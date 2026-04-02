@@ -1,0 +1,1916 @@
+package com.droplogger;
+
+import com.google.inject.Provides;
+import lombok.extern.slf4j.Slf4j;
+import net.runelite.api.ChatMessageType;
+import net.runelite.api.Client;
+import net.runelite.api.NPC;
+import net.runelite.api.Player;
+import net.runelite.api.clan.ClanChannel;
+import net.runelite.api.clan.ClanChannelMember;
+import net.runelite.api.coords.WorldPoint;
+import net.runelite.api.GameState;
+import net.runelite.api.events.ChatMessage;
+import net.runelite.api.events.GameStateChanged;
+import net.runelite.api.events.GameTick;
+import net.runelite.client.callback.ClientThread;
+import net.runelite.client.config.ConfigManager;
+import net.runelite.client.eventbus.Subscribe;
+import net.runelite.client.events.NpcLootReceived;
+import net.runelite.client.game.ItemManager;
+import net.runelite.client.plugins.Plugin;
+import net.runelite.client.plugins.PluginDescriptor;
+import net.runelite.client.ui.ClientToolbar;
+import net.runelite.client.ui.DrawManager;
+import net.runelite.client.ui.NavigationButton;
+import net.runelite.client.util.ImageUtil;
+import net.runelite.client.util.Text;
+
+import com.google.gson.Gson;
+import com.google.gson.reflect.TypeToken;
+
+import javax.inject.Inject;
+import java.awt.image.BufferedImage;
+import java.io.File;
+import java.io.FileReader;
+import java.io.FileWriter;
+import java.lang.reflect.Type;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Date;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+@Slf4j
+@PluginDescriptor(
+    name = "Clan Management",
+    description = "Clan management plugin — drops, hiscores, bingo, and more",
+    tags = {"clan", "management", "bingo", "drop", "logger", "discord", "hiscores"}
+)
+public class DropLoggerPlugin extends Plugin
+{
+    private static final Pattern VALUABLE_DROP_PATTERN =
+        Pattern.compile("Valuable drop: (.+?) \\(([\\d,]+) coins\\)");
+    private static final Pattern COLLECTION_LOG_PATTERN =
+        Pattern.compile("New item added to your collection log: (.+)");
+
+    @Inject
+    private Client client;
+
+    @Inject
+    private ClientThread clientThread;
+
+    @Inject
+    private DropLoggerConfig config;
+
+    @Inject
+    private ClientToolbar clientToolbar;
+
+    @Inject
+    private ItemManager itemManager;
+
+    @Inject
+    private ScheduledExecutorService executor;
+
+    @Inject
+    private GoogleSheetsService sheetsService;
+
+    @Inject
+    private BoardDataService boardDataService;
+
+    @Inject
+    private DiscordWebhookService discordService;
+
+    @Inject
+    private HiscoreService hiscoreService;
+
+    @Inject
+    private AdminService adminService;
+
+    @Inject
+    private WomService womService;
+
+    @Inject
+    private DrawManager drawManager;
+
+    private BingoPanel panel;
+    private AdminPanel adminPanel;
+    private NavigationButton navButton;
+    private BountyScheduler bountyScheduler;
+
+    private ScheduledFuture<?> boardRefreshTask;
+    private ScheduledFuture<?> bountyCheckTask;
+    private ScheduledFuture<?> countdownTask;
+
+    // Track last killed NPC for correlating drops
+    private String lastKilledNpc = "Unknown";
+    private int lastKillCount = 0;
+
+    private BingoModels.BoardData latestBoardData;
+    private PbDetector pbDetector;
+    private FightTracker fightTracker;
+    private boolean wasInInstance = false;
+
+    // Cached whitelist: lowercase item name → tile code
+    private Map<String, String> validDropMap = Collections.emptyMap();
+    private Set<String> validDropItems = Collections.emptySet();
+    private boolean dropWhitelistLoaded = false;
+
+    private static final String WHITELIST_CACHE_FILE = "solus-drop-whitelist.json";
+    private static final String HISCORE_CACHE_FILE = "solus-hiscore-cache.json";
+    private static final String HISCORE_CACHE_V2_FILE = "solus-hiscore-cache-v2.json";
+    private static final String DROPS_CACHE_FILE = "solus-drops-cache.json";
+
+    // In-memory hiscore cache: categoryKey → list of entries (v2), sheetRow → list (v1 legacy)
+    private final Map<String, List<HiscoreEntry>> hiscoreCacheV2 = Collections.synchronizedMap(new LinkedHashMap<>());
+    private final Map<Integer, List<HiscoreEntry>> hiscoreCache = Collections.synchronizedMap(new LinkedHashMap<>());
+    private volatile boolean hiscoreV2BatchFetched = false; // true once allTopTimes has been called this session
+
+    // Auto-detected team from API (null = not yet resolved)
+    private TeamCode detectedTeam;
+    private boolean teamLookupDone = false;
+
+    // Server-side config fetched from Settings tab (populated on first board refresh)
+    private String fetchedHiscoreApiUrl;
+    private String fetchedClanDropLogUrl;
+    private String fetchedDiscordWebhookUrl;
+    private String bingoStartDate;
+    private String bingoEndDate;
+    private String clanName = "Clan";
+    private boolean serverConfigLoaded = false;
+
+    // Cached drops tab data
+    private List<Map<String, Object>> cachedLeaderboard;
+    private List<Map<String, Object>> cachedRecentDrops;
+    private List<Map<String, String>> cachedClanWhitelist;
+    private boolean dropsTabLoaded = false;
+
+    @Provides
+    DropLoggerConfig provideConfig(ConfigManager configManager)
+    {
+        return configManager.getConfig(DropLoggerConfig.class);
+    }
+
+    /**
+     * Decode the board code (base64 of "url|key") into a 2-element array [url, key].
+     * Returns null if the code is blank or malformed.
+     */
+    private String[] decodeBoardCode()
+    {
+        String code = config.boardCode();
+        if (code == null || code.trim().isEmpty())
+        {
+            return null;
+        }
+        try
+        {
+            // Strip any surrounding quotes (RuneLite config may include them)
+            String cleaned = code.trim().replaceAll("^['\"]|['\"]$", "");
+            String decoded = new String(java.util.Base64.getDecoder().decode(cleaned));
+            int sep = decoded.indexOf('|');
+            if (sep < 0)
+            {
+                return null;
+            }
+            String url = decoded.substring(0, sep);
+            String key = decoded.substring(sep + 1);
+            if (url.isEmpty() || key.isEmpty())
+            {
+                return null;
+            }
+            return new String[]{url, key};
+        }
+        catch (Exception e)
+        {
+            log.warn("Invalid board code", e);
+            return null;
+        }
+    }
+
+    /** Get the board API URL from the board code, or empty string if not configured. */
+    private String getBoardApiUrl()
+    {
+        String[] parts = decodeBoardCode();
+        return parts != null ? parts[0] : "";
+    }
+
+    /** Get the API key from the board code, or empty string if not configured. */
+    private String getApiKey()
+    {
+        String[] parts = decodeBoardCode();
+        return parts != null ? parts[1] : "";
+    }
+
+    /** Get the clan name from server config, defaulting to "Clan". */
+    String getClanName()
+    {
+        return clanName != null && !clanName.isEmpty() ? clanName : "Clan";
+    }
+
+    @Override
+    protected void startUp()
+    {
+        // Set up side panel
+        panel = new BingoPanel();
+        // Show tabs only if board code is configured
+        panel.setConnected(decodeBoardCode() != null);
+        panel.setOnRefresh(() -> executor.submit(this::refreshBoard));
+        panel.setOnFetchTimes((cat, timesPanel) -> executor.submit(() -> fetchAndDisplayTimesV2(cat, timesPanel)));
+        panel.setOnClearHiscoreCache(() ->
+        {
+            hiscoreCache.clear();
+            hiscoreCacheV2.clear();
+            hiscoreV2BatchFetched = false;
+            File cacheFile = getHiscoreCacheFile();
+            if (cacheFile.exists()) cacheFile.delete();
+            File cacheFileV2 = getHiscoreCacheV2File();
+            if (cacheFileV2.exists()) cacheFileV2.delete();
+            log.info("Hiscore cache cleared — next view will batch-fetch");
+        });
+        panel.setOnRefreshDropsTab(() -> executor.submit(this::refreshDropsTab));
+        panel.setOnFetchPlayerDrops((rsn) -> executor.submit(() -> fetchPlayerDrops(rsn)));
+        panel.setOnRefreshWhitelist(() -> executor.submit(this::refreshClanWhitelist));
+        panel.setOnFetchWomData((metric, period) -> executor.submit(() -> fetchWomData(metric, period)));
+        updatePanelTeamInfo();
+
+        // Load caches from disk (avoids re-fetching every startup)
+        loadWhitelistFromDisk();
+        loadHiscoreCacheFromDisk();
+        loadHiscoreCacheV2FromDisk();
+        loadDropsCacheFromDisk();
+        loadWhitelistCacheFromDisk();
+        // Show cached drops data immediately if available
+        if (cachedLeaderboard != null)
+        {
+            panel.updateDropsLeaderboard(cachedLeaderboard, null);
+        }
+        if (cachedRecentDrops != null)
+        {
+            panel.updateRecentDrops(cachedRecentDrops);
+        }
+        if (cachedClanWhitelist != null && !cachedClanWhitelist.isEmpty())
+        {
+            panel.updateClanWhitelist(cachedClanWhitelist);
+        }
+
+        BufferedImage icon = ImageUtil.loadImageResource(getClass(), "/panel_icon.png");
+        if (icon == null)
+        {
+            icon = new BufferedImage(16, 16, BufferedImage.TYPE_INT_ARGB);
+        }
+        icon = ImageUtil.resizeImage(icon, 16, 16);
+
+        navButton = NavigationButton.builder()
+            .tooltip("Clan Management")
+            .icon(icon)
+            .priority(5)
+            .panel(panel)
+            .build();
+        clientToolbar.addNavigation(navButton);
+
+        // Set up admin panel if admin key is configured
+        setupAdminPanel();
+
+        // Set up PB detector and fight tracker
+        pbDetector = new PbDetector();
+        fightTracker = new FightTracker();
+
+        // Bounty system disabled for now — needs rework
+        // bountyScheduler = new BountyScheduler();
+        // bountyScheduler.loadSchedule(config.customSchedule());
+
+        // Start periodic board refresh
+        startBoardRefresh();
+
+        log.info("Clan Management plugin started");
+    }
+
+    @Override
+    protected void shutDown()
+    {
+        if (boardRefreshTask != null) boardRefreshTask.cancel(true);
+        if (bountyCheckTask != null) bountyCheckTask.cancel(true);
+        if (countdownTask != null) countdownTask.cancel(true);
+
+        if (fightTracker != null) fightTracker.reset();
+
+        clientToolbar.removeNavigation(navButton);
+        log.info("Clan Management plugin stopped");
+    }
+
+    @Subscribe
+    public void onConfigChanged(net.runelite.client.events.ConfigChanged event)
+    {
+        if (!"droplogger".equals(event.getGroup()))
+        {
+            return;
+        }
+
+        if ("boardCode".equals(event.getKey()))
+        {
+            log.info("Board code changed, reconnecting...");
+            serverConfigLoaded = false;
+            teamLookupDone = false;
+            detectedTeam = null;
+            panel.setConnected(decodeBoardCode() != null);
+            executor.submit(this::refreshBoard);
+        }
+    }
+
+    @Subscribe
+    public void onGameTick(GameTick event)
+    {
+        if (fightTracker == null)
+        {
+            return;
+        }
+
+        boolean inInstance = client.isInInstancedRegion();
+
+        if (inInstance && !wasInInstance)
+        {
+            // Just entered an instance — start tracking
+            String localName = client.getLocalPlayer() != null
+                ? client.getLocalPlayer().getName() : null;
+            fightTracker.startTracking(localName);
+        }
+        else if (!inInstance && wasInInstance)
+        {
+            // Just left an instance — stop tracking (data preserved for PB check)
+            fightTracker.stopTracking();
+        }
+
+        if (inInstance && fightTracker.isTracking())
+        {
+            // Scan for players each tick while in the instance
+            fightTracker.addPlayers(client.getPlayers(), client.getLocalPlayer());
+        }
+
+        wasInInstance = inInstance;
+    }
+
+    @Subscribe
+    public void onGameStateChanged(GameStateChanged event)
+    {
+        // Reset fight tracker on logout/hop to avoid stale data
+        if (event.getGameState() == GameState.LOGIN_SCREEN
+            || event.getGameState() == GameState.HOPPING)
+        {
+            if (fightTracker != null)
+            {
+                fightTracker.reset();
+            }
+            wasInInstance = false;
+        }
+    }
+
+    @Subscribe
+    public void onChatMessage(ChatMessage event)
+    {
+        if (event.getType() != ChatMessageType.GAMEMESSAGE)
+        {
+            return;
+        }
+
+        String rawMessage = event.getMessage();
+        String cleanedMessage = Text.removeTags(rawMessage);
+
+        // ── PB Detection (always update context, even if submission is disabled) ──
+        pbDetector.processMessage(cleanedMessage);
+
+        if (config.enablePbSubmission())
+        {
+            handlePbDetection(cleanedMessage);
+        }
+
+        // ── Drop Logging ──
+        if (config.enableDropLogging())
+        {
+            handleDropLogging(rawMessage);
+        }
+
+        // ── Collection Log Detection (for clan drop log) ──
+        if (config.enableClanDropLog())
+        {
+            handleCollectionLogEntry(cleanedMessage);
+        }
+    }
+
+    private void handleDropLogging(String message)
+    {
+        Matcher matcher = VALUABLE_DROP_PATTERN.matcher(message);
+        if (!matcher.find())
+        {
+            return;
+        }
+
+        String itemName = matcher.group(1);
+        int value = Integer.parseInt(matcher.group(2).replace(",", ""));
+
+        String playerName = client.getLocalPlayer() != null
+            ? client.getLocalPlayer().getName()
+            : "Unknown";
+
+        WorldPoint wp = client.getLocalPlayer() != null
+            ? client.getLocalPlayer().getWorldLocation()
+            : new WorldPoint(0, 0, 0);
+
+        DropEntry drop = new DropEntry(
+            itemName, value, lastKilledNpc, lastKillCount,
+            wp.getX(), wp.getY(), wp.getPlane(), playerName
+        );
+
+        // ── 1. Clan Drop Log — ALL valuable drops, always active ──
+        if (config.enableClanDropLog() && value >= config.clanDropMinValue()
+            && fetchedClanDropLogUrl != null && !fetchedClanDropLogUrl.isEmpty())
+        {
+            String clanLogUrl = fetchedClanDropLogUrl;
+            executor.submit(() -> sheetsService.logClanDrop(clanLogUrl, drop, getApiKey()));
+            log.debug("Clan drop logged: {} ({} gp)", itemName, value);
+        }
+
+        // ── 2. Bingo Drops — whitelist-filtered, only during bingo ──
+        if (config.enableDropLogging() && value >= config.minimumValue())
+        {
+            // Block bingo drops if whitelist hasn't loaded
+            if (validDropItems.isEmpty())
+            {
+                log.warn("Bingo whitelist not loaded — drop '{}' will NOT be auto-logged", itemName);
+                clientThread.invokeLater(() ->
+                    client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+                        "<col=ff0000>[" + getClanName() + "] Bingo whitelist not loaded. Submit '" + itemName + "' manually.</col>", ""));
+                return;
+            }
+
+            // Skip non-bingo drops
+            if (!validDropItems.contains(itemName.toLowerCase().trim()))
+            {
+                log.debug("Drop '{}' not on bingo whitelist, skipping bingo log", itemName);
+                return;
+            }
+
+            // Log to bingo sheet via BoardAPI submitDrop
+            String teamCode = (detectedTeam != null && detectedTeam != TeamCode.NONE)
+                ? detectedTeam.getCode() : "";
+            final String team = teamCode;
+            executor.submit(() -> sheetsService.logBingoDrop(getBoardApiUrl(), drop, getApiKey(), team));
+
+            // Post to Discord
+            if (config.postDrops() && fetchedDiscordWebhookUrl != null && !fetchedDiscordWebhookUrl.isEmpty())
+            {
+                String webhookUrl = fetchedDiscordWebhookUrl;
+                executor.submit(() -> discordService.postDrop(webhookUrl, drop));
+            }
+
+            // Chat confirmation
+            if (config.chatConfirmation())
+            {
+                clientThread.invokeLater(() ->
+                    client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+                        "[" + getClanName() + "] Bingo drop logged: " + itemName + " (" + value + " gp)", "")
+                );
+            }
+        }
+    }
+
+    private void handleCollectionLogEntry(String cleanedMessage)
+    {
+        Matcher matcher = COLLECTION_LOG_PATTERN.matcher(cleanedMessage);
+        if (!matcher.find())
+        {
+            return;
+        }
+
+        String itemName = matcher.group(1).trim();
+        String playerName = client.getLocalPlayer() != null
+            ? client.getLocalPlayer().getName()
+            : "Unknown";
+
+        WorldPoint wp = client.getLocalPlayer() != null
+            ? client.getLocalPlayer().getWorldLocation()
+            : new WorldPoint(0, 0, 0);
+
+        // Create a drop entry with 0 value (collection log entries don't always have a value)
+        DropEntry drop = new DropEntry(
+            itemName, 0, lastKilledNpc, lastKillCount,
+            wp.getX(), wp.getY(), wp.getPlane(), playerName
+        );
+
+        if (fetchedClanDropLogUrl != null && !fetchedClanDropLogUrl.isEmpty())
+        {
+            String clanLogUrl = fetchedClanDropLogUrl;
+            executor.submit(() -> sheetsService.logClanDrop(clanLogUrl, drop, getApiKey(), "collection_log"));
+            log.debug("Collection log entry submitted: {} for {}", itemName, playerName);
+        }
+    }
+
+    private void handlePbDetection(String cleanedMessage)
+    {
+        PbDetector.PbResult pb = pbDetector.detectPb(cleanedMessage);
+        if (pb == null)
+        {
+            return;
+        }
+
+        String group = pb.getGroup();
+        if ("unknown".equals(group))
+        {
+            log.debug("PB detected but could not identify activity");
+            return;
+        }
+
+        // Gather party members — use fight tracker for instanced bosses, fallback to snapshot
+        List<String> partyMembers;
+        if (fightTracker != null && fightTracker.getTrackedPartySize() > 0)
+        {
+            partyMembers = fightTracker.getTrackedMembers();
+        }
+        else
+        {
+            partyMembers = getPartyMembers();
+        }
+        int partySize = partyMembers.size();
+
+        // Resolve the specific BossCategory (v2)
+        BossCategory bossCategory = resolveBossCategory(group, partySize);
+
+        // Also resolve legacy SpeedCategory for dual-submit
+        SpeedCategory legacyCategory = resolveLegacyCategory(group, partySize);
+
+        if (bossCategory == null && legacyCategory == null)
+        {
+            log.warn("Could not resolve any category for group={} size={}", group, partySize);
+            return;
+        }
+
+        // Use whichever resolved for validation and display
+        boolean isGroupContent = bossCategory != null ? bossCategory.isGroupContent()
+            : legacyCategory != null && legacyCategory.isGroupContent();
+        String categoryName = bossCategory != null ? bossCategory.getDisplayName()
+            : legacyCategory.getActivityName();
+
+        // Validate clan membership for group content
+        if (isGroupContent)
+        {
+            if (!validateClanMembership(partyMembers))
+            {
+                log.info("PB not submitted: not all party members in clan chat");
+                if (config.pbChatConfirmation())
+                {
+                    clientThread.invokeLater(() ->
+                        client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+                            "[" + getClanName() + "] PB not submitted — not all party members are in clan chat", "")
+                    );
+                }
+                return;
+            }
+        }
+
+        // Sort party members so all clients agree on who submits
+        List<String> sortedMembers = new ArrayList<>(partyMembers);
+        Collections.sort(sortedMembers, String.CASE_INSENSITIVE_ORDER);
+        String rsns = String.join(", ", sortedMembers);
+
+        // Only the alphabetically first party member submits (prevents duplicates
+        // when multiple clan members have the plugin running in the same raid)
+        String localName = client.getLocalPlayer() != null ? client.getLocalPlayer().getName() : "";
+        boolean isSubmitter = sortedMembers.isEmpty()
+            || sortedMembers.get(0).equalsIgnoreCase(localName);
+
+        if (!isSubmitter)
+        {
+            log.info("PB detected but {} is the designated submitter, skipping",
+                sortedMembers.get(0));
+            if (config.pbChatConfirmation())
+            {
+                clientThread.invokeLater(() ->
+                    client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+                        "[" + getClanName() + "] PB detected! " + sortedMembers.get(0) + " is submitting for the team.", "")
+                );
+            }
+            return;
+        }
+
+        String date = new SimpleDateFormat("MM/dd").format(new Date());
+        String formattedTime = pb.getFormattedTime();
+        double timeSeconds = pb.getTimeSeconds();
+        String categoryKey = bossCategory != null ? bossCategory.getKey() : null;
+        int legacySheetRow = legacyCategory != null ? legacyCategory.getSheetRow() : -1;
+        String sizeLabel = bossCategory != null ? bossCategory.getSizeLabel() : "";
+
+        log.info("PB detected: {} {} — {} (key={}, legacyRow={}, party: {})",
+            formattedTime, categoryName, sizeLabel, categoryKey, legacySheetRow, rsns);
+
+        // Capture screenshot immediately (must be done on render thread)
+        final BufferedImage[] screenshotHolder = {null};
+        if (config.postPbs() && fetchedDiscordWebhookUrl != null && !fetchedDiscordWebhookUrl.isEmpty())
+        {
+            try
+            {
+                drawManager.requestNextFrameListener(image ->
+                {
+                    screenshotHolder[0] = new BufferedImage(
+                        image.getWidth(null), image.getHeight(null), BufferedImage.TYPE_INT_ARGB);
+                    java.awt.Graphics2D g = screenshotHolder[0].createGraphics();
+                    g.drawImage(image, 0, 0, null);
+                    g.dispose();
+                });
+            }
+            catch (Exception e)
+            {
+                log.warn("Failed to capture screenshot for PB", e);
+            }
+        }
+
+        String v1ApiUrl = fetchedHiscoreApiUrl != null ? fetchedHiscoreApiUrl : "";
+        String v2ApiUrl = fetchedClanDropLogUrl != null ? fetchedClanDropLogUrl : "";
+        String apiKey = getApiKey();
+        final int finalPartySize = partySize;
+        final String finalCategoryName = categoryName;
+
+        executor.submit(() ->
+        {
+            // Small delay to ensure screenshot capture completes
+            try { Thread.sleep(500); } catch (InterruptedException ignored) {}
+
+            int placed = 0;
+
+            // ── V2 submit (new system on Clan Drop Log) ──
+            if (categoryKey != null && !v2ApiUrl.isEmpty())
+            {
+                int v2Placed = hiscoreService.checkAndSubmitPbV2(
+                    v2ApiUrl, categoryKey, formattedTime, timeSeconds,
+                    rsns, date, finalPartySize, apiKey);
+                if (v2Placed > 0) placed = v2Placed;
+                else if (v2Placed == 0 && placed == 0) placed = 0;
+                log.debug("V2 submit result for {}: {}", categoryKey, v2Placed);
+            }
+
+            // ── V1 submit (legacy hiscore sheet — dual-run) ──
+            if (legacySheetRow > 0 && !v1ApiUrl.isEmpty())
+            {
+                int v1Placed = hiscoreService.checkAndSubmitPb(
+                    v1ApiUrl, legacySheetRow, formattedTime, timeSeconds, rsns, date, apiKey);
+                // Use v1 placement if v2 didn't place (or wasn't available)
+                if (v1Placed > 0 && placed <= 0) placed = v1Placed;
+                log.debug("V1 submit result for row {}: {}", legacySheetRow, v1Placed);
+            }
+
+            if (config.pbChatConfirmation())
+            {
+                String msg;
+                if (placed > 0)
+                {
+                    msg = String.format("[" + getClanName() + "] PB submitted! %s placed #%d in %s",
+                        formattedTime, placed, finalCategoryName);
+                }
+                else if (placed == 0)
+                {
+                    msg = String.format("[" + getClanName() + "] PB %s does not qualify for top 3 in %s",
+                        formattedTime, finalCategoryName);
+                }
+                else
+                {
+                    msg = "[" + getClanName() + "] Failed to submit PB — check logs for details";
+                }
+
+                clientThread.invokeLater(() ->
+                    client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", msg, "")
+                );
+            }
+
+            // Invalidate cache for this category so next UI view fetches fresh data
+            if (categoryKey != null)
+            {
+                hiscoreCacheV2.remove(categoryKey);
+                saveHiscoreCacheV2ToDisk();
+            }
+            if (legacySheetRow > 0)
+            {
+                hiscoreCache.remove(legacySheetRow);
+            }
+
+            // Post to Discord if placed top 3
+            if (placed > 0 && config.postPbs()
+                && fetchedDiscordWebhookUrl != null && !fetchedDiscordWebhookUrl.isEmpty())
+            {
+                discordService.postPb(fetchedDiscordWebhookUrl, formattedTime, placed,
+                    finalCategoryName, rsns, screenshotHolder[0]);
+            }
+        });
+    }
+
+    /**
+     * Resolve the BossCategory (v2) based on group key and party size.
+     * Group keys from PbDetector are now specific enough that BossCategory.find() handles most cases.
+     */
+    private BossCategory resolveBossCategory(String group, int partySize)
+    {
+        // For raids, the group key maps directly
+        // For most bosses, the group key is now specific (e.g. "bandos", "duke")
+        // BossCategory.find() picks the best match for the given party size
+        return BossCategory.find(group, partySize);
+    }
+
+    /**
+     * Resolve the legacy SpeedCategory for dual-run with the old hiscore system.
+     * Returns null for bosses that didn't exist in the old system.
+     */
+    private SpeedCategory resolveLegacyCategory(String group, int partySize)
+    {
+        // Map new specific group keys back to old combined keys for SpeedCategory
+        switch (group)
+        {
+            case "duke": return SpeedCategory.DUKE;
+            case "leviathan": return SpeedCategory.LEVIATHAN;
+            case "whisperer": return SpeedCategory.WHISPERER;
+            case "vardorvis": return SpeedCategory.VARDORVIS;
+
+            case "phosanis": return SpeedCategory.PHOSANIS;
+            case "nightmare": return SpeedCategory.find("nightmare", partySize);
+
+            case "gaunt": return SpeedCategory.GAUNTLET;
+            case "gaunt_corrupted": return SpeedCategory.CORRUPTED_GAUNTLET;
+
+            // CoX CM and ToA Expert map to old system groups
+            case "cox_cm":
+                return SpeedCategory.find("cox", partySize); // old system had CM under "cox" group
+            case "toa_expert":
+                return SpeedCategory.find("toa", partySize); // old system had no expert split
+
+            // Groups that map 1:1 to old system
+            case "cox":
+            case "tob":
+            case "toa":
+            case "jad":
+            case "zuk":
+            case "colo":
+            case "nex":
+            case "ba":
+            case "raks":
+            case "titans":
+            case "yama":
+                return SpeedCategory.find(group, partySize);
+
+            default:
+                // New bosses not in the old system — no legacy submission
+                return null;
+        }
+    }
+
+    /**
+     * Get all party members. In instanced areas, uses visible players
+     * on the same plane as the local player (filters out spectators).
+     * Otherwise returns just the local player.
+     */
+    private List<String> getPartyMembers()
+    {
+        List<String> members = new ArrayList<>();
+        Player localPlayer = client.getLocalPlayer();
+        if (localPlayer == null)
+        {
+            return members;
+        }
+
+        String localName = localPlayer.getName();
+        if (localName != null)
+        {
+            members.add(localName);
+        }
+
+        if (client.isInInstancedRegion())
+        {
+            int localPlane = localPlayer.getWorldLocation().getPlane();
+
+            for (Player player : client.getPlayers())
+            {
+                if (player == localPlayer)
+                {
+                    continue;
+                }
+                String name = player.getName();
+                if (name == null || name.isEmpty())
+                {
+                    continue;
+                }
+                // Filter out spectators — they're on a different plane (e.g. ToB spectators)
+                if (player.getWorldLocation().getPlane() != localPlane)
+                {
+                    continue;
+                }
+                members.add(name);
+            }
+        }
+
+        return members;
+    }
+
+    /**
+     * Validate that all party members are in the player's clan chat.
+     */
+    private boolean validateClanMembership(List<String> partyMembers)
+    {
+        ClanChannel clanChannel = client.getClanChannel();
+        if (clanChannel == null)
+        {
+            log.warn("Cannot validate clan membership — not in a clan chat");
+            return false;
+        }
+
+        Set<String> clanNames = new HashSet<>();
+        for (ClanChannelMember member : clanChannel.getMembers())
+        {
+            clanNames.add(Text.toJagexName(member.getName()).toLowerCase());
+        }
+
+        for (String partyMember : partyMembers)
+        {
+            String normalized = Text.toJagexName(partyMember).toLowerCase();
+            if (!clanNames.contains(normalized))
+            {
+                log.info("Party member {} is not in clan chat", partyMember);
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    @Subscribe
+    public void onNpcLootReceived(NpcLootReceived event)
+    {
+        NPC npc = event.getNpc();
+        if (npc != null)
+        {
+            lastKilledNpc = npc.getName();
+            lastKillCount = pbDetector.getLastKillCount();
+        }
+    }
+
+    private void startBoardRefresh()
+    {
+        if (boardRefreshTask != null)
+        {
+            boardRefreshTask.cancel(false);
+        }
+
+        int interval = Math.max(30, config.refreshInterval());
+        boardRefreshTask = executor.scheduleAtFixedRate(
+            this::refreshBoard, 10, interval, TimeUnit.SECONDS);
+    }
+
+    private void refreshBoard()
+    {
+        String apiUrl = getBoardApiUrl();
+        if (apiUrl == null || apiUrl.isEmpty())
+        {
+            panel.setConnected(false);
+            panel.setStatus("Enter your Board Code in plugin settings");
+            return;
+        }
+
+        String playerName = client.getLocalPlayer() != null
+            ? client.getLocalPlayer().getName()
+            : null;
+
+        // Fetch server-side config (URLs) on first successful connection
+        if (!serverConfigLoaded)
+        {
+            try
+            {
+                Map<String, String> serverConfig = boardDataService.fetchConfig(apiUrl, getApiKey());
+                fetchedHiscoreApiUrl = serverConfig.getOrDefault("hiscoreApiUrl", "");
+                fetchedClanDropLogUrl = serverConfig.getOrDefault("clanDropLogUrl", "");
+                fetchedDiscordWebhookUrl = serverConfig.getOrDefault("discordWebhookUrl", "");
+                bingoStartDate = serverConfig.getOrDefault("bingoStartDate", "");
+                bingoEndDate = serverConfig.getOrDefault("bingoEndDate", "");
+                String configClanName = serverConfig.getOrDefault("clanName", "");
+                if (!configClanName.isEmpty()) clanName = configClanName;
+                serverConfigLoaded = true;
+                panel.setConnected(true);
+                panel.setClanName(getClanName());
+                discordService.setClanName(getClanName());
+
+                // Show announcement on home tab
+                String announcement = serverConfig.getOrDefault("announcement", "");
+                if (!announcement.isEmpty())
+                {
+                    panel.setAnnouncements(java.util.Collections.singletonList(announcement));
+                }
+
+                log.info("Server config loaded — hiscores={}, clanLog={}, discord={}, bingoStart={}, bingoEnd={}",
+                    !fetchedHiscoreApiUrl.isEmpty(), !fetchedClanDropLogUrl.isEmpty(),
+                    !fetchedDiscordWebhookUrl.isEmpty(), bingoStartDate, bingoEndDate);
+
+                // Show/hide bingo tab based on event dates
+                updateBingoTabVisibility();
+
+                // Auto-load drops tab on first config load
+                if (!fetchedClanDropLogUrl.isEmpty())
+                {
+                    executor.submit(this::refreshDropsTab);
+                }
+            }
+            catch (Exception e)
+            {
+                log.warn("Failed to fetch server config — will retry next refresh", e);
+            }
+        }
+
+        // Auto-detect team if we haven't looked up yet
+        if (!teamLookupDone && playerName != null)
+        {
+            try
+            {
+                String found = boardDataService.findTeam(apiUrl, playerName, getApiKey());
+                detectedTeam = TeamCode.fromCode(found);
+                if (detectedTeam != TeamCode.NONE)
+                {
+                    log.info("Auto-detected team {} for player {}", detectedTeam.getCode(), playerName);
+                }
+            }
+            catch (Exception e)
+            {
+                log.warn("Team auto-detect failed", e);
+            }
+            teamLookupDone = true;
+        }
+
+        // Load drop whitelist once from API (if not already loaded from cache)
+        if (!dropWhitelistLoaded)
+        {
+            try
+            {
+                Map<String, String> fetched = boardDataService.fetchValidDropMap(apiUrl, getApiKey());
+                if (!fetched.isEmpty())
+                {
+                    validDropMap = fetched;
+                    validDropItems = validDropMap.keySet();
+                    dropWhitelistLoaded = true;
+                    panel.setDropWhitelist(validDropMap);
+                    saveWhitelistToDisk(validDropMap);
+                    log.info("Drop whitelist fetched and cached: {} items", validDropMap.size());
+                }
+                else
+                {
+                    log.warn("API returned 0 drops — keeping existing cache if available");
+                }
+            }
+            catch (Exception e)
+            {
+                log.warn("Failed to load drop whitelist — drops will be blocked until whitelist loads", e);
+            }
+        }
+
+        // Use auto-detected team
+        String teamCode = (detectedTeam != null && detectedTeam != TeamCode.NONE)
+            ? detectedTeam.getCode()
+            : "";
+
+        try
+        {
+            BingoModels.BoardData data = boardDataService.fetchBoardData(apiUrl, teamCode, getApiKey());
+            latestBoardData = data;
+
+            // Show bingo tab only if event is active/upcoming (controlled by dates)
+            // Falls back to tile check if no dates configured
+            if (isBingoActive())
+            {
+                panel.showBingoTab();
+            }
+            else
+            {
+                panel.hideBingoTab();
+            }
+
+            panel.updateBoard(data, teamCode, playerName);
+            panel.setAnnouncements(data.getAnnouncements());
+            updatePanelTeamInfo(detectedTeam);
+        }
+        catch (Exception e)
+        {
+            log.error("Failed to refresh board data", e);
+            panel.setStatus("Error: " + e.getMessage());
+        }
+
+        // Auto-refresh WOM data on same cycle
+        refreshWomData();
+        refreshClanActivity();
+    }
+
+    private void fetchAndDisplayTimes(SpeedCategory cat, javax.swing.JPanel timesPanel)
+    {
+        java.awt.Color accentColor = new java.awt.Color(100, 149, 237);
+
+        // Check in-memory cache first
+        List<HiscoreEntry> cached = hiscoreCache.get(cat.getSheetRow());
+        if (cached != null)
+        {
+            panel.populateTimesPanel(timesPanel, cached, accentColor);
+            return;
+        }
+
+        String hiscoreUrl = fetchedHiscoreApiUrl;
+        if (hiscoreUrl == null || hiscoreUrl.isEmpty())
+        {
+            // No API configured — show message
+            javax.swing.SwingUtilities.invokeLater(() ->
+            {
+                timesPanel.removeAll();
+                javax.swing.JLabel err = new javax.swing.JLabel("Hiscore API not configured");
+                err.setFont(err.getFont().deriveFont(java.awt.Font.ITALIC, 10f));
+                err.setForeground(new java.awt.Color(120, 120, 120));
+                err.setBorder(javax.swing.BorderFactory.createEmptyBorder(6, 36, 6, 10));
+                timesPanel.add(err);
+                timesPanel.revalidate();
+                timesPanel.repaint();
+            });
+            return;
+        }
+
+        try
+        {
+            List<HiscoreEntry> entries = hiscoreService.fetchTopTimes(hiscoreUrl, cat.getSheetRow(), getApiKey());
+            hiscoreCache.put(cat.getSheetRow(), entries);
+            panel.populateTimesPanel(timesPanel, entries, accentColor);
+            saveHiscoreCacheToDisk();
+        }
+        catch (Exception e)
+        {
+            log.warn("Failed to fetch hiscore times for {}", cat.getActivityName(), e);
+            javax.swing.SwingUtilities.invokeLater(() ->
+            {
+                timesPanel.removeAll();
+                javax.swing.JLabel err = new javax.swing.JLabel("Failed to load");
+                err.setFont(err.getFont().deriveFont(java.awt.Font.ITALIC, 10f));
+                err.setForeground(new java.awt.Color(180, 60, 60));
+                err.setBorder(javax.swing.BorderFactory.createEmptyBorder(6, 36, 6, 10));
+                timesPanel.add(err);
+                timesPanel.revalidate();
+                timesPanel.repaint();
+            });
+        }
+    }
+
+    /**
+     * Batch-fetch all hiscore times from the v2 API (one call), populate entire cache.
+     * Called once per session on first hiscore tab interaction, or on manual refresh.
+     */
+    private void batchFetchAllHiscores()
+    {
+        String v2Url = fetchedClanDropLogUrl;
+        String apiKey = getApiKey();
+
+        if (v2Url == null || v2Url.isEmpty())
+        {
+            log.debug("Clan drop log URL not configured — skipping batch hiscore fetch");
+            return;
+        }
+
+        try
+        {
+            Map<String, List<HiscoreEntry>> allTimes = hiscoreService.fetchAllTopTimes(v2Url, apiKey);
+            hiscoreCacheV2.putAll(allTimes);
+            hiscoreV2BatchFetched = true;
+            saveHiscoreCacheV2ToDisk();
+            log.info("Batch-fetched hiscores: {} categories", allTimes.size());
+        }
+        catch (Exception e)
+        {
+            log.warn("Failed to batch-fetch hiscores", e);
+        }
+    }
+
+    private void fetchAndDisplayTimesV2(BossCategory cat, javax.swing.JPanel timesPanel)
+    {
+        java.awt.Color accentColor = new java.awt.Color(100, 149, 237);
+
+        // If we haven't done a batch fetch this session and cache is empty, do it now
+        if (!hiscoreV2BatchFetched && hiscoreCacheV2.isEmpty())
+        {
+            batchFetchAllHiscores();
+        }
+
+        // Serve from cache (may be empty list for categories with no entries — that's fine)
+        List<HiscoreEntry> cached = hiscoreCacheV2.get(cat.getKey());
+        if (cached != null)
+        {
+            panel.populateTimesPanel(timesPanel, cached, accentColor);
+            return;
+        }
+
+        // Category not in cache — it might just have no entries yet
+        if (hiscoreV2BatchFetched)
+        {
+            // We already fetched everything; this category simply has no times
+            panel.populateTimesPanel(timesPanel, new ArrayList<>(), accentColor);
+            return;
+        }
+
+        // Fallback: try individual v2 fetch, then v1
+        String v2Url = fetchedClanDropLogUrl;
+        String v1Url = fetchedHiscoreApiUrl;
+        String apiKey = getApiKey();
+
+        if (v2Url != null && !v2Url.isEmpty())
+        {
+            try
+            {
+                List<HiscoreEntry> entries = hiscoreService.fetchTopTimesV2(v2Url, cat.getKey(), apiKey);
+                hiscoreCacheV2.put(cat.getKey(), entries);
+                saveHiscoreCacheV2ToDisk();
+                panel.populateTimesPanel(timesPanel, entries, accentColor);
+                return;
+            }
+            catch (Exception e)
+            {
+                log.warn("V2 fetch failed for {}, trying v1", cat.getKey(), e);
+            }
+        }
+
+        if (cat.getLegacySheetRow() > 0 && v1Url != null && !v1Url.isEmpty())
+        {
+            try
+            {
+                List<HiscoreEntry> entries = hiscoreService.fetchTopTimes(v1Url, cat.getLegacySheetRow(), apiKey);
+                hiscoreCacheV2.put(cat.getKey(), entries);
+                saveHiscoreCacheV2ToDisk();
+                panel.populateTimesPanel(timesPanel, entries, accentColor);
+                return;
+            }
+            catch (Exception e)
+            {
+                log.warn("V1 fallback fetch failed for {}", cat.getDisplayName(), e);
+            }
+        }
+
+        // Both failed or not configured
+        javax.swing.SwingUtilities.invokeLater(() ->
+        {
+            timesPanel.removeAll();
+            String msg = (v2Url == null || v2Url.isEmpty()) && (v1Url == null || v1Url.isEmpty())
+                ? "Hiscore API not configured"
+                : "Failed to load times";
+            javax.swing.JLabel err = new javax.swing.JLabel(msg);
+            err.setFont(err.getFont().deriveFont(java.awt.Font.ITALIC, 10f));
+            err.setForeground(new java.awt.Color(120, 120, 120));
+            err.setBorder(javax.swing.BorderFactory.createEmptyBorder(12, 10, 12, 10));
+            timesPanel.add(err);
+            timesPanel.revalidate();
+            timesPanel.repaint();
+        });
+    }
+
+    private void refreshDropsTab()
+    {
+        String clanLogUrl = fetchedClanDropLogUrl;
+        if (clanLogUrl == null || clanLogUrl.isEmpty())
+        {
+            log.debug("Clan drop log URL not configured — skipping drops tab refresh");
+            // Try to show cached data if available
+            if (cachedLeaderboard != null)
+            {
+                String playerName = client.getLocalPlayer() != null
+                    ? client.getLocalPlayer().getName() : null;
+                panel.updateDropsLeaderboard(cachedLeaderboard, playerName);
+            }
+            if (cachedRecentDrops != null)
+            {
+                panel.updateRecentDrops(cachedRecentDrops);
+            }
+            return;
+        }
+
+        String playerName = client.getLocalPlayer() != null
+            ? client.getLocalPlayer().getName()
+            : null;
+
+        try
+        {
+            List<Map<String, Object>> leaderboard = boardDataService.fetchLeaderboard(
+                clanLogUrl, getApiKey(), "monthly");
+            cachedLeaderboard = leaderboard;
+            panel.updateDropsLeaderboard(leaderboard, playerName);
+        }
+        catch (Exception e)
+        {
+            log.warn("Failed to fetch drops leaderboard", e);
+            // Show cached if available
+            if (cachedLeaderboard != null)
+            {
+                panel.updateDropsLeaderboard(cachedLeaderboard, playerName);
+            }
+        }
+
+        try
+        {
+            List<Map<String, Object>> recent = boardDataService.fetchRecentDrops(
+                clanLogUrl, getApiKey(), 20);
+            cachedRecentDrops = recent;
+            panel.updateRecentDrops(recent);
+            saveDropsCacheToDisk();
+        }
+        catch (Exception e)
+        {
+            log.warn("Failed to fetch recent drops", e);
+            if (cachedRecentDrops != null)
+            {
+                panel.updateRecentDrops(cachedRecentDrops);
+            }
+        }
+
+        // Also refresh the clan whitelist browser
+        refreshClanWhitelist();
+
+        dropsTabLoaded = true;
+    }
+
+    private void fetchPlayerDrops(String rsn)
+    {
+        String clanLogUrl = fetchedClanDropLogUrl;
+        if (clanLogUrl == null || clanLogUrl.isEmpty())
+        {
+            return;
+        }
+
+        try
+        {
+            List<Map<String, Object>> drops = boardDataService.fetchPlayerDrops(
+                clanLogUrl, getApiKey(), rsn);
+            panel.showPlayerDrops(rsn, drops);
+        }
+        catch (Exception e)
+        {
+            log.warn("Failed to fetch drops for {}", rsn, e);
+        }
+    }
+
+    private void refreshClanWhitelist()
+    {
+        String clanLogUrl = fetchedClanDropLogUrl;
+        if (clanLogUrl == null || clanLogUrl.isEmpty())
+        {
+            // Show cached if available
+            if (cachedClanWhitelist != null && !cachedClanWhitelist.isEmpty())
+            {
+                panel.updateClanWhitelist(cachedClanWhitelist);
+            }
+            return;
+        }
+
+        try
+        {
+            List<Map<String, String>> whitelist = boardDataService.fetchClanWhitelist(
+                clanLogUrl, getApiKey());
+            cachedClanWhitelist = whitelist;
+            panel.updateClanWhitelist(whitelist);
+            saveWhitelistCacheToDisk();
+        }
+        catch (Exception e)
+        {
+            log.warn("Failed to fetch clan whitelist", e);
+            if (cachedClanWhitelist != null && !cachedClanWhitelist.isEmpty())
+            {
+                panel.updateClanWhitelist(cachedClanWhitelist);
+            }
+        }
+    }
+
+    // Track last WOM fetch settings so auto-refresh uses the same options
+    private String lastWomMetric = "overall";
+    private String lastWomPeriod = "week"; // null = hiscores mode
+
+    private void fetchWomData(String metric, String period)
+    {
+        lastWomMetric = metric;
+        lastWomPeriod = period;
+        doFetchWomData(metric, period);
+    }
+
+    private void refreshWomData()
+    {
+        doFetchWomData(lastWomMetric, lastWomPeriod);
+    }
+
+    private void doFetchWomData(String metric, String period)
+    {
+        try
+        {
+            if (period != null)
+            {
+                List<WomService.WomEntry> entries = womService.fetchGained(metric, period);
+                panel.updateWomLeaderboard(entries, true);
+            }
+            else
+            {
+                List<WomService.WomEntry> entries = womService.fetchHiscores(metric);
+                panel.updateWomLeaderboard(entries, false);
+            }
+        }
+        catch (Exception e)
+        {
+            log.warn("Failed to fetch WOM data: {}", e.getMessage());
+            panel.updateWomLeaderboard(null, false);
+        }
+    }
+
+    private void refreshClanActivity()
+    {
+        try
+        {
+            List<WomService.ActivityEntry> activity = womService.fetchActivity(15);
+            panel.updateActivity(activity);
+        }
+        catch (Exception e)
+        {
+            log.warn("Failed to fetch clan activity: {}", e.getMessage());
+        }
+    }
+
+    private void saveWhitelistCacheToDisk()
+    {
+        try
+        {
+            File cacheFile = new File(
+                net.runelite.client.RuneLite.RUNELITE_DIR, "solus-whitelist-cache.json");
+            java.util.Map<String, Object> cacheData = new java.util.LinkedHashMap<>();
+            cacheData.put("whitelist", cachedClanWhitelist);
+            String json = new Gson().toJson(cacheData);
+            java.nio.file.Files.write(cacheFile.toPath(), json.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        }
+        catch (Exception e)
+        {
+            log.debug("Failed to save whitelist cache", e);
+        }
+    }
+
+    private void loadWhitelistCacheFromDisk()
+    {
+        try
+        {
+            File cacheFile = new File(
+                net.runelite.client.RuneLite.RUNELITE_DIR, "solus-whitelist-cache.json");
+            if (!cacheFile.exists()) return;
+
+            String json = new String(
+                java.nio.file.Files.readAllBytes(cacheFile.toPath()), java.nio.charset.StandardCharsets.UTF_8);
+            com.google.gson.JsonObject root = new com.google.gson.JsonParser().parse(json).getAsJsonObject();
+
+            if (root.has("whitelist"))
+            {
+                com.google.gson.JsonArray arr = root.getAsJsonArray("whitelist");
+                List<Map<String, String>> whitelist = new java.util.ArrayList<>();
+                for (com.google.gson.JsonElement elem : arr)
+                {
+                    com.google.gson.JsonObject obj = elem.getAsJsonObject();
+                    Map<String, String> item = new java.util.LinkedHashMap<>();
+                    for (Map.Entry<String, com.google.gson.JsonElement> entry : obj.entrySet())
+                    {
+                        item.put(entry.getKey(),
+                            entry.getValue().isJsonPrimitive()
+                                ? entry.getValue().getAsString() : "");
+                    }
+                    whitelist.add(item);
+                }
+                cachedClanWhitelist = whitelist;
+                log.debug("Loaded {} whitelist items from disk cache", whitelist.size());
+            }
+        }
+        catch (Exception e)
+        {
+            log.debug("Failed to load whitelist cache from disk", e);
+        }
+    }
+
+    /**
+     * Check if a bingo event is currently active or coming up within 7 days.
+     * If no dates are configured, falls back to true (always show).
+     */
+    private boolean isBingoActive()
+    {
+        if (bingoStartDate == null || bingoStartDate.isEmpty()
+            || bingoEndDate == null || bingoEndDate.isEmpty())
+        {
+            // No dates configured — don't show bingo tab by default
+            return false;
+        }
+
+        try
+        {
+            java.time.LocalDate now = java.time.LocalDate.now();
+            java.time.LocalDate start = java.time.LocalDate.parse(bingoStartDate);
+            java.time.LocalDate end = java.time.LocalDate.parse(bingoEndDate);
+
+            // Show bingo tab 7 days before start through end of event
+            java.time.LocalDate showFrom = start.minusDays(7);
+            return !now.isBefore(showFrom) && !now.isAfter(end);
+        }
+        catch (Exception e)
+        {
+            log.warn("Failed to parse bingo dates (start={}, end={}): {}",
+                bingoStartDate, bingoEndDate, e.getMessage());
+            return false;
+        }
+    }
+
+    private void updateBingoTabVisibility()
+    {
+        boolean active = isBingoActive();
+        if (active)
+        {
+            panel.showBingoTab();
+        }
+        else
+        {
+            panel.hideBingoTab();
+        }
+
+        // Bingo admin sections are now user-toggled via collapsible Events > Bingo
+    }
+
+    private File getWhitelistCacheFile()
+    {
+        File runeliteDir = new File(System.getProperty("user.home"), ".runelite");
+        return new File(runeliteDir, WHITELIST_CACHE_FILE);
+    }
+
+    private void saveWhitelistToDisk(Map<String, String> dropMap)
+    {
+        if (dropMap == null || dropMap.isEmpty()) return;
+        try
+        {
+            File cacheFile = getWhitelistCacheFile();
+            try (FileWriter writer = new FileWriter(cacheFile))
+            {
+                new Gson().toJson(dropMap, writer);
+            }
+            log.info("Whitelist cached to disk: {} items", dropMap.size());
+        }
+        catch (Exception e)
+        {
+            log.warn("Failed to save whitelist cache", e);
+        }
+    }
+
+    private void loadWhitelistFromDisk()
+    {
+        try
+        {
+            File cacheFile = getWhitelistCacheFile();
+            if (!cacheFile.exists()) return;
+
+            Type mapType = new TypeToken<LinkedHashMap<String, String>>(){}.getType();
+            try (FileReader reader = new FileReader(cacheFile))
+            {
+                Map<String, String> cached = new Gson().fromJson(reader, mapType);
+                if (cached != null && !cached.isEmpty())
+                {
+                    validDropMap = cached;
+                    validDropItems = cached.keySet();
+                    dropWhitelistLoaded = true;
+                    panel.setDropWhitelist(cached);
+                    log.info("Loaded {} cached drop items from disk", cached.size());
+                }
+            }
+        }
+        catch (Exception e)
+        {
+            log.warn("Failed to load whitelist cache from disk", e);
+        }
+    }
+
+    // ── Hiscore cache ──
+
+    private File getHiscoreCacheFile()
+    {
+        File runeliteDir = new File(System.getProperty("user.home"), ".runelite");
+        return new File(runeliteDir, HISCORE_CACHE_FILE);
+    }
+
+    private void saveHiscoreCacheToDisk()
+    {
+        try
+        {
+            // Convert HiscoreEntry objects to serializable maps
+            Map<Integer, List<Map<String, Object>>> toSave = new LinkedHashMap<>();
+            for (Map.Entry<Integer, List<HiscoreEntry>> entry : hiscoreCache.entrySet())
+            {
+                List<Map<String, Object>> entryList = new ArrayList<>();
+                for (HiscoreEntry he : entry.getValue())
+                {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("rank", he.getRank());
+                    m.put("timeSeconds", he.getTimeSeconds());
+                    m.put("formattedTime", he.getFormattedTime());
+                    m.put("rsns", he.getRsns());
+                    m.put("date", he.getDate());
+                    entryList.add(m);
+                }
+                toSave.put(entry.getKey(), entryList);
+            }
+
+            File cacheFile = getHiscoreCacheFile();
+            try (FileWriter writer = new FileWriter(cacheFile))
+            {
+                new Gson().toJson(toSave, writer);
+            }
+        }
+        catch (Exception e)
+        {
+            log.warn("Failed to save hiscore cache", e);
+        }
+    }
+
+    private void loadHiscoreCacheFromDisk()
+    {
+        try
+        {
+            File cacheFile = getHiscoreCacheFile();
+            if (!cacheFile.exists()) return;
+
+            Type type = new TypeToken<LinkedHashMap<Integer, List<Map<String, Object>>>>(){}.getType();
+            try (FileReader reader = new FileReader(cacheFile))
+            {
+                Map<Integer, List<Map<String, Object>>> raw = new Gson().fromJson(reader, type);
+                if (raw == null) return;
+
+                for (Map.Entry<Integer, List<Map<String, Object>>> entry : raw.entrySet())
+                {
+                    // Gson deserializes integer keys as strings in JSON
+                    int row = entry.getKey();
+                    List<HiscoreEntry> entries = new ArrayList<>();
+                    for (Map<String, Object> m : entry.getValue())
+                    {
+                        entries.add(new HiscoreEntry(
+                            ((Number) m.getOrDefault("rank", 0)).intValue(),
+                            ((Number) m.getOrDefault("timeSeconds", 0.0)).doubleValue(),
+                            (String) m.getOrDefault("formattedTime", ""),
+                            (String) m.getOrDefault("rsns", ""),
+                            (String) m.getOrDefault("date", "")
+                        ));
+                    }
+                    hiscoreCache.put(row, entries);
+                }
+                log.info("Loaded hiscore cache from disk: {} categories", hiscoreCache.size());
+            }
+        }
+        catch (Exception e)
+        {
+            log.warn("Failed to load hiscore cache from disk", e);
+        }
+    }
+
+    // ── Hiscore cache v2 (string keys) ──
+
+    private File getHiscoreCacheV2File()
+    {
+        File runeliteDir = new File(System.getProperty("user.home"), ".runelite");
+        return new File(runeliteDir, HISCORE_CACHE_V2_FILE);
+    }
+
+    private void saveHiscoreCacheV2ToDisk()
+    {
+        try
+        {
+            Map<String, List<Map<String, Object>>> toSave = new LinkedHashMap<>();
+            for (Map.Entry<String, List<HiscoreEntry>> entry : hiscoreCacheV2.entrySet())
+            {
+                List<Map<String, Object>> entryList = new ArrayList<>();
+                for (HiscoreEntry he : entry.getValue())
+                {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("rank", he.getRank());
+                    m.put("timeSeconds", he.getTimeSeconds());
+                    m.put("formattedTime", he.getFormattedTime());
+                    m.put("rsns", he.getRsns());
+                    m.put("date", he.getDate());
+                    m.put("categoryKey", he.getCategoryKey());
+                    m.put("partySize", he.getPartySize());
+                    entryList.add(m);
+                }
+                toSave.put(entry.getKey(), entryList);
+            }
+
+            File cacheFile = getHiscoreCacheV2File();
+            try (FileWriter writer = new FileWriter(cacheFile))
+            {
+                new Gson().toJson(toSave, writer);
+            }
+        }
+        catch (Exception e)
+        {
+            log.warn("Failed to save v2 hiscore cache", e);
+        }
+    }
+
+    private void loadHiscoreCacheV2FromDisk()
+    {
+        try
+        {
+            File cacheFile = getHiscoreCacheV2File();
+            if (!cacheFile.exists()) return;
+
+            Type type = new TypeToken<LinkedHashMap<String, List<Map<String, Object>>>>(){}.getType();
+            try (FileReader reader = new FileReader(cacheFile))
+            {
+                Map<String, List<Map<String, Object>>> raw = new Gson().fromJson(reader, type);
+                if (raw == null) return;
+
+                for (Map.Entry<String, List<Map<String, Object>>> entry : raw.entrySet())
+                {
+                    List<HiscoreEntry> entries = new ArrayList<>();
+                    for (Map<String, Object> m : entry.getValue())
+                    {
+                        entries.add(new HiscoreEntry(
+                            ((Number) m.getOrDefault("rank", 0)).intValue(),
+                            ((Number) m.getOrDefault("timeSeconds", 0.0)).doubleValue(),
+                            (String) m.getOrDefault("formattedTime", ""),
+                            (String) m.getOrDefault("rsns", ""),
+                            (String) m.getOrDefault("date", ""),
+                            (String) m.getOrDefault("categoryKey", null),
+                            ((Number) m.getOrDefault("partySize", 1)).intValue()
+                        ));
+                    }
+                    hiscoreCacheV2.put(entry.getKey(), entries);
+                }
+                log.info("Loaded v2 hiscore cache from disk: {} categories", hiscoreCacheV2.size());
+            }
+        }
+        catch (Exception e)
+        {
+            log.warn("Failed to load v2 hiscore cache from disk", e);
+        }
+    }
+
+    // ── Drops tab cache ──
+
+    private void saveDropsCacheToDisk()
+    {
+        try
+        {
+            Map<String, Object> cache = new LinkedHashMap<>();
+            cache.put("leaderboard", cachedLeaderboard);
+            cache.put("recent", cachedRecentDrops);
+
+            File cacheFile = new File(new File(System.getProperty("user.home"), ".runelite"), DROPS_CACHE_FILE);
+            try (FileWriter writer = new FileWriter(cacheFile))
+            {
+                new Gson().toJson(cache, writer);
+            }
+        }
+        catch (Exception e)
+        {
+            log.warn("Failed to save drops cache", e);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private void loadDropsCacheFromDisk()
+    {
+        try
+        {
+            File cacheFile = new File(new File(System.getProperty("user.home"), ".runelite"), DROPS_CACHE_FILE);
+            if (!cacheFile.exists()) return;
+
+            Type type = new TypeToken<LinkedHashMap<String, Object>>(){}.getType();
+            try (FileReader reader = new FileReader(cacheFile))
+            {
+                Map<String, Object> cache = new Gson().fromJson(reader, type);
+                if (cache == null) return;
+
+                if (cache.containsKey("leaderboard"))
+                {
+                    cachedLeaderboard = (List<Map<String, Object>>) cache.get("leaderboard");
+                }
+                if (cache.containsKey("recent"))
+                {
+                    cachedRecentDrops = (List<Map<String, Object>>) cache.get("recent");
+                }
+
+                if (cachedLeaderboard != null || cachedRecentDrops != null)
+                {
+                    log.info("Loaded drops cache from disk");
+                }
+            }
+        }
+        catch (Exception e)
+        {
+            log.warn("Failed to load drops cache from disk", e);
+        }
+    }
+
+    private void updatePanelTeamInfo()
+    {
+        updatePanelTeamInfo(detectedTeam);
+    }
+
+    private void updatePanelTeamInfo(TeamCode team)
+    {
+        if (team != null && team != TeamCode.NONE)
+        {
+            panel.setTeamInfo(team.getCode(), team.getFullName());
+        }
+        else
+        {
+            panel.setTeamInfo(null, null);
+        }
+    }
+
+    private void setupAdminPanel()
+    {
+        String adminKey = config.adminApiKey();
+        if (adminKey == null || adminKey.isEmpty())
+        {
+            return;
+        }
+
+        // Admins always see all tabs including Bingo
+        panel.showBingoTab();
+
+        this.adminPanel = new AdminPanel();
+
+        // Populate team dropdowns from TeamCode enum (excluding NONE)
+        String[] teamCodes = java.util.Arrays.stream(TeamCode.values())
+            .filter(tc -> tc != TeamCode.NONE)
+            .map(TeamCode::getCode)
+            .toArray(String[]::new);
+        adminPanel.setTeams(teamCodes);
+
+        // Bingo admin sections are now user-toggled via collapsible Events > Bingo
+
+        panel.showAdminTab(adminPanel);
+
+        String boardApiUrl = getBoardApiUrl();
+        String apiKey = getApiKey();
+
+        // Load shared settings from sheet
+        adminPanel.setOnLoadSettings(() -> executor.submit(() -> {
+            try
+            {
+                adminPanel.setStatus("Loading settings...");
+                var settings = adminService.getSharedSettings(boardApiUrl, apiKey, adminKey);
+                adminPanel.setClanName(settings.getOrDefault("clanName", ""));
+                adminPanel.setWebhookUrl(settings.getOrDefault("discordWebhookUrl", ""));
+                adminPanel.setAnnouncement(settings.getOrDefault("announcement", ""));
+                adminPanel.setHiscoreApiUrl(settings.getOrDefault("hiscoreApiUrl", ""));
+                adminPanel.setClanDropLogUrl(settings.getOrDefault("clanDropLogUrl", ""));
+                adminPanel.setBingoStartDate(settings.getOrDefault("bingoStartDate", ""));
+                adminPanel.setBingoEndDate(settings.getOrDefault("bingoEndDate", ""));
+                adminPanel.setStatus("Settings loaded");
+            }
+            catch (Exception e)
+            {
+                adminPanel.setStatus("Error: " + e.getMessage());
+            }
+        }));
+
+        // Save shared settings to sheet
+        adminPanel.setOnSaveSettings(args -> executor.submit(() -> {
+            try
+            {
+                adminPanel.setStatus("Saving...");
+                adminService.saveSharedSettings(boardApiUrl, apiKey, adminKey,
+                    args[0], args[1],
+                    args.length > 2 ? args[2] : "",
+                    args.length > 3 ? args[3] : "",
+                    args.length > 4 ? args[4] : "",
+                    args.length > 5 ? args[5] : "",
+                    args.length > 6 ? args[6] : "");
+                adminPanel.setStatus("Settings saved");
+                // Refresh local cached config
+                serverConfigLoaded = false;
+            }
+            catch (Exception e)
+            {
+                adminPanel.setStatus("Error: " + e.getMessage());
+            }
+        }));
+
+        // Load team drops
+        adminPanel.setOnLoadTeamDrops(teamCode -> executor.submit(() -> {
+            try
+            {
+                adminPanel.setStatus("Loading " + teamCode + " drops...");
+                List<BingoModels.TeamDrop> drops = adminService.getTeamDrops(
+                    boardApiUrl, apiKey, adminKey, teamCode);
+                adminPanel.showTeamDrops(teamCode, drops);
+                adminPanel.setStatus(teamCode + ": " + drops.size() + " drops loaded");
+            }
+            catch (Exception e)
+            {
+                adminPanel.setStatus("Error: " + e.getMessage());
+            }
+        }));
+
+        // Remove a drop
+        adminPanel.setOnRemoveDrop(args -> executor.submit(() -> {
+            try
+            {
+                adminPanel.setStatus("Removing drop...");
+                adminService.removeDrop(boardApiUrl, apiKey, adminKey,
+                    args[0], args[1], args[2], args[3], args[4]);
+                adminPanel.setStatus("Removed: " + args[2] + " from " + args[1]);
+                // Reload the team's drops
+                List<BingoModels.TeamDrop> drops = adminService.getTeamDrops(
+                    boardApiUrl, apiKey, adminKey, args[0]);
+                adminPanel.showTeamDrops(args[0], drops);
+            }
+            catch (Exception e)
+            {
+                adminPanel.setStatus("Error: " + e.getMessage());
+            }
+        }));
+
+        // Bounty winner
+        adminPanel.setOnSetBountyWinner(args -> executor.submit(() -> {
+            try
+            {
+                adminService.setBountyWinner(boardApiUrl, apiKey, adminKey,
+                    Integer.parseInt(args[0]), args[1], args[2]);
+                adminPanel.setStatus("Bounty #" + args[0] + " winner set to " + args[1]);
+            }
+            catch (Exception e)
+            {
+                adminPanel.setStatus("Error: " + e.getMessage());
+            }
+        }));
+
+        // Hiscore moderation
+        adminPanel.setOnRemoveHiscore(args -> executor.submit(() -> {
+            try
+            {
+                String categoryKey = args[0];
+                int rank = Integer.parseInt(args[1]);
+                // Try v2 (ClanDropLog) first
+                String v2Url = fetchedClanDropLogUrl != null ? fetchedClanDropLogUrl : "";
+                if (!v2Url.isEmpty())
+                {
+                    adminService.removeHiscoreEntryV2(v2Url, apiKey, adminKey, categoryKey, rank);
+                    adminPanel.setStatus("Removed rank #" + rank + " from " + categoryKey);
+                }
+                else
+                {
+                    // Fall back to v1 if available
+                    BossCategory cat = BossCategory.getByKey(categoryKey);
+                    if (cat != null && cat.getLegacySheetRow() > 0)
+                    {
+                        String hiscoreUrl = fetchedHiscoreApiUrl != null ? fetchedHiscoreApiUrl : "";
+                        adminService.removeHiscoreEntry(hiscoreUrl, apiKey, adminKey, cat.getLegacySheetRow(), rank);
+                        adminPanel.setStatus("Removed rank #" + rank + " (v1 fallback)");
+                    }
+                    else
+                    {
+                        adminPanel.setStatus("No hiscore API configured");
+                    }
+                }
+                // Clear cache for this category
+                hiscoreCacheV2.remove(categoryKey);
+            }
+            catch (Exception e)
+            {
+                adminPanel.setStatus("Error: " + e.getMessage());
+            }
+        }));
+
+        // Rotate API key
+        adminPanel.setOnRotateApiKey(newKey -> executor.submit(() -> {
+            try
+            {
+                adminPanel.setStatus("Rotating API key...");
+                adminService.rotateApiKey(boardApiUrl, apiKey, adminKey, newKey);
+
+                // Generate new board code with the new key
+                String newBoardCode = java.util.Base64.getEncoder().encodeToString(
+                    (boardApiUrl + "|" + newKey).getBytes());
+                adminPanel.setNewBoardCode(newBoardCode);
+                adminPanel.setStatus("API key rotated — distribute new board code to members");
+            }
+            catch (Exception e)
+            {
+                adminPanel.setStatus("Error: " + e.getMessage());
+            }
+        }));
+
+        log.info("Admin panel enabled");
+    }
+
+    private void checkBountyAlerts()
+    {
+        // Bounty system disabled for now — needs rework
+    }
+
+    private void updateCountdown()
+    {
+        String countdown = bountyScheduler.getNextBountyCountdown();
+        panel.updateCountdown(countdown);
+    }
+}
