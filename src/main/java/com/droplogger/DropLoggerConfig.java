@@ -39,7 +39,7 @@ public interface DropLoggerConfig extends Config
     @ConfigItem(
         keyName = "enableDropLogging",
         name = "Enable Bingo Drops",
-        description = "Log whitelist-filtered drops to the bingo leadsheet",
+        description = "Sends whitelist-filtered drops to your clan's Google Sheet for bingo tracking",
         section = dropLoggingSection,
         position = 0
     )
@@ -75,7 +75,7 @@ public interface DropLoggerConfig extends Config
     @ConfigItem(
         keyName = "enableClanDropLog",
         name = "Enable Clan Drop Log",
-        description = "Log all valuable drops to the clan drop tracker",
+        description = "Sends valuable drops to your clan's Google Sheet for permanent tracking",
         section = clanDropLogSection,
         position = 0
     )
@@ -120,7 +120,7 @@ public interface DropLoggerConfig extends Config
     @ConfigItem(
         keyName = "enablePbSubmission",
         name = "Enable PB Submission",
-        description = "Auto-detect and submit personal best times to the hiscores sheet",
+        description = "Sends personal best times to your clan's Google Sheet when a new PB is detected",
         section = hiscoresSection,
         position = 0
     )
@@ -147,7 +147,7 @@ public interface DropLoggerConfig extends Config
     @ConfigItem(
         keyName = "postDrops",
         name = "Post Drops",
-        description = "Send valuable drops to Discord",
+        description = "Sends valuable drops to Discord via your clan's webhook",
         section = discordSection,
         position = 0
     )
@@ -156,7 +156,7 @@ public interface DropLoggerConfig extends Config
     @ConfigItem(
         keyName = "postPbs",
         name = "Post PBs",
-        description = "Send top 3 PB placements to Discord with screenshot",
+        description = "Sends top 3 PB placements to Discord via your clan's webhook with a screenshot",
         section = discordSection,
         position = 2
     )
