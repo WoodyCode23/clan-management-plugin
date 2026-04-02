@@ -43,7 +43,7 @@ public interface DropLoggerConfig extends Config
         section = dropLoggingSection,
         position = 0
     )
-    default boolean enableDropLogging() { return true; }
+    default boolean enableDropLogging() { return false; }
 
     @ConfigItem(
         keyName = "minimumValue",
@@ -79,7 +79,7 @@ public interface DropLoggerConfig extends Config
         section = clanDropLogSection,
         position = 0
     )
-    default boolean enableClanDropLog() { return true; }
+    default boolean enableClanDropLog() { return false; }
 
     @ConfigItem(
         keyName = "clanDropMinValue",
@@ -124,7 +124,7 @@ public interface DropLoggerConfig extends Config
         section = hiscoresSection,
         position = 0
     )
-    default boolean enablePbSubmission() { return true; }
+    default boolean enablePbSubmission() { return false; }
 
     @ConfigItem(
         keyName = "pbChatConfirmation",
@@ -151,7 +151,7 @@ public interface DropLoggerConfig extends Config
         section = discordSection,
         position = 0
     )
-    default boolean postDrops() { return true; }
+    default boolean postDrops() { return false; }
 
     @ConfigItem(
         keyName = "postPbs",
@@ -160,7 +160,7 @@ public interface DropLoggerConfig extends Config
         section = discordSection,
         position = 2
     )
-    default boolean postPbs() { return true; }
+    default boolean postPbs() { return false; }
 
     // ── Admin ──
 
