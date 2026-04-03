@@ -216,7 +216,7 @@ public class HiscoreService
             }
 
             String body = response.body().string();
-            JsonObject root = JsonParser.parseString(body).getAsJsonObject();
+            JsonObject root = new JsonParser().parse(body).getAsJsonObject();
 
             List<HiscoreEntry> entries = new ArrayList<>();
             if (root.has("top3"))
@@ -276,7 +276,7 @@ public class HiscoreService
             }
 
             String responseBody = response.body().string();
-            JsonObject root = JsonParser.parseString(responseBody).getAsJsonObject();
+            JsonObject root = new JsonParser().parse(responseBody).getAsJsonObject();
 
             if (root.has("status") && "error".equals(root.get("status").getAsString()))
             {
@@ -367,7 +367,7 @@ public class HiscoreService
             }
 
             String body = response.body().string();
-            JsonObject root = JsonParser.parseString(body).getAsJsonObject();
+            JsonObject root = new JsonParser().parse(body).getAsJsonObject();
 
             Map<String, List<HiscoreEntry>> result = new java.util.LinkedHashMap<>();
 
