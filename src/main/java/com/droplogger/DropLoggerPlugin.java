@@ -53,8 +53,8 @@ import java.util.regex.Pattern;
 @Slf4j
 @PluginDescriptor(
     name = "Clan Management",
-    description = "Clan management plugin — drops, hiscores, bingo, and more",
-    tags = {"clan", "management", "bingo", "drop", "logger", "discord", "hiscores"}
+    description = "Clan management plugin — drops, hiscores, and more",
+    tags = {"clan", "management", "drop", "logger", "discord", "hiscores"}
 )
 public class DropLoggerPlugin extends Plugin
 {
@@ -102,49 +102,31 @@ public class DropLoggerPlugin extends Plugin
     @Inject
     private DrawManager drawManager;
 
-    private BingoPanel panel;
+    private ClanPanel panel;
     private AdminPanel adminPanel;
     private NavigationButton navButton;
-    private BountyScheduler bountyScheduler;
 
-    private ScheduledFuture<?> boardRefreshTask;
-    private ScheduledFuture<?> bountyCheckTask;
-    private ScheduledFuture<?> countdownTask;
+    private ScheduledFuture<?> refreshTask;
 
     // Track last killed NPC for correlating drops
     private String lastKilledNpc = "Unknown";
     private int lastKillCount = 0;
 
-    private BingoModels.BoardData latestBoardData;
     private PbDetector pbDetector;
     private FightTracker fightTracker;
     private boolean wasInInstance = false;
 
-    // Cached whitelist: lowercase item name → tile code
-    private Map<String, String> validDropMap = Collections.emptyMap();
-    private Set<String> validDropItems = Collections.emptySet();
-    private boolean dropWhitelistLoaded = false;
+    private static final String WHITELIST_CACHE_FILE = "clan-whitelist-cache.json";
+    private static final String HISCORE_CACHE_FILE = "clan-hiscore-cache.json";
+    private static final String DROPS_CACHE_FILE = "clan-drops-cache.json";
 
-    private static final String WHITELIST_CACHE_FILE = "solus-drop-whitelist.json";
-    private static final String HISCORE_CACHE_FILE = "solus-hiscore-cache.json";
-    private static final String HISCORE_CACHE_V2_FILE = "solus-hiscore-cache-v2.json";
-    private static final String DROPS_CACHE_FILE = "solus-drops-cache.json";
-
-    // In-memory hiscore cache: categoryKey → list of entries (v2), sheetRow → list (v1 legacy)
+    // In-memory hiscore cache: categoryKey → list of entries
     private final Map<String, List<HiscoreEntry>> hiscoreCacheV2 = Collections.synchronizedMap(new LinkedHashMap<>());
-    private final Map<Integer, List<HiscoreEntry>> hiscoreCache = Collections.synchronizedMap(new LinkedHashMap<>());
     private volatile boolean hiscoreV2BatchFetched = false; // true once allTopTimes has been called this session
 
-    // Auto-detected team from API (null = not yet resolved)
-    private TeamCode detectedTeam;
-    private boolean teamLookupDone = false;
-
-    // Server-side config fetched from Settings tab (populated on first board refresh)
-    private String fetchedHiscoreApiUrl;
+    // Server-side config fetched from Settings tab
     private String fetchedClanDropLogUrl;
     private String fetchedDiscordWebhookUrl;
-    private String bingoStartDate;
-    private String bingoEndDate;
     private String clanName = "Clan";
     private boolean serverConfigLoaded = false;
 
@@ -161,10 +143,10 @@ public class DropLoggerPlugin extends Plugin
     }
 
     /**
-     * Decode the board code (base64 of "url|key") into a 2-element array [url, key].
+     * Decode the clan code (base64 of "url|key") into a 2-element array [url, key].
      * Returns null if the code is blank or malformed.
      */
-    private String[] decodeBoardCode()
+    private String[] decodeClanCode()
     {
         String code = config.boardCode();
         if (code == null || code.trim().isEmpty())
@@ -173,7 +155,6 @@ public class DropLoggerPlugin extends Plugin
         }
         try
         {
-            // Strip any surrounding quotes (RuneLite config may include them)
             String cleaned = code.trim().replaceAll("^['\"]|['\"]$", "");
             String decoded = new String(java.util.Base64.getDecoder().decode(cleaned));
             int sep = decoded.indexOf('|');
@@ -191,22 +172,22 @@ public class DropLoggerPlugin extends Plugin
         }
         catch (Exception e)
         {
-            log.warn("Invalid board code", e);
+            log.warn("Invalid clan code", e);
             return null;
         }
     }
 
-    /** Get the board API URL from the board code, or empty string if not configured. */
-    private String getBoardApiUrl()
+    /** Get the Clan Management API URL from the clan code. */
+    private String getClanApiUrl()
     {
-        String[] parts = decodeBoardCode();
+        String[] parts = decodeClanCode();
         return parts != null ? parts[0] : "";
     }
 
-    /** Get the API key from the board code, or empty string if not configured. */
+    /** Get the API key from the clan code. */
     private String getApiKey()
     {
-        String[] parts = decodeBoardCode();
+        String[] parts = decodeClanCode();
         return parts != null ? parts[1] : "";
     }
 
@@ -220,32 +201,25 @@ public class DropLoggerPlugin extends Plugin
     protected void startUp()
     {
         // Set up side panel
-        panel = new BingoPanel();
+        panel = new ClanPanel();
         // Show tabs only if board code is configured
-        panel.setConnected(decodeBoardCode() != null);
-        panel.setOnRefresh(() -> executor.submit(this::refreshBoard));
+        panel.setConnected(decodeClanCode() != null);
+        panel.setOnRefresh(() -> executor.submit(this::refreshData));
         panel.setOnFetchTimes((cat, timesPanel) -> executor.submit(() -> fetchAndDisplayTimesV2(cat, timesPanel)));
         panel.setOnClearHiscoreCache(() ->
         {
-            hiscoreCache.clear();
             hiscoreCacheV2.clear();
             hiscoreV2BatchFetched = false;
             File cacheFile = getHiscoreCacheFile();
             if (cacheFile.exists()) cacheFile.delete();
-            File cacheFileV2 = getHiscoreCacheV2File();
-            if (cacheFileV2.exists()) cacheFileV2.delete();
             log.info("Hiscore cache cleared — next view will batch-fetch");
         });
         panel.setOnRefreshDropsTab(() -> executor.submit(this::refreshDropsTab));
         panel.setOnFetchPlayerDrops((rsn) -> executor.submit(() -> fetchPlayerDrops(rsn)));
         panel.setOnRefreshWhitelist(() -> executor.submit(this::refreshClanWhitelist));
         panel.setOnFetchWomData((metric, period) -> executor.submit(() -> fetchWomData(metric, period)));
-        updatePanelTeamInfo();
-
         // Load caches from disk (avoids re-fetching every startup)
-        loadWhitelistFromDisk();
         loadHiscoreCacheFromDisk();
-        loadHiscoreCacheV2FromDisk();
         loadDropsCacheFromDisk();
         loadWhitelistCacheFromDisk();
         // Show cached drops data immediately if available
@@ -284,12 +258,8 @@ public class DropLoggerPlugin extends Plugin
         pbDetector = new PbDetector();
         fightTracker = new FightTracker();
 
-        // Bounty system disabled for now — needs rework
-        // bountyScheduler = new BountyScheduler();
-        // bountyScheduler.loadSchedule(config.customSchedule());
-
-        // Start periodic board refresh
-        startBoardRefresh();
+        // Start periodic data refresh
+        startDataRefresh();
 
         log.info("Clan Management plugin started");
     }
@@ -297,9 +267,7 @@ public class DropLoggerPlugin extends Plugin
     @Override
     protected void shutDown()
     {
-        if (boardRefreshTask != null) boardRefreshTask.cancel(true);
-        if (bountyCheckTask != null) bountyCheckTask.cancel(true);
-        if (countdownTask != null) countdownTask.cancel(true);
+        if (refreshTask != null) refreshTask.cancel(true);
 
         if (fightTracker != null) fightTracker.reset();
 
@@ -317,12 +285,10 @@ public class DropLoggerPlugin extends Plugin
 
         if ("boardCode".equals(event.getKey()))
         {
-            log.info("Board code changed, reconnecting...");
+            log.info("Clan code changed, reconnecting...");
             serverConfigLoaded = false;
-            teamLookupDone = false;
-            detectedTeam = null;
-            panel.setConnected(decodeBoardCode() != null);
-            executor.submit(this::refreshBoard);
+            panel.setConnected(decodeClanCode() != null);
+            executor.submit(this::refreshData);
         }
     }
 
@@ -384,16 +350,16 @@ public class DropLoggerPlugin extends Plugin
         String rawMessage = event.getMessage();
         String cleanedMessage = Text.removeTags(rawMessage);
 
-        // ── PB Detection (always update context, even if submission is disabled) ──
+        // ── Hiscore submission (always update context, even if submission is disabled) ──
         pbDetector.processMessage(cleanedMessage);
 
         if (config.enablePbSubmission())
         {
-            handlePbDetection(cleanedMessage);
+            handleCompletionTime(cleanedMessage);
         }
 
-        // ── Drop Logging ──
-        if (config.enableDropLogging())
+        // ── Drop Logging (clan drop log) ──
+        if (config.enableClanDropLog())
         {
             handleDropLogging(rawMessage);
         }
@@ -416,6 +382,17 @@ public class DropLoggerPlugin extends Plugin
         String itemName = matcher.group(1);
         int value = Integer.parseInt(matcher.group(2).replace(",", ""));
 
+        if (value < config.clanDropMinValue())
+        {
+            return;
+        }
+
+        String clanLogUrl = getClanApiUrl();
+        if (clanLogUrl.isEmpty())
+        {
+            return;
+        }
+
         String playerName = client.getLocalPlayer() != null
             ? client.getLocalPlayer().getName()
             : "Unknown";
@@ -429,56 +406,23 @@ public class DropLoggerPlugin extends Plugin
             wp.getX(), wp.getY(), wp.getPlane(), playerName
         );
 
-        // ── 1. Clan Drop Log — ALL valuable drops, always active ──
-        if (config.enableClanDropLog() && value >= config.clanDropMinValue()
-            && fetchedClanDropLogUrl != null && !fetchedClanDropLogUrl.isEmpty())
+        executor.submit(() -> sheetsService.logClanDrop(clanLogUrl, drop, getApiKey()));
+        log.debug("Clan drop logged: {} ({} gp)", itemName, value);
+
+        // Post to Discord
+        if (config.postDrops() && fetchedDiscordWebhookUrl != null && !fetchedDiscordWebhookUrl.isEmpty())
         {
-            String clanLogUrl = fetchedClanDropLogUrl;
-            executor.submit(() -> sheetsService.logClanDrop(clanLogUrl, drop, getApiKey()));
-            log.debug("Clan drop logged: {} ({} gp)", itemName, value);
+            String webhookUrl = fetchedDiscordWebhookUrl;
+            executor.submit(() -> discordService.postDrop(webhookUrl, drop));
         }
 
-        // ── 2. Bingo Drops — whitelist-filtered, only during bingo ──
-        if (config.enableDropLogging() && value >= config.minimumValue())
+        // Chat confirmation
+        if (config.chatConfirmation())
         {
-            // Block bingo drops if whitelist hasn't loaded
-            if (validDropItems.isEmpty())
-            {
-                log.warn("Bingo whitelist not loaded — drop '{}' will NOT be auto-logged", itemName);
-                clientThread.invokeLater(() ->
-                    client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
-                        "<col=ff0000>[" + getClanName() + "] Bingo whitelist not loaded. Submit '" + itemName + "' manually.</col>", ""));
-                return;
-            }
-
-            // Skip non-bingo drops
-            if (!validDropItems.contains(itemName.toLowerCase().trim()))
-            {
-                log.debug("Drop '{}' not on bingo whitelist, skipping bingo log", itemName);
-                return;
-            }
-
-            // Log to bingo sheet via BoardAPI submitDrop
-            String teamCode = (detectedTeam != null && detectedTeam != TeamCode.NONE)
-                ? detectedTeam.getCode() : "";
-            final String team = teamCode;
-            executor.submit(() -> sheetsService.logBingoDrop(getBoardApiUrl(), drop, getApiKey(), team));
-
-            // Post to Discord
-            if (config.postDrops() && fetchedDiscordWebhookUrl != null && !fetchedDiscordWebhookUrl.isEmpty())
-            {
-                String webhookUrl = fetchedDiscordWebhookUrl;
-                executor.submit(() -> discordService.postDrop(webhookUrl, drop));
-            }
-
-            // Chat confirmation
-            if (config.chatConfirmation())
-            {
-                clientThread.invokeLater(() ->
-                    client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
-                        "[" + getClanName() + "] Bingo drop logged: " + itemName + " (" + value + " gp)", "")
-                );
-            }
+            clientThread.invokeLater(() ->
+                client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+                    "[" + getClanName() + "] Drop logged: " + itemName + " (" + value + " gp)", "")
+            );
         }
     }
 
@@ -513,18 +457,23 @@ public class DropLoggerPlugin extends Plugin
         }
     }
 
-    private void handlePbDetection(String cleanedMessage)
+    /**
+     * Handle any boss/raid completion time — checks against clan hiscores
+     * even when it's not a personal best, since a player can set a clan
+     * record without beating their own PB.
+     */
+    private void handleCompletionTime(String cleanedMessage)
     {
-        PbDetector.PbResult pb = pbDetector.detectPb(cleanedMessage);
-        if (pb == null)
+        PbDetector.CompletionResult completion = pbDetector.detectCompletion(cleanedMessage);
+        if (completion == null)
         {
             return;
         }
 
-        String group = pb.getGroup();
+        String group = completion.getGroup();
         if ("unknown".equals(group))
         {
-            log.debug("PB detected but could not identify activity");
+            log.debug("Completion time detected but could not identify activity");
             return;
         }
 
@@ -540,35 +489,29 @@ public class DropLoggerPlugin extends Plugin
         }
         int partySize = partyMembers.size();
 
-        // Resolve the specific BossCategory (v2)
+        // Resolve the specific BossCategory
         BossCategory bossCategory = resolveBossCategory(group, partySize);
 
-        // Also resolve legacy SpeedCategory for dual-submit
-        SpeedCategory legacyCategory = resolveLegacyCategory(group, partySize);
-
-        if (bossCategory == null && legacyCategory == null)
+        if (bossCategory == null)
         {
-            log.warn("Could not resolve any category for group={} size={}", group, partySize);
+            log.warn("Could not resolve category for group={} size={}", group, partySize);
             return;
         }
 
-        // Use whichever resolved for validation and display
-        boolean isGroupContent = bossCategory != null ? bossCategory.isGroupContent()
-            : legacyCategory != null && legacyCategory.isGroupContent();
-        String categoryName = bossCategory != null ? bossCategory.getDisplayName()
-            : legacyCategory.getActivityName();
+        boolean isGroupContent = bossCategory.isGroupContent();
+        String categoryName = bossCategory.getDisplayName();
 
         // Validate clan membership for group content
         if (isGroupContent)
         {
             if (!validateClanMembership(partyMembers))
             {
-                log.info("PB not submitted: not all party members in clan chat");
+                log.info("Time not submitted: not all party members in clan chat");
                 if (config.pbChatConfirmation())
                 {
                     clientThread.invokeLater(() ->
                         client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
-                            "[" + getClanName() + "] PB not submitted — not all party members are in clan chat", "")
+                            "[" + getClanName() + "] Time not submitted — not all party members are in clan chat", "")
                     );
                 }
                 return;
@@ -588,27 +531,19 @@ public class DropLoggerPlugin extends Plugin
 
         if (!isSubmitter)
         {
-            log.info("PB detected but {} is the designated submitter, skipping",
+            log.debug("Completion detected but {} is the designated submitter, skipping",
                 sortedMembers.get(0));
-            if (config.pbChatConfirmation())
-            {
-                clientThread.invokeLater(() ->
-                    client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
-                        "[" + getClanName() + "] PB detected! " + sortedMembers.get(0) + " is submitting for the team.", "")
-                );
-            }
             return;
         }
 
         String date = new SimpleDateFormat("MM/dd").format(new Date());
-        String formattedTime = pb.getFormattedTime();
-        double timeSeconds = pb.getTimeSeconds();
-        String categoryKey = bossCategory != null ? bossCategory.getKey() : null;
-        int legacySheetRow = legacyCategory != null ? legacyCategory.getSheetRow() : -1;
-        String sizeLabel = bossCategory != null ? bossCategory.getSizeLabel() : "";
+        String formattedTime = completion.getFormattedTime();
+        double timeSeconds = completion.getTimeSeconds();
+        String categoryKey = bossCategory.getKey();
+        String sizeLabel = bossCategory.getSizeLabel();
 
-        log.info("PB detected: {} {} — {} (key={}, legacyRow={}, party: {})",
-            formattedTime, categoryName, sizeLabel, categoryKey, legacySheetRow, rsns);
+        log.info("Completion time: {} {} — {} (key={}, party: {})",
+            formattedTime, categoryName, sizeLabel, categoryKey, rsns);
 
         // Capture screenshot immediately (must be done on render thread)
         final BufferedImage[] screenshotHolder = {null};
@@ -627,11 +562,10 @@ public class DropLoggerPlugin extends Plugin
             }
             catch (Exception e)
             {
-                log.warn("Failed to capture screenshot for PB", e);
+                log.warn("Failed to capture screenshot", e);
             }
         }
 
-        String v1ApiUrl = fetchedHiscoreApiUrl != null ? fetchedHiscoreApiUrl : "";
         String v2ApiUrl = fetchedClanDropLogUrl != null ? fetchedClanDropLogUrl : "";
         String apiKey = getApiKey();
         final int finalPartySize = partySize;
@@ -644,59 +578,29 @@ public class DropLoggerPlugin extends Plugin
 
             int placed = 0;
 
-            // ── V2 submit (new system on Clan Drop Log) ──
-            if (categoryKey != null && !v2ApiUrl.isEmpty())
+            if (!v2ApiUrl.isEmpty())
             {
-                int v2Placed = hiscoreService.checkAndSubmitPbV2(
+                placed = hiscoreService.checkAndSubmitPbV2(
                     v2ApiUrl, categoryKey, formattedTime, timeSeconds,
                     rsns, date, finalPartySize, apiKey);
-                if (v2Placed > 0) placed = v2Placed;
-                else if (v2Placed == 0 && placed == 0) placed = 0;
-                log.debug("V2 submit result for {}: {}", categoryKey, v2Placed);
+                log.debug("Hiscore submit result for {}: {}", categoryKey, placed);
             }
 
-            // ── V1 submit (legacy hiscore sheet — dual-run) ──
-            if (legacySheetRow > 0 && !v1ApiUrl.isEmpty())
+            // Only notify in chat if the time placed in the clan top 3
+            if (placed > 0 && config.pbChatConfirmation())
             {
-                int v1Placed = hiscoreService.checkAndSubmitPb(
-                    v1ApiUrl, legacySheetRow, formattedTime, timeSeconds, rsns, date, apiKey);
-                // Use v1 placement if v2 didn't place (or wasn't available)
-                if (v1Placed > 0 && placed <= 0) placed = v1Placed;
-                log.debug("V1 submit result for row {}: {}", legacySheetRow, v1Placed);
-            }
-
-            if (config.pbChatConfirmation())
-            {
-                String msg;
-                if (placed > 0)
-                {
-                    msg = String.format("[" + getClanName() + "] PB submitted! %s placed #%d in %s",
-                        formattedTime, placed, finalCategoryName);
-                }
-                else if (placed == 0)
-                {
-                    msg = String.format("[" + getClanName() + "] PB %s does not qualify for top 3 in %s",
-                        formattedTime, finalCategoryName);
-                }
-                else
-                {
-                    msg = "[" + getClanName() + "] Failed to submit PB — check logs for details";
-                }
-
+                String msg = String.format("[%s] %s placed #%d in %s!",
+                    getClanName(), formattedTime, placed, finalCategoryName);
                 clientThread.invokeLater(() ->
                     client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", msg, "")
                 );
             }
 
             // Invalidate cache for this category so next UI view fetches fresh data
-            if (categoryKey != null)
+            if (placed > 0)
             {
                 hiscoreCacheV2.remove(categoryKey);
                 saveHiscoreCacheV2ToDisk();
-            }
-            if (legacySheetRow > 0)
-            {
-                hiscoreCache.remove(legacySheetRow);
             }
 
             // Post to Discord if placed top 3
@@ -719,52 +623,6 @@ public class DropLoggerPlugin extends Plugin
         // For most bosses, the group key is now specific (e.g. "bandos", "duke")
         // BossCategory.find() picks the best match for the given party size
         return BossCategory.find(group, partySize);
-    }
-
-    /**
-     * Resolve the legacy SpeedCategory for dual-run with the old hiscore system.
-     * Returns null for bosses that didn't exist in the old system.
-     */
-    private SpeedCategory resolveLegacyCategory(String group, int partySize)
-    {
-        // Map new specific group keys back to old combined keys for SpeedCategory
-        switch (group)
-        {
-            case "duke": return SpeedCategory.DUKE;
-            case "leviathan": return SpeedCategory.LEVIATHAN;
-            case "whisperer": return SpeedCategory.WHISPERER;
-            case "vardorvis": return SpeedCategory.VARDORVIS;
-
-            case "phosanis": return SpeedCategory.PHOSANIS;
-            case "nightmare": return SpeedCategory.find("nightmare", partySize);
-
-            case "gaunt": return SpeedCategory.GAUNTLET;
-            case "gaunt_corrupted": return SpeedCategory.CORRUPTED_GAUNTLET;
-
-            // CoX CM and ToA Expert map to old system groups
-            case "cox_cm":
-                return SpeedCategory.find("cox", partySize); // old system had CM under "cox" group
-            case "toa_expert":
-                return SpeedCategory.find("toa", partySize); // old system had no expert split
-
-            // Groups that map 1:1 to old system
-            case "cox":
-            case "tob":
-            case "toa":
-            case "jad":
-            case "zuk":
-            case "colo":
-            case "nex":
-            case "ba":
-            case "raks":
-            case "titans":
-            case "yama":
-                return SpeedCategory.find(group, partySize);
-
-            default:
-                // New bosses not in the old system — no legacy submission
-                return null;
-        }
     }
 
     /**
@@ -856,43 +714,36 @@ public class DropLoggerPlugin extends Plugin
         }
     }
 
-    private void startBoardRefresh()
+    private void startDataRefresh()
     {
-        if (boardRefreshTask != null)
+        if (refreshTask != null)
         {
-            boardRefreshTask.cancel(false);
+            refreshTask.cancel(false);
         }
 
         int interval = Math.max(30, config.refreshInterval());
-        boardRefreshTask = executor.scheduleAtFixedRate(
-            this::refreshBoard, 10, interval, TimeUnit.SECONDS);
+        refreshTask = executor.scheduleAtFixedRate(
+            this::refreshData, 10, interval, TimeUnit.SECONDS);
     }
 
-    private void refreshBoard()
+    private void refreshData()
     {
-        String apiUrl = getBoardApiUrl();
+        String apiUrl = getClanApiUrl();
         if (apiUrl == null || apiUrl.isEmpty())
         {
             panel.setConnected(false);
-            panel.setStatus("Enter your Board Code in plugin settings");
+            panel.setStatus("Enter your Clan Code in plugin settings");
             return;
         }
 
-        String playerName = client.getLocalPlayer() != null
-            ? client.getLocalPlayer().getName()
-            : null;
-
-        // Fetch server-side config (URLs) on first successful connection
+        // Fetch server-side config on first successful connection
         if (!serverConfigLoaded)
         {
             try
             {
                 Map<String, String> serverConfig = boardDataService.fetchConfig(apiUrl, getApiKey());
-                fetchedHiscoreApiUrl = serverConfig.getOrDefault("hiscoreApiUrl", "");
-                fetchedClanDropLogUrl = serverConfig.getOrDefault("clanDropLogUrl", "");
+                fetchedClanDropLogUrl = apiUrl; // Same URL as the clan code
                 fetchedDiscordWebhookUrl = serverConfig.getOrDefault("discordWebhookUrl", "");
-                bingoStartDate = serverConfig.getOrDefault("bingoStartDate", "");
-                bingoEndDate = serverConfig.getOrDefault("bingoEndDate", "");
                 String configClanName = serverConfig.getOrDefault("clanName", "");
                 if (!configClanName.isEmpty()) clanName = configClanName;
                 serverConfigLoaded = true;
@@ -907,18 +758,11 @@ public class DropLoggerPlugin extends Plugin
                     panel.setAnnouncements(java.util.Collections.singletonList(announcement));
                 }
 
-                log.info("Server config loaded — hiscores={}, clanLog={}, discord={}, bingoStart={}, bingoEnd={}",
-                    !fetchedHiscoreApiUrl.isEmpty(), !fetchedClanDropLogUrl.isEmpty(),
-                    !fetchedDiscordWebhookUrl.isEmpty(), bingoStartDate, bingoEndDate);
-
-                // Show/hide bingo tab based on event dates
-                updateBingoTabVisibility();
+                log.info("Server config loaded — clanName={}, clanLog={}, discord={}",
+                    getClanName(), !fetchedClanDropLogUrl.isEmpty(), !fetchedDiscordWebhookUrl.isEmpty());
 
                 // Auto-load drops tab on first config load
-                if (!fetchedClanDropLogUrl.isEmpty())
-                {
-                    executor.submit(this::refreshDropsTab);
-                }
+                executor.submit(this::refreshDropsTab);
             }
             catch (Exception e)
             {
@@ -926,139 +770,9 @@ public class DropLoggerPlugin extends Plugin
             }
         }
 
-        // Auto-detect team if we haven't looked up yet
-        if (!teamLookupDone && playerName != null)
-        {
-            try
-            {
-                String found = boardDataService.findTeam(apiUrl, playerName, getApiKey());
-                detectedTeam = TeamCode.fromCode(found);
-                if (detectedTeam != TeamCode.NONE)
-                {
-                    log.info("Auto-detected team {} for player {}", detectedTeam.getCode(), playerName);
-                }
-            }
-            catch (Exception e)
-            {
-                log.warn("Team auto-detect failed", e);
-            }
-            teamLookupDone = true;
-        }
-
-        // Load drop whitelist once from API (if not already loaded from cache)
-        if (!dropWhitelistLoaded)
-        {
-            try
-            {
-                Map<String, String> fetched = boardDataService.fetchValidDropMap(apiUrl, getApiKey());
-                if (!fetched.isEmpty())
-                {
-                    validDropMap = fetched;
-                    validDropItems = validDropMap.keySet();
-                    dropWhitelistLoaded = true;
-                    panel.setDropWhitelist(validDropMap);
-                    saveWhitelistToDisk(validDropMap);
-                    log.info("Drop whitelist fetched and cached: {} items", validDropMap.size());
-                }
-                else
-                {
-                    log.warn("API returned 0 drops — keeping existing cache if available");
-                }
-            }
-            catch (Exception e)
-            {
-                log.warn("Failed to load drop whitelist — drops will be blocked until whitelist loads", e);
-            }
-        }
-
-        // Use auto-detected team
-        String teamCode = (detectedTeam != null && detectedTeam != TeamCode.NONE)
-            ? detectedTeam.getCode()
-            : "";
-
-        try
-        {
-            BingoModels.BoardData data = boardDataService.fetchBoardData(apiUrl, teamCode, getApiKey());
-            latestBoardData = data;
-
-            // Show bingo tab only if event is active/upcoming (controlled by dates)
-            // Falls back to tile check if no dates configured
-            if (isBingoActive())
-            {
-                panel.showBingoTab();
-            }
-            else
-            {
-                panel.hideBingoTab();
-            }
-
-            panel.updateBoard(data, teamCode, playerName);
-            panel.setAnnouncements(data.getAnnouncements());
-            updatePanelTeamInfo(detectedTeam);
-        }
-        catch (Exception e)
-        {
-            log.error("Failed to refresh board data", e);
-            panel.setStatus("Error: " + e.getMessage());
-        }
-
         // Auto-refresh WOM data on same cycle
         refreshWomData();
         refreshClanActivity();
-    }
-
-    private void fetchAndDisplayTimes(SpeedCategory cat, javax.swing.JPanel timesPanel)
-    {
-        java.awt.Color accentColor = new java.awt.Color(100, 149, 237);
-
-        // Check in-memory cache first
-        List<HiscoreEntry> cached = hiscoreCache.get(cat.getSheetRow());
-        if (cached != null)
-        {
-            panel.populateTimesPanel(timesPanel, cached, accentColor);
-            return;
-        }
-
-        String hiscoreUrl = fetchedHiscoreApiUrl;
-        if (hiscoreUrl == null || hiscoreUrl.isEmpty())
-        {
-            // No API configured — show message
-            javax.swing.SwingUtilities.invokeLater(() ->
-            {
-                timesPanel.removeAll();
-                javax.swing.JLabel err = new javax.swing.JLabel("Hiscore API not configured");
-                err.setFont(err.getFont().deriveFont(java.awt.Font.ITALIC, 10f));
-                err.setForeground(new java.awt.Color(120, 120, 120));
-                err.setBorder(javax.swing.BorderFactory.createEmptyBorder(6, 36, 6, 10));
-                timesPanel.add(err);
-                timesPanel.revalidate();
-                timesPanel.repaint();
-            });
-            return;
-        }
-
-        try
-        {
-            List<HiscoreEntry> entries = hiscoreService.fetchTopTimes(hiscoreUrl, cat.getSheetRow(), getApiKey());
-            hiscoreCache.put(cat.getSheetRow(), entries);
-            panel.populateTimesPanel(timesPanel, entries, accentColor);
-            saveHiscoreCacheToDisk();
-        }
-        catch (Exception e)
-        {
-            log.warn("Failed to fetch hiscore times for {}", cat.getActivityName(), e);
-            javax.swing.SwingUtilities.invokeLater(() ->
-            {
-                timesPanel.removeAll();
-                javax.swing.JLabel err = new javax.swing.JLabel("Failed to load");
-                err.setFont(err.getFont().deriveFont(java.awt.Font.ITALIC, 10f));
-                err.setForeground(new java.awt.Color(180, 60, 60));
-                err.setBorder(javax.swing.BorderFactory.createEmptyBorder(6, 36, 6, 10));
-                timesPanel.add(err);
-                timesPanel.revalidate();
-                timesPanel.repaint();
-            });
-        }
     }
 
     /**
@@ -1116,9 +830,8 @@ public class DropLoggerPlugin extends Plugin
             return;
         }
 
-        // Fallback: try individual v2 fetch, then v1
+        // Fallback: try individual fetch
         String v2Url = fetchedClanDropLogUrl;
-        String v1Url = fetchedHiscoreApiUrl;
         String apiKey = getApiKey();
 
         if (v2Url != null && !v2Url.isEmpty())
@@ -1133,31 +846,15 @@ public class DropLoggerPlugin extends Plugin
             }
             catch (Exception e)
             {
-                log.warn("V2 fetch failed for {}, trying v1", cat.getKey(), e);
+                log.warn("Failed to fetch hiscore times for {}", cat.getKey(), e);
             }
         }
 
-        if (cat.getLegacySheetRow() > 0 && v1Url != null && !v1Url.isEmpty())
-        {
-            try
-            {
-                List<HiscoreEntry> entries = hiscoreService.fetchTopTimes(v1Url, cat.getLegacySheetRow(), apiKey);
-                hiscoreCacheV2.put(cat.getKey(), entries);
-                saveHiscoreCacheV2ToDisk();
-                panel.populateTimesPanel(timesPanel, entries, accentColor);
-                return;
-            }
-            catch (Exception e)
-            {
-                log.warn("V1 fallback fetch failed for {}", cat.getDisplayName(), e);
-            }
-        }
-
-        // Both failed or not configured
+        // Failed or not configured
         javax.swing.SwingUtilities.invokeLater(() ->
         {
             timesPanel.removeAll();
-            String msg = (v2Url == null || v2Url.isEmpty()) && (v1Url == null || v1Url.isEmpty())
+            String msg = (v2Url == null || v2Url.isEmpty())
                 ? "Hiscore API not configured"
                 : "Failed to load times";
             javax.swing.JLabel err = new javax.swing.JLabel(msg);
@@ -1341,7 +1038,7 @@ public class DropLoggerPlugin extends Plugin
         try
         {
             File cacheFile = new File(
-                net.runelite.client.RuneLite.RUNELITE_DIR, "solus-whitelist-cache.json");
+                net.runelite.client.RuneLite.RUNELITE_DIR, "clan-whitelist-cache.json");
             java.util.Map<String, Object> cacheData = new java.util.LinkedHashMap<>();
             cacheData.put("whitelist", cachedClanWhitelist);
             String json = new Gson().toJson(cacheData);
@@ -1358,7 +1055,7 @@ public class DropLoggerPlugin extends Plugin
         try
         {
             File cacheFile = new File(
-                net.runelite.client.RuneLite.RUNELITE_DIR, "solus-whitelist-cache.json");
+                net.runelite.client.RuneLite.RUNELITE_DIR, "clan-whitelist-cache.json");
             if (!cacheFile.exists()) return;
 
             String json = new String(
@@ -1391,190 +1088,12 @@ public class DropLoggerPlugin extends Plugin
         }
     }
 
-    /**
-     * Check if a bingo event is currently active or coming up within 7 days.
-     * If no dates are configured, falls back to true (always show).
-     */
-    private boolean isBingoActive()
-    {
-        if (bingoStartDate == null || bingoStartDate.isEmpty()
-            || bingoEndDate == null || bingoEndDate.isEmpty())
-        {
-            // No dates configured — don't show bingo tab by default
-            return false;
-        }
-
-        try
-        {
-            java.time.LocalDate now = java.time.LocalDate.now();
-            java.time.LocalDate start = java.time.LocalDate.parse(bingoStartDate);
-            java.time.LocalDate end = java.time.LocalDate.parse(bingoEndDate);
-
-            // Show bingo tab 7 days before start through end of event
-            java.time.LocalDate showFrom = start.minusDays(7);
-            return !now.isBefore(showFrom) && !now.isAfter(end);
-        }
-        catch (Exception e)
-        {
-            log.warn("Failed to parse bingo dates (start={}, end={}): {}",
-                bingoStartDate, bingoEndDate, e.getMessage());
-            return false;
-        }
-    }
-
-    private void updateBingoTabVisibility()
-    {
-        boolean active = isBingoActive();
-        if (active)
-        {
-            panel.showBingoTab();
-        }
-        else
-        {
-            panel.hideBingoTab();
-        }
-
-        // Bingo admin sections are now user-toggled via collapsible Events > Bingo
-    }
-
-    private File getWhitelistCacheFile()
-    {
-        File runeliteDir = new File(System.getProperty("user.home"), ".runelite");
-        return new File(runeliteDir, WHITELIST_CACHE_FILE);
-    }
-
-    private void saveWhitelistToDisk(Map<String, String> dropMap)
-    {
-        if (dropMap == null || dropMap.isEmpty()) return;
-        try
-        {
-            File cacheFile = getWhitelistCacheFile();
-            try (FileWriter writer = new FileWriter(cacheFile))
-            {
-                new Gson().toJson(dropMap, writer);
-            }
-            log.info("Whitelist cached to disk: {} items", dropMap.size());
-        }
-        catch (Exception e)
-        {
-            log.warn("Failed to save whitelist cache", e);
-        }
-    }
-
-    private void loadWhitelistFromDisk()
-    {
-        try
-        {
-            File cacheFile = getWhitelistCacheFile();
-            if (!cacheFile.exists()) return;
-
-            Type mapType = new TypeToken<LinkedHashMap<String, String>>(){}.getType();
-            try (FileReader reader = new FileReader(cacheFile))
-            {
-                Map<String, String> cached = new Gson().fromJson(reader, mapType);
-                if (cached != null && !cached.isEmpty())
-                {
-                    validDropMap = cached;
-                    validDropItems = cached.keySet();
-                    dropWhitelistLoaded = true;
-                    panel.setDropWhitelist(cached);
-                    log.info("Loaded {} cached drop items from disk", cached.size());
-                }
-            }
-        }
-        catch (Exception e)
-        {
-            log.warn("Failed to load whitelist cache from disk", e);
-        }
-    }
-
     // ── Hiscore cache ──
 
     private File getHiscoreCacheFile()
     {
         File runeliteDir = new File(System.getProperty("user.home"), ".runelite");
         return new File(runeliteDir, HISCORE_CACHE_FILE);
-    }
-
-    private void saveHiscoreCacheToDisk()
-    {
-        try
-        {
-            // Convert HiscoreEntry objects to serializable maps
-            Map<Integer, List<Map<String, Object>>> toSave = new LinkedHashMap<>();
-            for (Map.Entry<Integer, List<HiscoreEntry>> entry : hiscoreCache.entrySet())
-            {
-                List<Map<String, Object>> entryList = new ArrayList<>();
-                for (HiscoreEntry he : entry.getValue())
-                {
-                    Map<String, Object> m = new LinkedHashMap<>();
-                    m.put("rank", he.getRank());
-                    m.put("timeSeconds", he.getTimeSeconds());
-                    m.put("formattedTime", he.getFormattedTime());
-                    m.put("rsns", he.getRsns());
-                    m.put("date", he.getDate());
-                    entryList.add(m);
-                }
-                toSave.put(entry.getKey(), entryList);
-            }
-
-            File cacheFile = getHiscoreCacheFile();
-            try (FileWriter writer = new FileWriter(cacheFile))
-            {
-                new Gson().toJson(toSave, writer);
-            }
-        }
-        catch (Exception e)
-        {
-            log.warn("Failed to save hiscore cache", e);
-        }
-    }
-
-    private void loadHiscoreCacheFromDisk()
-    {
-        try
-        {
-            File cacheFile = getHiscoreCacheFile();
-            if (!cacheFile.exists()) return;
-
-            Type type = new TypeToken<LinkedHashMap<Integer, List<Map<String, Object>>>>(){}.getType();
-            try (FileReader reader = new FileReader(cacheFile))
-            {
-                Map<Integer, List<Map<String, Object>>> raw = new Gson().fromJson(reader, type);
-                if (raw == null) return;
-
-                for (Map.Entry<Integer, List<Map<String, Object>>> entry : raw.entrySet())
-                {
-                    // Gson deserializes integer keys as strings in JSON
-                    int row = entry.getKey();
-                    List<HiscoreEntry> entries = new ArrayList<>();
-                    for (Map<String, Object> m : entry.getValue())
-                    {
-                        entries.add(new HiscoreEntry(
-                            ((Number) m.getOrDefault("rank", 0)).intValue(),
-                            ((Number) m.getOrDefault("timeSeconds", 0.0)).doubleValue(),
-                            (String) m.getOrDefault("formattedTime", ""),
-                            (String) m.getOrDefault("rsns", ""),
-                            (String) m.getOrDefault("date", "")
-                        ));
-                    }
-                    hiscoreCache.put(row, entries);
-                }
-                log.info("Loaded hiscore cache from disk: {} categories", hiscoreCache.size());
-            }
-        }
-        catch (Exception e)
-        {
-            log.warn("Failed to load hiscore cache from disk", e);
-        }
-    }
-
-    // ── Hiscore cache v2 (string keys) ──
-
-    private File getHiscoreCacheV2File()
-    {
-        File runeliteDir = new File(System.getProperty("user.home"), ".runelite");
-        return new File(runeliteDir, HISCORE_CACHE_V2_FILE);
     }
 
     private void saveHiscoreCacheV2ToDisk()
@@ -1600,7 +1119,7 @@ public class DropLoggerPlugin extends Plugin
                 toSave.put(entry.getKey(), entryList);
             }
 
-            File cacheFile = getHiscoreCacheV2File();
+            File cacheFile = getHiscoreCacheFile();
             try (FileWriter writer = new FileWriter(cacheFile))
             {
                 new Gson().toJson(toSave, writer);
@@ -1608,15 +1127,15 @@ public class DropLoggerPlugin extends Plugin
         }
         catch (Exception e)
         {
-            log.warn("Failed to save v2 hiscore cache", e);
+            log.warn("Failed to save hiscore cache", e);
         }
     }
 
-    private void loadHiscoreCacheV2FromDisk()
+    private void loadHiscoreCacheFromDisk()
     {
         try
         {
-            File cacheFile = getHiscoreCacheV2File();
+            File cacheFile = getHiscoreCacheFile();
             if (!cacheFile.exists()) return;
 
             Type type = new TypeToken<LinkedHashMap<String, List<Map<String, Object>>>>(){}.getType();
@@ -1642,12 +1161,12 @@ public class DropLoggerPlugin extends Plugin
                     }
                     hiscoreCacheV2.put(entry.getKey(), entries);
                 }
-                log.info("Loaded v2 hiscore cache from disk: {} categories", hiscoreCacheV2.size());
+                log.info("Loaded hiscore cache from disk: {} categories", hiscoreCacheV2.size());
             }
         }
         catch (Exception e)
         {
-            log.warn("Failed to load v2 hiscore cache from disk", e);
+            log.warn("Failed to load hiscore cache from disk", e);
         }
     }
 
@@ -1708,23 +1227,6 @@ public class DropLoggerPlugin extends Plugin
         }
     }
 
-    private void updatePanelTeamInfo()
-    {
-        updatePanelTeamInfo(detectedTeam);
-    }
-
-    private void updatePanelTeamInfo(TeamCode team)
-    {
-        if (team != null && team != TeamCode.NONE)
-        {
-            panel.setTeamInfo(team.getCode(), team.getFullName());
-        }
-        else
-        {
-            panel.setTeamInfo(null, null);
-        }
-    }
-
     private void setupAdminPanel()
     {
         String adminKey = config.adminApiKey();
@@ -1733,23 +1235,10 @@ public class DropLoggerPlugin extends Plugin
             return;
         }
 
-        // Admins always see all tabs including Bingo
-        panel.showBingoTab();
-
         this.adminPanel = new AdminPanel();
-
-        // Populate team dropdowns from TeamCode enum (excluding NONE)
-        String[] teamCodes = java.util.Arrays.stream(TeamCode.values())
-            .filter(tc -> tc != TeamCode.NONE)
-            .map(TeamCode::getCode)
-            .toArray(String[]::new);
-        adminPanel.setTeams(teamCodes);
-
-        // Bingo admin sections are now user-toggled via collapsible Events > Bingo
-
         panel.showAdminTab(adminPanel);
 
-        String boardApiUrl = getBoardApiUrl();
+        String clanApiUrl = getClanApiUrl();
         String apiKey = getApiKey();
 
         // Load shared settings from sheet
@@ -1757,14 +1246,10 @@ public class DropLoggerPlugin extends Plugin
             try
             {
                 adminPanel.setStatus("Loading settings...");
-                var settings = adminService.getSharedSettings(boardApiUrl, apiKey, adminKey);
+                var settings = adminService.getSharedSettings(clanApiUrl, apiKey, adminKey);
                 adminPanel.setClanName(settings.getOrDefault("clanName", ""));
                 adminPanel.setWebhookUrl(settings.getOrDefault("discordWebhookUrl", ""));
                 adminPanel.setAnnouncement(settings.getOrDefault("announcement", ""));
-                adminPanel.setHiscoreApiUrl(settings.getOrDefault("hiscoreApiUrl", ""));
-                adminPanel.setClanDropLogUrl(settings.getOrDefault("clanDropLogUrl", ""));
-                adminPanel.setBingoStartDate(settings.getOrDefault("bingoStartDate", ""));
-                adminPanel.setBingoEndDate(settings.getOrDefault("bingoEndDate", ""));
                 adminPanel.setStatus("Settings loaded");
             }
             catch (Exception e)
@@ -1778,65 +1263,12 @@ public class DropLoggerPlugin extends Plugin
             try
             {
                 adminPanel.setStatus("Saving...");
-                adminService.saveSharedSettings(boardApiUrl, apiKey, adminKey,
+                adminService.saveSharedSettings(clanApiUrl, apiKey, adminKey,
                     args[0], args[1],
-                    args.length > 2 ? args[2] : "",
-                    args.length > 3 ? args[3] : "",
-                    args.length > 4 ? args[4] : "",
-                    args.length > 5 ? args[5] : "",
-                    args.length > 6 ? args[6] : "");
+                    args.length > 2 ? args[2] : "");
                 adminPanel.setStatus("Settings saved");
                 // Refresh local cached config
                 serverConfigLoaded = false;
-            }
-            catch (Exception e)
-            {
-                adminPanel.setStatus("Error: " + e.getMessage());
-            }
-        }));
-
-        // Load team drops
-        adminPanel.setOnLoadTeamDrops(teamCode -> executor.submit(() -> {
-            try
-            {
-                adminPanel.setStatus("Loading " + teamCode + " drops...");
-                List<BingoModels.TeamDrop> drops = adminService.getTeamDrops(
-                    boardApiUrl, apiKey, adminKey, teamCode);
-                adminPanel.showTeamDrops(teamCode, drops);
-                adminPanel.setStatus(teamCode + ": " + drops.size() + " drops loaded");
-            }
-            catch (Exception e)
-            {
-                adminPanel.setStatus("Error: " + e.getMessage());
-            }
-        }));
-
-        // Remove a drop
-        adminPanel.setOnRemoveDrop(args -> executor.submit(() -> {
-            try
-            {
-                adminPanel.setStatus("Removing drop...");
-                adminService.removeDrop(boardApiUrl, apiKey, adminKey,
-                    args[0], args[1], args[2], args[3], args[4]);
-                adminPanel.setStatus("Removed: " + args[2] + " from " + args[1]);
-                // Reload the team's drops
-                List<BingoModels.TeamDrop> drops = adminService.getTeamDrops(
-                    boardApiUrl, apiKey, adminKey, args[0]);
-                adminPanel.showTeamDrops(args[0], drops);
-            }
-            catch (Exception e)
-            {
-                adminPanel.setStatus("Error: " + e.getMessage());
-            }
-        }));
-
-        // Bounty winner
-        adminPanel.setOnSetBountyWinner(args -> executor.submit(() -> {
-            try
-            {
-                adminService.setBountyWinner(boardApiUrl, apiKey, adminKey,
-                    Integer.parseInt(args[0]), args[1], args[2]);
-                adminPanel.setStatus("Bounty #" + args[0] + " winner set to " + args[1]);
             }
             catch (Exception e)
             {
@@ -1850,7 +1282,6 @@ public class DropLoggerPlugin extends Plugin
             {
                 String categoryKey = args[0];
                 int rank = Integer.parseInt(args[1]);
-                // Try v2 (ClanDropLog) first
                 String v2Url = fetchedClanDropLogUrl != null ? fetchedClanDropLogUrl : "";
                 if (!v2Url.isEmpty())
                 {
@@ -1859,18 +1290,7 @@ public class DropLoggerPlugin extends Plugin
                 }
                 else
                 {
-                    // Fall back to v1 if available
-                    BossCategory cat = BossCategory.getByKey(categoryKey);
-                    if (cat != null && cat.getLegacySheetRow() > 0)
-                    {
-                        String hiscoreUrl = fetchedHiscoreApiUrl != null ? fetchedHiscoreApiUrl : "";
-                        adminService.removeHiscoreEntry(hiscoreUrl, apiKey, adminKey, cat.getLegacySheetRow(), rank);
-                        adminPanel.setStatus("Removed rank #" + rank + " (v1 fallback)");
-                    }
-                    else
-                    {
-                        adminPanel.setStatus("No hiscore API configured");
-                    }
+                    adminPanel.setStatus("No hiscore API configured");
                 }
                 // Clear cache for this category
                 hiscoreCacheV2.remove(categoryKey);
@@ -1886,13 +1306,13 @@ public class DropLoggerPlugin extends Plugin
             try
             {
                 adminPanel.setStatus("Rotating API key...");
-                adminService.rotateApiKey(boardApiUrl, apiKey, adminKey, newKey);
+                adminService.rotateApiKey(clanApiUrl, apiKey, adminKey, newKey);
 
-                // Generate new board code with the new key
-                String newBoardCode = java.util.Base64.getEncoder().encodeToString(
-                    (boardApiUrl + "|" + newKey).getBytes());
-                adminPanel.setNewBoardCode(newBoardCode);
-                adminPanel.setStatus("API key rotated — distribute new board code to members");
+                // Generate new clan code with the new key
+                String newClanCode = java.util.Base64.getEncoder().encodeToString(
+                    (clanApiUrl + "|" + newKey).getBytes());
+                adminPanel.setNewBoardCode(newClanCode);
+                adminPanel.setStatus("API key rotated — distribute new clan code to members");
             }
             catch (Exception e)
             {
@@ -1901,16 +1321,5 @@ public class DropLoggerPlugin extends Plugin
         }));
 
         log.info("Admin panel enabled");
-    }
-
-    private void checkBountyAlerts()
-    {
-        // Bounty system disabled for now — needs rework
-    }
-
-    private void updateCountdown()
-    {
-        String countdown = bountyScheduler.getNextBountyCountdown();
-        panel.updateCountdown(countdown);
     }
 }

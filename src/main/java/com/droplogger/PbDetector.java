@@ -7,38 +7,39 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Detects personal best times from OSRS game chat messages.
- * Tracks activity context to determine which boss/raid the PB is for.
+ * Detects completion times from OSRS game chat messages.
+ * Tracks activity context to determine which boss/raid the time is for.
+ * Supports both personal best detection and general completion time detection
+ * so clan hiscores can be checked on every completion, not just PBs.
  */
 @Slf4j
 public class PbDetector
 {
-    // ── PB detection patterns ──
-    // These match lines containing "(new personal best)" with a time
+    // ── Completion time patterns (match ANY completion, with or without PB) ──
 
-    // "Challenge duration: 22:15.00 (new personal best)" — CoX or Gauntlet
-    private static final Pattern CHALLENGE_PB = Pattern.compile(
-        "Challenge duration: ((\\d+:)?\\d+:\\d+\\.\\d+).*\\(new personal best\\)", Pattern.CASE_INSENSITIVE);
+    // "Challenge duration: 22:15.00" or "Challenge duration: 22:15.00 (new personal best)" — CoX or Gauntlet
+    private static final Pattern CHALLENGE_TIME = Pattern.compile(
+        "Challenge duration: ((\\d+:)?\\d+:\\d+\\.\\d+)", Pattern.CASE_INSENSITIVE);
 
-    // "Theatre of Blood completion time: 23:45.60 (new personal best)"
-    private static final Pattern TOB_PB = Pattern.compile(
-        "Theatre of Blood.*?completion time: ((\\d+:)?\\d+:\\d+\\.\\d+).*\\(new personal best\\)", Pattern.CASE_INSENSITIVE);
+    // "Theatre of Blood completion time: 23:45.60"
+    private static final Pattern TOB_TIME = Pattern.compile(
+        "Theatre of Blood.*?completion time: ((\\d+:)?\\d+:\\d+\\.\\d+)", Pattern.CASE_INSENSITIVE);
 
-    // "Tombs of Amascut...completion time: 23:45.60 (new personal best)"
-    private static final Pattern TOA_PB = Pattern.compile(
-        "Tombs of Amascut.*?completion time: ((\\d+:)?\\d+:\\d+\\.\\d+).*\\(new personal best\\)", Pattern.CASE_INSENSITIVE);
+    // "Tombs of Amascut...completion time: 23:45.60"
+    private static final Pattern TOA_TIME = Pattern.compile(
+        "Tombs of Amascut.*?completion time: ((\\d+:)?\\d+:\\d+\\.\\d+)", Pattern.CASE_INSENSITIVE);
 
-    // "Hallowed Sepulchre completion time: 5:30.00 (new personal best)"
-    private static final Pattern SEP_PB = Pattern.compile(
-        "Hallowed Sepulchre.*?completion time: ((\\d+:)?\\d+:\\d+\\.\\d+).*\\(new personal best\\)", Pattern.CASE_INSENSITIVE);
+    // "Hallowed Sepulchre completion time: 5:30.00"
+    private static final Pattern SEP_TIME = Pattern.compile(
+        "Hallowed Sepulchre.*?completion time: ((\\d+:)?\\d+:\\d+\\.\\d+)", Pattern.CASE_INSENSITIVE);
 
-    // "Fight duration: 1:23.40 (new personal best)" — boss kills
-    private static final Pattern FIGHT_PB = Pattern.compile(
-        "Fight duration: ((\\d+:)?\\d+:\\d+\\.\\d+).*\\(new personal best\\)", Pattern.CASE_INSENSITIVE);
+    // "Fight duration: 1:23.40" — boss kills
+    private static final Pattern FIGHT_TIME = Pattern.compile(
+        "Fight duration: ((\\d+:)?\\d+:\\d+\\.\\d+)", Pattern.CASE_INSENSITIVE);
 
-    // "Duration: 32:15.60 (new personal best)" — wave content (Jad, Zuk, Colo) and general
-    private static final Pattern DURATION_PB = Pattern.compile(
-        "Duration: ((\\d+:)?\\d+:\\d+\\.\\d+).*\\(new personal best\\)", Pattern.CASE_INSENSITIVE);
+    // "Duration: 32:15.60" — wave content (Jad, Zuk, Colo) and general
+    private static final Pattern DURATION_TIME = Pattern.compile(
+        "Duration: ((\\d+:)?\\d+:\\d+\\.\\d+)", Pattern.CASE_INSENSITIVE);
 
     // ── Activity identification patterns ──
     // Kill count messages identify which boss was just killed
@@ -102,57 +103,60 @@ public class PbDetector
     }
 
     /**
-     * Check if a chat message contains a new personal best.
-     * Returns a PbResult if detected, null otherwise.
+     * Check if a chat message contains a completion time (PB or not).
+     * Returns a CompletionResult if detected, null otherwise.
+     * This fires on every boss kill / raid completion so the clan
+     * hiscores can be checked even when it's not a personal best.
      */
-    public PbResult detectPb(String cleanedMessage)
+    public CompletionResult detectCompletion(String cleanedMessage)
     {
+        boolean isPb = cleanedMessage.contains("(new personal best)");
         Matcher matcher;
 
         // Check ToB first (specific pattern)
-        matcher = TOB_PB.matcher(cleanedMessage);
+        matcher = TOB_TIME.matcher(cleanedMessage);
         if (matcher.find())
         {
-            return new PbResult("tob", matcher.group(1));
+            return new CompletionResult("tob", matcher.group(1), null, isPb);
         }
 
         // Check ToA — "Expert Mode" in the message means 300+ invocations
-        matcher = TOA_PB.matcher(cleanedMessage);
+        matcher = TOA_TIME.matcher(cleanedMessage);
         if (matcher.find())
         {
             String toaGroup = cleanedMessage.toLowerCase().contains("expert") ? "toa_expert" : "toa";
-            return new PbResult(toaGroup, matcher.group(1));
+            return new CompletionResult(toaGroup, matcher.group(1), null, isPb);
         }
 
         // Check Sepulchre
-        matcher = SEP_PB.matcher(cleanedMessage);
+        matcher = SEP_TIME.matcher(cleanedMessage);
         if (matcher.find())
         {
-            return new PbResult("sep", matcher.group(1));
+            return new CompletionResult("sep", matcher.group(1), null, isPb);
         }
 
         // Check Challenge duration (CoX or Gauntlet — disambiguate by context)
-        matcher = CHALLENGE_PB.matcher(cleanedMessage);
+        matcher = CHALLENGE_TIME.matcher(cleanedMessage);
         if (matcher.find())
         {
             String group = resolveChallengeDuration();
-            return new PbResult(group, matcher.group(1));
+            return new CompletionResult(group, matcher.group(1), null, isPb);
         }
 
         // Check Fight duration (bosses — use lastActivity for boss identity)
-        matcher = FIGHT_PB.matcher(cleanedMessage);
+        matcher = FIGHT_TIME.matcher(cleanedMessage);
         if (matcher.find())
         {
             String group = lastActivity != null ? lastActivity : "unknown";
-            return new PbResult(group, matcher.group(1), lastBossName);
+            return new CompletionResult(group, matcher.group(1), lastBossName, isPb);
         }
 
         // Check generic Duration (Jad, Zuk, Colo — use lastActivity)
-        matcher = DURATION_PB.matcher(cleanedMessage);
+        matcher = DURATION_TIME.matcher(cleanedMessage);
         if (matcher.find())
         {
             String group = lastActivity != null ? lastActivity : "unknown";
-            return new PbResult(group, matcher.group(1), lastBossName);
+            return new CompletionResult(group, matcher.group(1), lastBossName, isPb);
         }
 
         return null;
@@ -313,27 +317,24 @@ public class PbDetector
     }
 
     /**
-     * Result of a PB detection.
+     * Result of a completion time detection.
      */
     @Getter
-    public static class PbResult
+    public static class CompletionResult
     {
         private final String group;
         private final String formattedTime;
         private final double timeSeconds;
         private final String bossName;
+        private final boolean personalBest;
 
-        public PbResult(String group, String formattedTime)
-        {
-            this(group, formattedTime, null);
-        }
-
-        public PbResult(String group, String formattedTime, String bossName)
+        public CompletionResult(String group, String formattedTime, String bossName, boolean personalBest)
         {
             this.group = group;
             this.formattedTime = formattedTime;
             this.timeSeconds = HiscoreService.parseTimeToSeconds(formattedTime);
             this.bossName = bossName;
+            this.personalBest = personalBest;
         }
     }
 }

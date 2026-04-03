@@ -5,7 +5,6 @@ import net.runelite.client.ui.ColorScheme;
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import java.awt.*;
-import java.util.List;
 import java.util.function.Consumer;
 
 public class AdminPanel extends JPanel
@@ -20,18 +19,7 @@ public class AdminPanel extends JPanel
     // ── Shared Settings ──
     private final JTextField clanNameField = new JTextField();
     private final JTextField webhookField = new JTextField();
-    private final JTextField clanDropLogUrlField = new JTextField();
     private final JTextArea announcementArea = new JTextArea(3, 20);
-    private final JTextField bingoStartField = new JTextField();
-    private final JTextField bingoEndField = new JTextField();
-
-    // ── Team Drops ──
-    private final JPanel dropsListPanel = new JPanel();
-    private final JComboBox<String> teamDropsBox = new JComboBox<>();
-
-    // ── Bingo sections container ──
-    private final JPanel bingoSectionsPanel = new JPanel();
-    private final JComboBox<String> bountyWinnerBox = new JComboBox<>();
 
     // ── Rotate API Key ──
     private final JTextField newApiKeyField = new JTextField();
@@ -40,9 +28,6 @@ public class AdminPanel extends JPanel
     // Callbacks
     private Consumer<String[]> onSaveSettings;
     private Runnable onLoadSettings;
-    private Consumer<String> onLoadTeamDrops;
-    private Consumer<String[]> onRemoveDrop;
-    private Consumer<String[]> onSetBountyWinner;
     private Consumer<String[]> onRemoveHiscore;
     private Consumer<String> onRotateApiKey;
 
@@ -61,7 +46,7 @@ public class AdminPanel extends JPanel
         add(Box.createVerticalStrut(8));
 
         // ══════════════════════════════════
-        // Shared Settings (webhook + announcements)
+        // Shared Settings
         // ══════════════════════════════════
         add(createSectionTitle("Shared Settings"));
         add(Box.createVerticalStrut(4));
@@ -79,13 +64,6 @@ public class AdminPanel extends JPanel
         webhookField.setFont(SMALL_FONT);
         webhookField.setAlignmentX(Component.LEFT_ALIGNMENT);
         add(webhookField);
-        add(Box.createVerticalStrut(4));
-
-        add(createFieldLabel("Clan Drop Log / Hiscores URL"));
-        clanDropLogUrlField.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
-        clanDropLogUrlField.setFont(SMALL_FONT);
-        clanDropLogUrlField.setAlignmentX(Component.LEFT_ALIGNMENT);
-        add(clanDropLogUrlField);
         add(Box.createVerticalStrut(4));
 
         add(createFieldLabel("Announcement (visible to all members)"));
@@ -114,14 +92,10 @@ public class AdminPanel extends JPanel
         saveSettingsBtn.addActionListener(e -> {
             String clanNameVal = clanNameField.getText().trim();
             String webhook = webhookField.getText().trim();
-            String clanLogUrl = clanDropLogUrlField.getText().trim();
             String announcement = announcementArea.getText().trim();
-            String bingoStart = bingoStartField.getText().trim();
-            String bingoEnd = bingoEndField.getText().trim();
             if (onSaveSettings != null)
             {
-                // Send clanLogUrl for both hiscoreApiUrl and clanDropLogUrl (unified)
-                onSaveSettings.accept(new String[]{webhook, announcement, clanLogUrl, clanLogUrl, bingoStart, bingoEnd, clanNameVal});
+                onSaveSettings.accept(new String[]{clanNameVal, webhook, announcement});
             }
         });
 
@@ -154,7 +128,7 @@ public class AdminPanel extends JPanel
                 setStatus("API key must be at least 6 characters");
                 return;
             }
-            if (confirmAction("Rotate API key on all services?\nAll members will need a new board code."))
+            if (confirmAction("Rotate API key?\nAll members will need a new clan code."))
             {
                 if (onRotateApiKey != null) onRotateApiKey.accept(newKey);
             }
@@ -177,137 +151,7 @@ public class AdminPanel extends JPanel
         add(Box.createVerticalStrut(6));
 
         // ══════════════════════════════════
-        // Events — collapsible section for event modules
-        // ══════════════════════════════════
-        JLabel eventsHeader = createSectionTitle("Events");
-        add(eventsHeader);
-        add(Box.createVerticalStrut(6));
-
-        // ── Bingo event (collapsible) ──
-        JPanel bingoToggleRow = new JPanel(new BorderLayout());
-        bingoToggleRow.setBackground(ColorScheme.DARK_GRAY_COLOR);
-        bingoToggleRow.setAlignmentX(Component.LEFT_ALIGNMENT);
-        bingoToggleRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 22));
-        bingoToggleRow.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-
-        JLabel bingoToggleLabel = new JLabel("\u25B6 Bingo");
-        bingoToggleLabel.setFont(new Font("Segoe UI", Font.BOLD, 12));
-        bingoToggleLabel.setForeground(new Color(180, 140, 255));
-        bingoToggleRow.add(bingoToggleLabel, BorderLayout.WEST);
-        add(bingoToggleRow);
-        add(Box.createVerticalStrut(4));
-
-        // Bingo content panel (starts collapsed)
-        bingoSectionsPanel.setLayout(new BoxLayout(bingoSectionsPanel, BoxLayout.Y_AXIS));
-        bingoSectionsPanel.setBackground(ColorScheme.DARK_GRAY_COLOR);
-        bingoSectionsPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
-        bingoSectionsPanel.setVisible(false);
-
-        // Toggle bingo section on click
-        bingoToggleRow.addMouseListener(new java.awt.event.MouseAdapter()
-        {
-            @Override
-            public void mouseClicked(java.awt.event.MouseEvent e)
-            {
-                boolean show = !bingoSectionsPanel.isVisible();
-                bingoSectionsPanel.setVisible(show);
-                bingoToggleLabel.setText((show ? "\u25BC " : "\u25B6 ") + "Bingo");
-                revalidate();
-                repaint();
-            }
-        });
-
-        // ── Bingo Schedule ──
-        bingoSectionsPanel.add(createFieldLabel("Start Date (YYYY-MM-DD)"));
-        bingoStartField.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
-        bingoStartField.setFont(SMALL_FONT);
-        bingoStartField.setAlignmentX(Component.LEFT_ALIGNMENT);
-        bingoStartField.setToolTipText("Bingo tab shows 7 days before this date");
-        bingoSectionsPanel.add(bingoStartField);
-        bingoSectionsPanel.add(Box.createVerticalStrut(4));
-
-        bingoSectionsPanel.add(createFieldLabel("End Date (YYYY-MM-DD)"));
-        bingoEndField.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
-        bingoEndField.setFont(SMALL_FONT);
-        bingoEndField.setAlignmentX(Component.LEFT_ALIGNMENT);
-        bingoEndField.setToolTipText("Bingo tab hides after this date");
-        bingoSectionsPanel.add(bingoEndField);
-        bingoSectionsPanel.add(Box.createVerticalStrut(6));
-
-        // ── Team Drop Management ──
-        bingoSectionsPanel.add(createSectionTitle("Team Drops"));
-        bingoSectionsPanel.add(Box.createVerticalStrut(4));
-
-        bingoSectionsPanel.add(createFieldLabel("Select a team to view recent drops"));
-
-        // Combo box for team selection (populated dynamically via setTeams)
-        teamDropsBox.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
-        teamDropsBox.setFont(SMALL_FONT);
-        teamDropsBox.setAlignmentX(Component.LEFT_ALIGNMENT);
-        bingoSectionsPanel.add(teamDropsBox);
-        bingoSectionsPanel.add(Box.createVerticalStrut(4));
-
-        JButton loadDropsBtn = createButton("Load Drops");
-        loadDropsBtn.setAlignmentX(Component.LEFT_ALIGNMENT);
-        loadDropsBtn.addActionListener(e -> {
-            String selected = (String) teamDropsBox.getSelectedItem();
-            if (selected != null && !selected.isEmpty() && onLoadTeamDrops != null)
-            {
-                onLoadTeamDrops.accept(selected);
-            }
-        });
-        bingoSectionsPanel.add(loadDropsBtn);
-        bingoSectionsPanel.add(Box.createVerticalStrut(4));
-
-        dropsListPanel.setLayout(new BoxLayout(dropsListPanel, BoxLayout.Y_AXIS));
-        dropsListPanel.setBackground(new Color(25, 25, 25));
-        dropsListPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
-        bingoSectionsPanel.add(dropsListPanel);
-
-        bingoSectionsPanel.add(Box.createVerticalStrut(8));
-        bingoSectionsPanel.add(createSeparator());
-        bingoSectionsPanel.add(Box.createVerticalStrut(6));
-
-        // ── Bounty Management ──
-        bingoSectionsPanel.add(createSectionTitle("Bounty Management"));
-        bingoSectionsPanel.add(Box.createVerticalStrut(4));
-
-        String[] bountyNums = {"1", "2", "3", "4", "5", "6", "7", "8", "9"};
-        JComboBox<String> bountyNumBox = new JComboBox<>(bountyNums);
-        bountyNumBox.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
-        bountyWinnerBox.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
-        JTextField bountyDescField = new JTextField();
-        bountyDescField.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
-        bountyDescField.setFont(SMALL_FONT);
-
-        bingoSectionsPanel.add(createLabeledField("Bounty #:", bountyNumBox));
-        bingoSectionsPanel.add(Box.createVerticalStrut(2));
-        bingoSectionsPanel.add(createLabeledField("Winner:", bountyWinnerBox));
-        bingoSectionsPanel.add(Box.createVerticalStrut(2));
-        bingoSectionsPanel.add(createLabeledField("Desc:", bountyDescField));
-        bingoSectionsPanel.add(Box.createVerticalStrut(4));
-
-        JButton setBountyBtn = createButton("Set Winner");
-        setBountyBtn.setAlignmentX(Component.LEFT_ALIGNMENT);
-        setBountyBtn.addActionListener(e -> {
-            String num = (String) bountyNumBox.getSelectedItem();
-            String winner = (String) bountyWinnerBox.getSelectedItem();
-            String desc = bountyDescField.getText().trim();
-            if (confirmAction("Set Bounty #" + num + " winner to " + winner + "?"))
-            {
-                if (onSetBountyWinner != null) onSetBountyWinner.accept(new String[]{num, winner, desc});
-            }
-        });
-        bingoSectionsPanel.add(setBountyBtn);
-
-        bingoSectionsPanel.add(Box.createVerticalStrut(8));
-        bingoSectionsPanel.add(createSeparator());
-        bingoSectionsPanel.add(Box.createVerticalStrut(6));
-
-        add(bingoSectionsPanel);
-
-        // ══════════════════════════════════
-        // Hiscore Moderation (always visible)
+        // Hiscore Moderation
         // ══════════════════════════════════
         add(createSectionTitle("Hiscore Moderation"));
         add(Box.createVerticalStrut(4));
@@ -435,171 +279,10 @@ public class AdminPanel extends JPanel
         SwingUtilities.invokeLater(() -> announcementArea.setText(text != null ? text : ""));
     }
 
-    public void setHiscoreApiUrl(String url)
-    {
-        // Legacy — if clanDropLogUrl isn't set yet, use hiscoreApiUrl as fallback
-        SwingUtilities.invokeLater(() ->
-        {
-            if (clanDropLogUrlField.getText().isEmpty() && url != null && !url.isEmpty())
-            {
-                clanDropLogUrlField.setText(url);
-            }
-        });
-    }
-
-    public void setClanDropLogUrl(String url)
-    {
-        SwingUtilities.invokeLater(() -> clanDropLogUrlField.setText(url != null ? url : ""));
-    }
-
-    public void setBingoStartDate(String date)
-    {
-        SwingUtilities.invokeLater(() -> bingoStartField.setText(date != null ? date : ""));
-    }
-
-    public void setBingoEndDate(String date)
-    {
-        SwingUtilities.invokeLater(() -> bingoEndField.setText(date != null ? date : ""));
-    }
-
-    /**
-     * Set the list of team codes for the team drops and bounty winner dropdowns.
-     * Call this to dynamically populate teams (e.g., from TeamCode enum or server data).
-     */
-    public void setTeams(String[] teamCodes)
-    {
-        SwingUtilities.invokeLater(() -> {
-            teamDropsBox.removeAllItems();
-            bountyWinnerBox.removeAllItems();
-            for (String code : teamCodes)
-            {
-                teamDropsBox.addItem(code);
-                bountyWinnerBox.addItem(code);
-            }
-        });
-    }
-
-    /**
-     * Show or hide the bingo-specific admin sections (Team Drops, Bounty Management).
-     */
-    public void setBingoSectionsVisible(boolean visible)
-    {
-        SwingUtilities.invokeLater(() -> {
-            bingoSectionsPanel.setVisible(visible);
-            revalidate();
-            repaint();
-        });
-    }
-
-    public void showTeamDrops(String teamCode, List<BingoModels.TeamDrop> drops)
-    {
-        SwingUtilities.invokeLater(() -> {
-            dropsListPanel.removeAll();
-
-            if (drops == null || drops.isEmpty())
-            {
-                JLabel empty = new JLabel("No drops for " + teamCode);
-                empty.setFont(SMALL_ITALIC);
-                empty.setForeground(new Color(100, 100, 100));
-                empty.setBorder(new EmptyBorder(6, 6, 6, 6));
-                dropsListPanel.add(empty);
-            }
-            else
-            {
-                JLabel teamTitle = new JLabel(teamCode + " — " + drops.size() + " drops");
-                teamTitle.setFont(SECTION_FONT);
-                teamTitle.setForeground(new Color(100, 180, 255));
-                teamTitle.setBorder(new EmptyBorder(4, 6, 4, 6));
-                teamTitle.setAlignmentX(Component.LEFT_ALIGNMENT);
-                dropsListPanel.add(teamTitle);
-
-                for (BingoModels.TeamDrop drop : drops)
-                {
-                    dropsListPanel.add(createDropRow(teamCode, drop));
-                }
-            }
-
-            dropsListPanel.revalidate();
-            dropsListPanel.repaint();
-        });
-    }
-
-    private JPanel createDropRow(String teamCode, BingoModels.TeamDrop drop)
-    {
-        JPanel row = new JPanel(new BorderLayout(4, 0));
-        row.setBackground(new Color(25, 25, 25));
-        row.setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(40, 40, 40)),
-            new EmptyBorder(4, 6, 4, 4)
-        ));
-        row.setAlignmentX(Component.LEFT_ALIGNMENT);
-        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 44));
-
-        // Left side: drop info
-        JPanel info = new JPanel();
-        info.setLayout(new BoxLayout(info, BoxLayout.Y_AXIS));
-        info.setBackground(new Color(25, 25, 25));
-
-        JLabel itemLabel = new JLabel(drop.getDropName());
-        itemLabel.setFont(LABEL_FONT);
-        itemLabel.setForeground(new Color(220, 220, 220));
-        info.add(itemLabel);
-
-        String detail = drop.getRsn();
-        if (drop.getDate() != null && !drop.getDate().isEmpty())
-        {
-            detail += " — " + drop.getDate();
-        }
-        if (drop.getTileCode() != null && !drop.getTileCode().isEmpty())
-        {
-            detail += " [" + drop.getTileCode() + "]";
-        }
-        JLabel detailLabel = new JLabel(detail);
-        detailLabel.setFont(SMALL_FONT);
-        detailLabel.setForeground(new Color(140, 140, 140));
-        info.add(detailLabel);
-
-        row.add(info, BorderLayout.CENTER);
-
-        // Right side: remove button
-        JLabel removeBtn = new JLabel("\u2715");
-        removeBtn.setFont(removeBtn.getFont().deriveFont(12f));
-        removeBtn.setForeground(new Color(150, 60, 60));
-        removeBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        removeBtn.setBorder(new EmptyBorder(0, 4, 0, 4));
-        removeBtn.addMouseListener(new java.awt.event.MouseAdapter()
-        {
-            @Override
-            public void mouseClicked(java.awt.event.MouseEvent e)
-            {
-                if (confirmAction("Remove " + drop.getDropName() + " from " + drop.getRsn() + "?"))
-                {
-                    if (onRemoveDrop != null)
-                    {
-                        onRemoveDrop.accept(new String[]{
-                            teamCode, drop.getRsn(), drop.getDropName(),
-                            drop.getTileCode(), drop.getDate()
-                        });
-                    }
-                }
-            }
-            @Override
-            public void mouseEntered(java.awt.event.MouseEvent e) { removeBtn.setForeground(new Color(220, 60, 60)); }
-            @Override
-            public void mouseExited(java.awt.event.MouseEvent e) { removeBtn.setForeground(new Color(150, 60, 60)); }
-        });
-        row.add(removeBtn, BorderLayout.EAST);
-
-        return row;
-    }
-
     // ── Callback setters ──
 
     public void setOnSaveSettings(Consumer<String[]> cb) { this.onSaveSettings = cb; }
     public void setOnLoadSettings(Runnable cb) { this.onLoadSettings = cb; }
-    public void setOnLoadTeamDrops(Consumer<String> cb) { this.onLoadTeamDrops = cb; }
-    public void setOnRemoveDrop(Consumer<String[]> cb) { this.onRemoveDrop = cb; }
-    public void setOnSetBountyWinner(Consumer<String[]> cb) { this.onSetBountyWinner = cb; }
     public void setOnRemoveHiscore(Consumer<String[]> cb) { this.onRemoveHiscore = cb; }
     public void setOnRotateApiKey(Consumer<String> cb) { this.onRotateApiKey = cb; }
 

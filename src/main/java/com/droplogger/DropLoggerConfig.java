@@ -27,42 +27,6 @@ public interface DropLoggerConfig extends Config
     )
     default String boardCode() { return ""; }
 
-    // ── Bingo Drops ──
-
-    @ConfigSection(
-        name = "Bingo Drops",
-        description = "Whitelist-filtered drops for bingo events",
-        position = 0
-    )
-    String dropLoggingSection = "dropLogging";
-
-    @ConfigItem(
-        keyName = "enableDropLogging",
-        name = "Enable Bingo Drops",
-        description = "Sends whitelist-filtered drops to your clan's Google Sheet for bingo tracking",
-        section = dropLoggingSection,
-        position = 0
-    )
-    default boolean enableDropLogging() { return false; }
-
-    @ConfigItem(
-        keyName = "minimumValue",
-        name = "Minimum Value",
-        description = "Minimum GP value to log (0 = all valuable drops)",
-        section = dropLoggingSection,
-        position = 1
-    )
-    default int minimumValue() { return 0; }
-
-    @ConfigItem(
-        keyName = "chatConfirmation",
-        name = "Chat Confirmation",
-        description = "Show logged drop confirmation in chat",
-        section = dropLoggingSection,
-        position = 2
-    )
-    default boolean chatConfirmation() { return true; }
-
     // ── Clan Drop Log ──
 
     @ConfigSection(
@@ -90,20 +54,29 @@ public interface DropLoggerConfig extends Config
     )
     default int clanDropMinValue() { return 100000; }
 
-    // ── Bingo Board ──
-
-    @ConfigSection(
-        name = "Bingo Board",
-        description = "Settings for the live bingo board side panel",
+    @ConfigItem(
+        keyName = "chatConfirmation",
+        name = "Chat Confirmation",
+        description = "Show logged drop confirmation in chat",
+        section = clanDropLogSection,
         position = 2
     )
-    String bingoBoardSection = "bingoBoard";
+    default boolean chatConfirmation() { return true; }
+
+    // ── Panel ──
+
+    @ConfigSection(
+        name = "Panel",
+        description = "Settings for the side panel",
+        position = 2
+    )
+    String panelSection = "panel";
 
     @ConfigItem(
         keyName = "refreshInterval",
         name = "Refresh Interval (sec)",
-        description = "Seconds between board data polls (minimum 30)",
-        section = bingoBoardSection,
+        description = "Seconds between data polls (minimum 30)",
+        section = panelSection,
         position = 0
     )
     default int refreshInterval() { return 60; }

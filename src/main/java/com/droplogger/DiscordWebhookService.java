@@ -64,35 +64,6 @@ public class DiscordWebhookService
         sendEmbed(webhookUrl, embed);
     }
 
-    public void postBountyAlert(String webhookUrl, BountyScheduler.BountyAlert alert)
-    {
-        if (!isValidWebhookUrl(webhookUrl))
-        {
-            return;
-        }
-
-        JsonObject embed = new JsonObject();
-
-        if (alert.getType() == BountyScheduler.BountyAlert.Type.HINT)
-        {
-            embed.addProperty("title", "Bounty Hint #" + alert.getBountyNumber());
-            embed.addProperty("color", 0xFFA500); // Orange
-        }
-        else
-        {
-            embed.addProperty("title", "Bounty #" + alert.getBountyNumber() + " is LIVE!");
-            embed.addProperty("color", 0xFF0000); // Red
-        }
-
-        embed.addProperty("description", alert.getMessage());
-
-        JsonObject footer = new JsonObject();
-        footer.addProperty("text", clanName);
-        embed.add("footer", footer);
-
-        sendEmbed(webhookUrl, embed);
-    }
-
     public void postPb(String webhookUrl, String formattedTime, int placed, String categoryName,
                        String rsns, BufferedImage screenshot)
     {
@@ -191,31 +162,6 @@ public class DiscordWebhookService
             log.error("Failed to encode screenshot", e);
             sendEmbed(webhookUrl, embed);
         }
-    }
-
-    public void postStandings(String webhookUrl, BingoModels.BoardData boardData)
-    {
-        if (!isValidWebhookUrl(webhookUrl) || boardData == null)
-        {
-            return;
-        }
-
-        JsonObject embed = new JsonObject();
-        embed.addProperty("title", "Team Standings");
-        embed.addProperty("color", 0x4CAF50); // Green
-
-        StringBuilder desc = new StringBuilder();
-        for (BingoModels.Team team : boardData.getTeams())
-        {
-            desc.append(String.format("**#%d** %s — %d pts\n", team.getRank(), team.getName(), team.getPoints()));
-        }
-        embed.addProperty("description", desc.toString());
-
-        JsonObject footer = new JsonObject();
-        footer.addProperty("text", clanName);
-        embed.add("footer", footer);
-
-        sendEmbed(webhookUrl, embed);
     }
 
     private void sendEmbed(String webhookUrl, JsonObject embed)

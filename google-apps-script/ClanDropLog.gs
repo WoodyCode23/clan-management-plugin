@@ -22,10 +22,45 @@ var DEFAULT_API_KEY = "changeme";
 var DEFAULT_ADMIN_KEY = "changeme-admin";
 
 function getApiKeyFromProps() {
+  // Check Settings tab first, then Script Properties, then default
+  var fromSettings = getSettingValue_("apiKey");
+  if (fromSettings && fromSettings !== "changeme") return fromSettings;
   return PropertiesService.getScriptProperties().getProperty("API_KEY") || DEFAULT_API_KEY;
 }
 function getAdminKeyFromProps() {
+  var fromSettings = getSettingValue_("adminKey");
+  if (fromSettings && fromSettings !== "changeme-admin") return fromSettings;
   return PropertiesService.getScriptProperties().getProperty("ADMIN_API_KEY") || DEFAULT_ADMIN_KEY;
+}
+
+/** Read a single value from the Settings tab by key name. */
+function getSettingValue_(key) {
+  try {
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Settings");
+    if (!sheet) return null;
+    var data = sheet.getRange("A2:B100").getValues();
+    for (var i = 0; i < data.length; i++) {
+      if ((data[i][0] || "").toString().trim() === key) {
+        return (data[i][1] || "").toString().trim();
+      }
+    }
+  } catch (e) {}
+  return null;
+}
+
+/** Write a single value to the Settings tab by key name. */
+function updateSettingValue_(key, value) {
+  try {
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Settings");
+    if (!sheet) return;
+    var data = sheet.getRange("A2:A100").getValues();
+    for (var i = 0; i < data.length; i++) {
+      if ((data[i][0] || "").toString().trim() === key) {
+        sheet.getRange(i + 2, 2).setValue(value);
+        return;
+      }
+    }
+  } catch (e) {}
 }
 
 var SHEET_NAME = "Drops";
@@ -42,6 +77,10 @@ function doGet(e) {
 
   if (action === "ping") {
     return resp({ status: "ok", message: "Clan Drop Log is running" });
+  }
+
+  if (action === "getConfig") {
+    return resp(getPluginConfig());
   }
 
   if (action === "clanWhitelist") {
@@ -86,6 +125,14 @@ function doGet(e) {
     return resp(getHiscoreCategories());
   }
 
+  if (action === "getSharedSettings") {
+    var adminKey = (e.parameter.adminKey || "").trim();
+    if (adminKey !== getAdminKeyFromProps()) {
+      return resp({ status: "error", message: "Invalid admin key" });
+    }
+    return resp(getSharedSettings());
+  }
+
   return resp({ status: "error", message: "Unknown action: " + action });
 }
 
@@ -109,7 +156,18 @@ function doPost(e) {
         return resp({ status: "error", message: "New API key must be at least 6 characters" });
       }
       PropertiesService.getScriptProperties().setProperty("API_KEY", newKey);
+      // Also update the Settings tab so it stays in sync
+      updateSettingValue_("apiKey", newKey);
       return resp({ status: "ok", message: "API key updated" });
+    }
+
+    // ── Admin: Save shared settings ──
+    if (action === "adminSaveSettings") {
+      var adminKey = data.adminKey || "";
+      if (adminKey !== getAdminKeyFromProps()) {
+        return resp({ status: "error", message: "Invalid admin key" });
+      }
+      return resp(adminSaveSettings(data));
     }
 
     // ── Hiscore: Submit PB ──
@@ -791,6 +849,139 @@ function migrateV1Hiscores() {
     SpreadsheetApp.getUi().alert("Migration complete. Migrated " + migrated + " entries to the Hiscores tab.");
   } catch (err) {
     SpreadsheetApp.getUi().alert("Migration error: " + err.toString());
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SETTINGS — Shared plugin configuration
+// ═══════════════════════════════════════════════════════════════
+
+function setupSettingsTab() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Settings");
+  if (!sheet) {
+    sheet = ss.insertSheet("Settings");
+  }
+
+  // Preserve existing values if re-running setup
+  var existing = {};
+  var data = sheet.getRange("A2:B100").getValues();
+  for (var i = 0; i < data.length; i++) {
+    var key = (data[i][0] || "").toString().trim();
+    if (key) existing[key] = (data[i][1] || "").toString();
+  }
+
+  var defaults = [
+    ["apiKey", "changeme"],
+    ["adminKey", "changeme-admin"],
+    ["clanName", ""],
+    ["discordWebhookUrl", ""],
+    ["announcement", ""]
+  ];
+
+  sheet.getRange("A1:B1").setValues([["Setting", "Value"]]);
+  sheet.getRange("A1:B1").setFontWeight("bold");
+
+  var rows = [];
+  for (var d = 0; d < defaults.length; d++) {
+    var key = defaults[d][0];
+    var val = existing.hasOwnProperty(key) ? existing[key] : defaults[d][1];
+    rows.push([key, val]);
+  }
+
+  // Clear old data and write fresh
+  if (sheet.getLastRow() > 1) {
+    sheet.getRange(2, 1, sheet.getLastRow() - 1, 2).clearContent();
+  }
+  sheet.getRange(2, 1, rows.length, 2).setValues(rows);
+  sheet.setFrozenRows(1);
+  sheet.setColumnWidth(1, 180);
+  sheet.setColumnWidth(2, 400);
+
+  return sheet;
+}
+
+/**
+ * Return plugin configuration from the Settings tab.
+ * Called by the plugin on startup so players don't need to enter URLs manually.
+ */
+function getPluginConfig() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Settings");
+  if (!sheet) {
+    sheet = setupSettingsTab();
+  }
+
+  var data = sheet.getRange("A2:B100").getValues();
+  var settings = {};
+  for (var i = 0; i < data.length; i++) {
+    var key = (data[i][0] || "").toString().trim();
+    if (key) {
+      settings[key] = (data[i][1] || "").toString();
+    }
+  }
+
+  return {
+    clanName: settings["clanName"] || "",
+    discordWebhookUrl: settings["discordWebhookUrl"] || "",
+    announcement: settings["announcement"] || ""
+  };
+}
+
+/**
+ * Return all settings for the admin panel (same as getPluginConfig but requires admin key).
+ */
+function getSharedSettings() {
+  return getPluginConfig();
+}
+
+/**
+ * Save shared settings to the Settings tab.
+ */
+function adminSaveSettings(payload) {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName("Settings");
+    if (!sheet) {
+      sheet = setupSettingsTab();
+    }
+
+    var data = sheet.getRange("A2:A100").getValues();
+    var keyRows = {};
+    var lastUsedRow = 1;
+    for (var i = 0; i < data.length; i++) {
+      var key = (data[i][0] || "").toString().trim();
+      if (key) {
+        keyRows[key] = i + 2;
+        lastUsedRow = i + 2;
+      }
+    }
+
+    var knownKeys = ["clanName", "discordWebhookUrl", "announcement"];
+    var settingsToSave = {};
+    for (var k = 0; k < knownKeys.length; k++) {
+      var key = knownKeys[k];
+      if (payload.hasOwnProperty(key)) {
+        settingsToSave[key] = payload[key] || "";
+      }
+    }
+    for (var key in settingsToSave) {
+      if (keyRows[key]) {
+        sheet.getRange(keyRows[key], 2).setValue(settingsToSave[key]);
+      } else {
+        lastUsedRow++;
+        sheet.getRange(lastUsedRow, 1, 1, 2).setValues([[key, settingsToSave[key]]]);
+      }
+    }
+
+    lock.releaseLock();
+    return { status: "ok", message: "Settings saved" };
+  } catch (err) {
+    lock.releaseLock();
+    return { status: "error", message: err.toString() };
   }
 }
 

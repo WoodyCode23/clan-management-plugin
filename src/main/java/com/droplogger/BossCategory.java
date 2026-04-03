@@ -9,7 +9,7 @@ import java.util.Map;
 /**
  * Data-driven boss category registry for the expanded hiscore system.
  * Each entry maps a boss + party size to a unique key used for storage/lookup.
- * Replaces the old SpeedCategory enum's fixed sheet-row approach.
+ * Each entry maps a boss + party size to a unique key used for storage and lookup.
  */
 public class BossCategory
 {
@@ -293,7 +293,7 @@ public class BossCategory
 
     /**
      * Find the best matching category for a group key and party size.
-     * Same logic as the old SpeedCategory.find() — prefers the most specific match.
+     * Prefers the most specific match for the given party size.
      */
     public static BossCategory find(String group, int partySize)
     {

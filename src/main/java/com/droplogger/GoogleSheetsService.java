@@ -39,30 +39,6 @@ public class GoogleSheetsService
     }
 
     /**
-     * Log a bingo drop via BoardAPI.gs submitDrop action.
-     * Sends RSN, item, timestamp, and team code.
-     * The sheet's formulas handle points, tile code, stipulations, etc.
-     */
-    public void logBingoDrop(String boardApiUrl, DropEntry drop, String apiKey, String teamCode)
-    {
-        if (boardApiUrl == null || boardApiUrl.isEmpty())
-        {
-            log.warn("Board API URL is not configured");
-            return;
-        }
-
-        JsonObject payload = new JsonObject();
-        payload.addProperty("key", apiKey != null ? apiKey : "");
-        payload.addProperty("action", "submitDrop");
-        payload.addProperty("player", drop.getPlayerName());
-        payload.addProperty("item", drop.getItemName());
-        payload.addProperty("timestamp", TIMESTAMP_FORMAT.format(drop.getTimestamp()));
-        payload.addProperty("team", teamCode != null ? teamCode : "");
-
-        postToApi(boardApiUrl, payload, "Bingo drop");
-    }
-
-    /**
      * Log a drop to the clan drop log (separate sheet, all columns).
      */
     public void logClanDrop(String webhookUrl, DropEntry drop, String apiKey)

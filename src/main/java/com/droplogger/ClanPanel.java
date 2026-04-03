@@ -14,35 +14,16 @@ import java.awt.image.BufferedImage;
 import java.util.*;
 import java.util.List;
 
-public class BingoPanel extends PluginPanel
+public class ClanPanel extends PluginPanel
 {
-    private static final int GRID_SIZE = 6;
-    private static final int CELL_SIZE = 32;
     private static final Font READABLE_FONT = new Font("Segoe UI", Font.PLAIN, 11);
     private static final Font READABLE_FONT_SMALL = new Font("Segoe UI", Font.PLAIN, 10);
     private static final Font READABLE_FONT_ITALIC = new Font("Segoe UI", Font.ITALIC, 10);
-
-    // ── Bingo tab components ──
-    private final JLabel teamHeader = new JLabel("No team selected");
-    private final JLabel teamPointsLabel = new JLabel("");
-    private final JLabel countdownLabel = new JLabel("No upcoming bounties");
-    private final JPanel boardGrid = new JPanel(new GridLayout(GRID_SIZE, GRID_SIZE, 1, 1));
-    private final JPanel tileDetailPanel = new JPanel();
-    private final JPanel standingsPanel = new JPanel();
-    private final JPanel playerStandingsPanel = new JPanel();
-    private final JPanel dropsPanel = new JPanel();
-    private final JLabel bingoStatusLabel = new JLabel("Waiting for board data...");
-    private final JButton refreshButton = new JButton("\u21BB");
 
     // ── Home tab components ──
     private final JLabel homeStatusLabel = new JLabel("");
     private final JPanel announcementsPanel = new JPanel();
     private final JPanel activityPanel = new JPanel();
-    private JPanel bingoNavCard;
-
-    // ── Drop search (lives in Bingo tab) ──
-    private final JPanel dropListPanel = new JPanel();
-    private final JTextField dropSearchField = new JTextField();
 
     // ── Layout ──
     private final JTabbedPane tabbedPane = new JTabbedPane();
@@ -53,7 +34,6 @@ public class BingoPanel extends PluginPanel
     private boolean connected = false;
 
     private Runnable onRefresh;
-    private BingoModels.Tile selectedTile;
 
     // ── Hiscores tab components ──
     private final JPanel hiscoresContentPanel = new JPanel();
@@ -88,14 +68,11 @@ public class BingoPanel extends PluginPanel
     private final JComboBox<String> womModeCombo = new JComboBox<>(new String[]{"XP Gained", "Total XP"});
     private java.util.function.BiConsumer<String, String> onFetchWomData;
 
-    private boolean bingoTabVisible = false;
-    private JPanel bingoTabPanel;
-
     // Dynamic clan name labels
     private JLabel notConnectedTitleLabel;
     private JLabel homeTitleLabel;
 
-    public BingoPanel()
+    public ClanPanel()
     {
         super(false);
         setLayout(new BorderLayout());
@@ -139,9 +116,6 @@ public class BingoPanel extends PluginPanel
         // Activity tab (clan joins, leaves, rank changes)
         tabbedPane.addTab("Activity", buildActivityTab());
 
-        // Bingo tab built but not added — shown when bingo is active
-        bingoTabPanel = buildBingoTab();
-
         // CardLayout to switch between not-connected and connected views
         cardContainer.add(notConnectedPanel, CARD_NOT_CONNECTED);
         cardContainer.add(tabbedPane, CARD_CONNECTED);
@@ -162,7 +136,7 @@ public class BingoPanel extends PluginPanel
         // Title
         homeTitleLabel = new JLabel("Clan");
         homeTitleLabel.setFont(homeTitleLabel.getFont().deriveFont(Font.BOLD, 22f));
-        homeTitleLabel.setForeground(SOLUS_GOLD);
+        homeTitleLabel.setForeground(ACCENT_GOLD);
         homeTitleLabel.setHorizontalAlignment(SwingConstants.CENTER);
         homeTitleLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
         homeTitleLabel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 32));
@@ -179,10 +153,6 @@ public class BingoPanel extends PluginPanel
         home.add(Box.createVerticalStrut(20));
 
         // Navigation cards — click to switch tabs by name
-        bingoNavCard = createNavCard("Bingo", "Drop logging, board, standings & bounties", SOLUS_GOLD, "Bingo");
-        bingoNavCard.setVisible(false); // Hidden until bingo is active
-        home.add(bingoNavCard);
-        home.add(Box.createVerticalStrut(8));
         home.add(createNavCard("Hiscores", "PB times & clan speed leaderboards", new Color(100, 149, 237), "Hiscores"));
         home.add(Box.createVerticalStrut(8));
         home.add(createNavCard("XP", "Clan XP leaderboards from Wise Old Man", new Color(76, 175, 80), "XP"));
@@ -195,7 +165,7 @@ public class BingoPanel extends PluginPanel
         // ── Announcements section ──
         JLabel announcementsTitle = new JLabel("Announcements");
         announcementsTitle.setFont(announcementsTitle.getFont().deriveFont(Font.BOLD, 13f));
-        announcementsTitle.setForeground(SOLUS_GOLD);
+        announcementsTitle.setForeground(ACCENT_GOLD);
         announcementsTitle.setAlignmentX(Component.LEFT_ALIGNMENT);
         home.add(announcementsTitle);
         home.add(Box.createVerticalStrut(6));
@@ -356,7 +326,7 @@ public class BingoPanel extends PluginPanel
                     JPanel card = new JPanel(new BorderLayout(8, 0));
                     card.setBackground(new Color(30, 28, 15));
                     card.setBorder(BorderFactory.createCompoundBorder(
-                        BorderFactory.createMatteBorder(0, 3, 0, 0, SOLUS_GOLD_DIM),
+                        BorderFactory.createMatteBorder(0, 3, 0, 0, ACCENT_GOLD_DIM),
                         new EmptyBorder(8, 10, 8, 10)
                     ));
                     card.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -364,7 +334,7 @@ public class BingoPanel extends PluginPanel
 
                     JLabel text = new JLabel("<html>" + msg + "</html>");
                     text.setFont(text.getFont().deriveFont(11f));
-                    text.setForeground(SOLUS_GOLD_BRIGHT);
+                    text.setForeground(ACCENT_GOLD_BRIGHT);
                     card.add(text, BorderLayout.CENTER);
 
                     announcementsPanel.add(card);
@@ -479,111 +449,10 @@ public class BingoPanel extends PluginPanel
         }
     }
 
-    /**
-     * Populate the valid drops list in the bingo tab.
-     * Map keys are lowercase item names, values are tile codes.
-     */
-    public void setDropWhitelist(Map<String, String> dropMap)
-    {
-        cachedDropMap = dropMap;
-        // Re-render with current search filter
-        String text = dropSearchField.getText();
-        if (text.equals("Search drops...")) text = "";
-        renderDropList(text.toLowerCase().trim());
-    }
-
-    private Map<String, String> cachedDropMap = Collections.emptyMap();
-
-    private void renderDropList(String filter)
-    {
-        dropListPanel.removeAll();
-
-        // Collect matching items sorted alphabetically
-        List<Map.Entry<String, String>> sorted = new ArrayList<>();
-        for (Map.Entry<String, String> entry : cachedDropMap.entrySet())
-        {
-            if (!filter.isEmpty() && !entry.getKey().contains(filter)) continue;
-            sorted.add(entry);
-        }
-        sorted.sort(Comparator.comparing(Map.Entry::getKey));
-
-        if (sorted.isEmpty())
-        {
-            JLabel noResults = new JLabel(filter.isEmpty() ? "No drops loaded" : "No matches");
-            noResults.setFont(noResults.getFont().deriveFont(11f));
-            noResults.setForeground(new Color(100, 100, 100));
-            noResults.setBorder(new EmptyBorder(8, 4, 8, 4));
-            dropListPanel.add(noResults);
-        }
-        else
-        {
-            for (Map.Entry<String, String> entry : sorted)
-            {
-                dropListPanel.add(createDropRow(entry.getKey(), entry.getValue()));
-            }
-        }
-
-        dropListPanel.revalidate();
-        dropListPanel.repaint();
-    }
-
-    // Solus gold palette
-    private static final Color SOLUS_GOLD = new Color(212, 175, 55);
-    private static final Color SOLUS_GOLD_DIM = new Color(160, 130, 40);
-    private static final Color SOLUS_GOLD_BRIGHT = new Color(245, 215, 110);
-    private static final Color ROW_BG = new Color(20, 20, 20);
-    private static final Color ROW_BG_HOVER = new Color(35, 32, 20);
-
-    private JPanel createDropRow(String itemName, String tileCode)
-    {
-        JPanel row = new JPanel(new BorderLayout());
-        row.setBackground(ROW_BG);
-        row.setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(40, 38, 25)),
-            new EmptyBorder(7, 10, 7, 10)
-        ));
-        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 34));
-
-        // Gold accent bar on the left
-        JPanel accent = new JPanel();
-        accent.setBackground(SOLUS_GOLD_DIM);
-        accent.setPreferredSize(new Dimension(3, 20));
-        row.add(accent, BorderLayout.WEST);
-
-        // Item name
-        String displayName = itemName.substring(0, 1).toUpperCase() + itemName.substring(1);
-        JLabel nameLabel = new JLabel(displayName);
-        nameLabel.setFont(nameLabel.getFont().deriveFont(Font.PLAIN, 12f));
-        nameLabel.setForeground(SOLUS_GOLD_BRIGHT);
-        nameLabel.setBorder(new EmptyBorder(0, 8, 0, 0));
-        row.add(nameLabel, BorderLayout.CENTER);
-
-        // Tile code on the right
-        JLabel tileLabel = new JLabel(tileCode);
-        tileLabel.setFont(tileLabel.getFont().deriveFont(Font.BOLD, 11f));
-        tileLabel.setForeground(SOLUS_GOLD);
-        tileLabel.setBorder(new EmptyBorder(0, 8, 0, 0));
-        row.add(tileLabel, BorderLayout.EAST);
-
-        // Hover
-        row.addMouseListener(new MouseAdapter()
-        {
-            @Override
-            public void mouseEntered(MouseEvent e)
-            {
-                row.setBackground(ROW_BG_HOVER);
-                accent.setBackground(SOLUS_GOLD);
-            }
-            @Override
-            public void mouseExited(MouseEvent e)
-            {
-                row.setBackground(ROW_BG);
-                accent.setBackground(SOLUS_GOLD_DIM);
-            }
-        });
-
-        return row;
-    }
+    // Accent palette
+    private static final Color ACCENT_GOLD = new Color(212, 175, 55);
+    private static final Color ACCENT_GOLD_DIM = new Color(160, 130, 40);
+    private static final Color ACCENT_GOLD_BRIGHT = new Color(245, 215, 110);
 
     // ══════════════════════════════════════════
     // WOM XP Tab
@@ -828,198 +697,6 @@ public class BingoPanel extends PluginPanel
 
             return label;
         }
-    }
-
-    // ══════════════════════════════════════════
-    // Bingo Tab
-    // ══════════════════════════════════════════
-
-    private JPanel buildBingoTab()
-    {
-        JPanel bingoContent = new JPanel();
-        bingoContent.setLayout(new BoxLayout(bingoContent, BoxLayout.Y_AXIS));
-        bingoContent.setBackground(ColorScheme.DARK_GRAY_COLOR);
-        bingoContent.setBorder(new EmptyBorder(6, 6, 6, 6));
-
-        // Header with refresh
-        JPanel headerPanel = new JPanel(new BorderLayout());
-        headerPanel.setBackground(ColorScheme.DARK_GRAY_COLOR);
-        headerPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
-        headerPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
-
-        JLabel bingoTitle = new JLabel("Bingo Board");
-        bingoTitle.setFont(bingoTitle.getFont().deriveFont(Font.BOLD, 12f));
-        bingoTitle.setForeground(Color.WHITE);
-        headerPanel.add(bingoTitle, BorderLayout.WEST);
-
-        refreshButton.setFont(refreshButton.getFont().deriveFont(12f));
-        refreshButton.setMargin(new Insets(0, 4, 0, 4));
-        refreshButton.setFocusPainted(false);
-        refreshButton.addActionListener(e -> { if (onRefresh != null) onRefresh.run(); });
-        headerPanel.add(refreshButton, BorderLayout.EAST);
-
-        bingoContent.add(headerPanel);
-        bingoContent.add(Box.createVerticalStrut(4));
-
-        // Team info
-        JPanel teamPanel = new JPanel(new BorderLayout());
-        teamPanel.setBackground(ColorScheme.DARK_GRAY_COLOR);
-        teamPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
-        teamPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 18));
-        teamHeader.setFont(teamHeader.getFont().deriveFont(Font.BOLD, 11f));
-        teamHeader.setForeground(new Color(76, 175, 80));
-        teamPointsLabel.setFont(teamPointsLabel.getFont().deriveFont(10f));
-        teamPointsLabel.setForeground(new Color(180, 180, 180));
-        teamPanel.add(teamHeader, BorderLayout.WEST);
-        teamPanel.add(teamPointsLabel, BorderLayout.EAST);
-        bingoContent.add(teamPanel);
-        bingoContent.add(Box.createVerticalStrut(4));
-
-        // Bounty countdown hidden — bounty system needs rework
-        // countdownLabel.setFont(countdownLabel.getFont().deriveFont(Font.BOLD, 10f));
-        // countdownLabel.setForeground(new Color(255, 165, 0));
-        // countdownLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
-        // bingoContent.add(countdownLabel);
-        // bingoContent.add(Box.createVerticalStrut(6));
-
-        // Board grid
-        boardGrid.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-        boardGrid.setBorder(BorderFactory.createLineBorder(ColorScheme.DARKER_GRAY_COLOR, 1));
-        boardGrid.setAlignmentX(Component.LEFT_ALIGNMENT);
-        int gridWidth = CELL_SIZE * GRID_SIZE + GRID_SIZE + 1;
-        boardGrid.setMaximumSize(new Dimension(gridWidth, gridWidth));
-        boardGrid.setPreferredSize(new Dimension(gridWidth, gridWidth));
-        initEmptyGrid();
-        bingoContent.add(boardGrid);
-        bingoContent.add(Box.createVerticalStrut(4));
-
-        // Tile detail
-        tileDetailPanel.setLayout(new BoxLayout(tileDetailPanel, BoxLayout.Y_AXIS));
-        tileDetailPanel.setBackground(new Color(40, 40, 40));
-        tileDetailPanel.setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createLineBorder(new Color(60, 60, 60), 1),
-            new EmptyBorder(6, 8, 6, 8)
-        ));
-        tileDetailPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
-        tileDetailPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 80));
-        tileDetailPanel.setVisible(false);
-        bingoContent.add(tileDetailPanel);
-        bingoContent.add(Box.createVerticalStrut(6));
-
-        // Scrollable standings + drops
-        JPanel scrollContent = new JPanel();
-        scrollContent.setLayout(new BoxLayout(scrollContent, BoxLayout.Y_AXIS));
-        scrollContent.setBackground(ColorScheme.DARK_GRAY_COLOR);
-
-        scrollContent.add(createSectionTitle("Standings"));
-        scrollContent.add(Box.createVerticalStrut(2));
-        standingsPanel.setLayout(new BoxLayout(standingsPanel, BoxLayout.Y_AXIS));
-        standingsPanel.setBackground(ColorScheme.DARK_GRAY_COLOR);
-        standingsPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
-        scrollContent.add(standingsPanel);
-        scrollContent.add(Box.createVerticalStrut(8));
-
-        scrollContent.add(createSectionTitle("Player Standings"));
-        scrollContent.add(Box.createVerticalStrut(2));
-        playerStandingsPanel.setLayout(new BoxLayout(playerStandingsPanel, BoxLayout.Y_AXIS));
-        playerStandingsPanel.setBackground(ColorScheme.DARK_GRAY_COLOR);
-        playerStandingsPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
-        scrollContent.add(playerStandingsPanel);
-        scrollContent.add(Box.createVerticalStrut(8));
-
-        // ── Search valid drops ──
-        dropSearchField.setBackground(new Color(25, 25, 25));
-        dropSearchField.setForeground(SOLUS_GOLD);
-        dropSearchField.setCaretColor(SOLUS_GOLD);
-        dropSearchField.setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createLineBorder(new Color(80, 65, 20), 1),
-            new EmptyBorder(5, 8, 5, 8)
-        ));
-        dropSearchField.setFont(dropSearchField.getFont().deriveFont(11f));
-        dropSearchField.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
-        dropSearchField.setAlignmentX(Component.LEFT_ALIGNMENT);
-        dropSearchField.setToolTipText("Search valid bingo drops...");
-        dropSearchField.setText("Search valid drops...");
-        dropSearchField.setForeground(new Color(100, 100, 100));
-        dropSearchField.addFocusListener(new java.awt.event.FocusAdapter()
-        {
-            @Override
-            public void focusGained(java.awt.event.FocusEvent e)
-            {
-                if (dropSearchField.getText().equals("Search valid drops..."))
-                {
-                    dropSearchField.setText("");
-                    dropSearchField.setForeground(Color.WHITE);
-                }
-            }
-            @Override
-            public void focusLost(java.awt.event.FocusEvent e)
-            {
-                if (dropSearchField.getText().isEmpty())
-                {
-                    dropSearchField.setText("Search valid drops...");
-                    dropSearchField.setForeground(new Color(100, 100, 100));
-                }
-            }
-        });
-
-        // Drop search results (hidden by default, shown when typing)
-        dropListPanel.setLayout(new BoxLayout(dropListPanel, BoxLayout.Y_AXIS));
-        dropListPanel.setBackground(ColorScheme.DARK_GRAY_COLOR);
-        dropListPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
-        dropListPanel.setVisible(false);
-
-        // Wire up live search — show/hide results based on input
-        dropSearchField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener()
-        {
-            private void filter()
-            {
-                String text = dropSearchField.getText();
-                if (text.equals("Search valid drops...")) text = "";
-                String query = text.toLowerCase().trim();
-                boolean hasQuery = !query.isEmpty();
-                dropListPanel.setVisible(hasQuery);
-                dropsPanel.setVisible(!hasQuery);
-                if (hasQuery)
-                {
-                    renderDropList(query);
-                }
-            }
-            @Override public void insertUpdate(javax.swing.event.DocumentEvent e) { filter(); }
-            @Override public void removeUpdate(javax.swing.event.DocumentEvent e) { filter(); }
-            @Override public void changedUpdate(javax.swing.event.DocumentEvent e) { filter(); }
-        });
-
-        scrollContent.add(dropSearchField);
-        scrollContent.add(Box.createVerticalStrut(4));
-
-        // Drop search results panel
-        scrollContent.add(dropListPanel);
-
-        // Recent drops (shown by default, hidden when searching)
-        scrollContent.add(createSectionTitle("Recent Drops"));
-        scrollContent.add(Box.createVerticalStrut(2));
-        dropsPanel.setLayout(new BoxLayout(dropsPanel, BoxLayout.Y_AXIS));
-        dropsPanel.setBackground(ColorScheme.DARK_GRAY_COLOR);
-        dropsPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
-        scrollContent.add(dropsPanel);
-
-        JScrollPane scrollPane = new JScrollPane(scrollContent);
-        scrollPane.setBorder(null);
-        scrollPane.setBackground(ColorScheme.DARK_GRAY_COLOR);
-        scrollPane.getViewport().setBackground(ColorScheme.DARK_GRAY_COLOR);
-        scrollPane.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
-        scrollPane.setAlignmentX(Component.LEFT_ALIGNMENT);
-        bingoContent.add(scrollPane);
-
-        // Status
-        bingoContent.add(Box.createVerticalStrut(4));
-        bingoStatusLabel.setFont(bingoStatusLabel.getFont().deriveFont(11f));
-        bingoStatusLabel.setForeground(new Color(140, 140, 140));
-        bingoStatusLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
-        bingoContent.add(bingoStatusLabel);
-
-        return bingoContent;
     }
 
     // ══════════════════════════════════════════
@@ -2264,237 +1941,13 @@ public class BingoPanel extends PluginPanel
         });
     }
 
-    /**
-     * Show the Bingo tab when bingo is active.
-     * Inserts it after Home (index 1), before Hiscores.
-     */
-    public void showBingoTab()
-    {
-        SwingUtilities.invokeLater(() ->
-        {
-            if (bingoTabVisible) return;
-            bingoTabVisible = true;
-            // Insert at index 1 (after Home, before Hiscores)
-            tabbedPane.insertTab("Bingo", null, bingoTabPanel, null, 1);
-            bingoNavCard.setVisible(true);
-            revalidate();
-            repaint();
-        });
-    }
-
-    public void hideBingoTab()
-    {
-        SwingUtilities.invokeLater(() ->
-        {
-            if (!bingoTabVisible) return;
-            int idx = tabbedPane.indexOfTab("Bingo");
-            if (idx >= 0) tabbedPane.removeTabAt(idx);
-            bingoTabVisible = false;
-            bingoNavCard.setVisible(false);
-            revalidate();
-            repaint();
-        });
-    }
-
-    public boolean isBingoTabVisible()
-    {
-        return bingoTabVisible;
-    }
-
     // ══════════════════════════════════════════
     // Public API
     // ══════════════════════════════════════════
 
-    public void setTeamInfo(String teamCode, String teamName)
-    {
-        SwingUtilities.invokeLater(() ->
-        {
-            if (teamCode == null || teamCode.isEmpty())
-            {
-                teamHeader.setText("No team selected");
-                teamHeader.setForeground(Color.GRAY);
-            }
-            else
-            {
-                teamHeader.setText(teamCode + " \u2014 " + teamName);
-                teamHeader.setForeground(new Color(76, 175, 80));
-            }
-        });
-    }
-
-    public void updateBoard(BingoModels.BoardData data, String myTeamCode, String myPlayerName)
-    {
-        SwingUtilities.invokeLater(() ->
-        {
-            // Team points
-            if (data.getTeamTotalPoints() > 0)
-            {
-                teamPointsLabel.setText(String.format("%.1f pts", data.getTeamTotalPoints()));
-            }
-
-            // Grid
-            boardGrid.removeAll();
-            List<BingoModels.Tile> tiles = data.getTiles();
-
-            if (tiles.isEmpty())
-            {
-                initEmptyGrid();
-            }
-            else
-            {
-                JPanel[][] cells = new JPanel[GRID_SIZE][GRID_SIZE];
-                for (int r = 0; r < GRID_SIZE; r++)
-                    for (int c = 0; c < GRID_SIZE; c++)
-                        cells[r][c] = createEmptyCell();
-
-                for (BingoModels.Tile tile : tiles)
-                {
-                    int r = tile.getRow();
-                    int c = tile.getCol();
-                    if (r >= 0 && r < GRID_SIZE && c >= 0 && c < GRID_SIZE)
-                    {
-                        cells[r][c] = createTileCell(tile);
-                    }
-                }
-
-                for (int r = 0; r < GRID_SIZE; r++)
-                    for (int c = 0; c < GRID_SIZE; c++)
-                        boardGrid.add(cells[r][c]);
-            }
-
-            // Standings
-            standingsPanel.removeAll();
-            for (BingoModels.Team team : data.getTeams())
-            {
-                JPanel row = new JPanel(new BorderLayout());
-                row.setBackground(ColorScheme.DARK_GRAY_COLOR);
-                row.setAlignmentX(Component.LEFT_ALIGNMENT);
-                row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 16));
-
-                boolean isMyTeam = myTeamCode != null && !myTeamCode.isEmpty()
-                    && team.getCode().equalsIgnoreCase(myTeamCode);
-
-                JLabel rankName = new JLabel(String.format("#%d %s", team.getRank(), team.getName()));
-                rankName.setFont(rankName.getFont().deriveFont(isMyTeam ? Font.BOLD : Font.PLAIN, 10f));
-                rankName.setForeground(isMyTeam ? new Color(76, 175, 80) : new Color(200, 200, 200));
-
-                JLabel pts = new JLabel(String.format("%.0f", team.getPoints()));
-                pts.setFont(pts.getFont().deriveFont(10f));
-                pts.setForeground(isMyTeam ? new Color(76, 175, 80) : new Color(150, 150, 150));
-
-                row.add(rankName, BorderLayout.WEST);
-                row.add(pts, BorderLayout.EAST);
-                standingsPanel.add(row);
-            }
-
-            // Player standings
-            playerStandingsPanel.removeAll();
-            List<BingoModels.TeamDrop> allDrops = data.getTeamDrops();
-            if (!allDrops.isEmpty())
-            {
-                Map<String, Double> playerPoints = new LinkedHashMap<>();
-                for (BingoModels.TeamDrop drop : allDrops)
-                {
-                    String rsn = drop.getRsn();
-                    if (rsn != null && !rsn.isEmpty())
-                    {
-                        playerPoints.merge(rsn, drop.getPoints(), Double::sum);
-                    }
-                }
-
-                List<Map.Entry<String, Double>> sorted = new ArrayList<>(playerPoints.entrySet());
-                sorted.sort((a, b) -> Double.compare(b.getValue(), a.getValue()));
-
-                int rank = 1;
-                for (Map.Entry<String, Double> entry : sorted)
-                {
-                    boolean isMe = myPlayerName != null
-                        && entry.getKey().equalsIgnoreCase(myPlayerName);
-
-                    JPanel pRow = new JPanel(new BorderLayout());
-                    pRow.setBackground(ColorScheme.DARK_GRAY_COLOR);
-                    pRow.setAlignmentX(Component.LEFT_ALIGNMENT);
-                    pRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 16));
-
-                    JLabel pName = new JLabel(String.format("#%d %s", rank, truncate(entry.getKey(), 14)));
-                    pName.setFont(pName.getFont().deriveFont(isMe ? Font.BOLD : Font.PLAIN, 10f));
-                    pName.setForeground(isMe ? new Color(76, 175, 80) : new Color(200, 200, 200));
-
-                    JLabel pPts = new JLabel(String.format("%.1f", entry.getValue()));
-                    pPts.setFont(pPts.getFont().deriveFont(10f));
-                    pPts.setForeground(isMe ? new Color(76, 175, 80) : new Color(150, 150, 150));
-
-                    pRow.add(pName, BorderLayout.WEST);
-                    pRow.add(pPts, BorderLayout.EAST);
-                    playerStandingsPanel.add(pRow);
-                    rank++;
-                }
-            }
-            else
-            {
-                JLabel none = new JLabel("No player data");
-                none.setFont(none.getFont().deriveFont(10f));
-                none.setForeground(Color.GRAY);
-                none.setAlignmentX(Component.LEFT_ALIGNMENT);
-                playerStandingsPanel.add(none);
-            }
-
-            // Recent drops
-            dropsPanel.removeAll();
-            List<BingoModels.TeamDrop> drops = data.getTeamDrops();
-            if (drops.isEmpty())
-            {
-                JLabel none = new JLabel("No drops yet");
-                none.setFont(none.getFont().deriveFont(10f));
-                none.setForeground(Color.GRAY);
-                none.setAlignmentX(Component.LEFT_ALIGNMENT);
-                dropsPanel.add(none);
-            }
-            else
-            {
-                int limit = Math.min(drops.size(), 15);
-                for (int i = drops.size() - 1; i >= Math.max(0, drops.size() - limit); i--)
-                {
-                    BingoModels.TeamDrop drop = drops.get(i);
-                    JPanel row = new JPanel(new BorderLayout(2, 0));
-                    row.setBackground(ColorScheme.DARK_GRAY_COLOR);
-                    row.setAlignmentX(Component.LEFT_ALIGNMENT);
-                    row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
-                    row.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(50, 50, 50)));
-
-                    JLabel item = new JLabel(
-                        String.format("<html><b style='color:white'>%s</b> <span style='color:gray'>%s</span></html>",
-                            truncate(drop.getDropName(), 18), truncate(drop.getRsn(), 10)));
-                    item.setFont(item.getFont().deriveFont(9f));
-
-                    JLabel ptLabel = new JLabel(
-                        String.format("<html><span style='color:#4CAF50'>+%.1f</span></html>", drop.getPoints()));
-                    ptLabel.setFont(ptLabel.getFont().deriveFont(9f));
-
-                    row.add(item, BorderLayout.CENTER);
-                    row.add(ptLabel, BorderLayout.EAST);
-                    dropsPanel.add(row);
-                }
-            }
-
-            bingoStatusLabel.setText("Updated just now");
-            revalidate();
-            repaint();
-        });
-    }
-
-    public void updateCountdown(String text)
-    {
-        SwingUtilities.invokeLater(() -> countdownLabel.setText(text));
-    }
-
     public void setStatus(String text)
     {
-        SwingUtilities.invokeLater(() ->
-        {
-            bingoStatusLabel.setText(text);
-            homeStatusLabel.setText(text);
-        });
+        SwingUtilities.invokeLater(() -> homeStatusLabel.setText(text));
     }
 
     public void setConnected(boolean isConnected)
@@ -2524,136 +1977,6 @@ public class BingoPanel extends PluginPanel
     // ══════════════════════════════════════════
     // Private helpers
     // ══════════════════════════════════════════
-
-    private void showTileDetail(BingoModels.Tile tile)
-    {
-        selectedTile = tile;
-        tileDetailPanel.removeAll();
-
-        JLabel name = new JLabel(tile.getTask());
-        name.setFont(name.getFont().deriveFont(Font.BOLD, 11f));
-        name.setForeground(Color.WHITE);
-        name.setAlignmentX(Component.LEFT_ALIGNMENT);
-        tileDetailPanel.add(name);
-
-        JProgressBar bar = new JProgressBar(0, 100);
-        bar.setValue(Math.min(100, (int) tile.getCompletionPercent()));
-        bar.setStringPainted(true);
-        bar.setString(String.format("%.1f%%", tile.getCompletionPercent()));
-        bar.setFont(bar.getFont().deriveFont(9f));
-        bar.setAlignmentX(Component.LEFT_ALIGNMENT);
-        bar.setMaximumSize(new Dimension(Integer.MAX_VALUE, 14));
-        bar.setForeground(tile.getTileColor());
-        bar.setBackground(new Color(60, 60, 60));
-        tileDetailPanel.add(Box.createVerticalStrut(3));
-        tileDetailPanel.add(bar);
-
-        JLabel info = new JLabel(String.format("%.1f / %.1f pts (Bingo: %.1f)",
-            tile.getPoints(),
-            tile.getMaxThreshold(),
-            tile.getBingoThreshold()));
-        info.setFont(info.getFont().deriveFont(9f));
-        info.setForeground(new Color(180, 180, 180));
-        info.setAlignmentX(Component.LEFT_ALIGNMENT);
-        tileDetailPanel.add(Box.createVerticalStrut(2));
-        tileDetailPanel.add(info);
-
-        JLabel close = new JLabel("Click tile again to close");
-        close.setFont(close.getFont().deriveFont(Font.ITALIC, 8f));
-        close.setForeground(new Color(100, 100, 100));
-        close.setAlignmentX(Component.LEFT_ALIGNMENT);
-        tileDetailPanel.add(Box.createVerticalStrut(2));
-        tileDetailPanel.add(close);
-
-        tileDetailPanel.setVisible(true);
-        tileDetailPanel.revalidate();
-        tileDetailPanel.repaint();
-    }
-
-    private void hideTileDetail()
-    {
-        selectedTile = null;
-        tileDetailPanel.setVisible(false);
-        tileDetailPanel.revalidate();
-    }
-
-    private JLabel createSectionTitle(String text)
-    {
-        JLabel label = new JLabel(text);
-        label.setFont(label.getFont().deriveFont(Font.BOLD, 10f));
-        label.setForeground(new Color(180, 180, 180));
-        label.setAlignmentX(Component.LEFT_ALIGNMENT);
-        return label;
-    }
-
-    private void initEmptyGrid()
-    {
-        boardGrid.removeAll();
-        for (int row = 0; row < GRID_SIZE; row++)
-        {
-            for (int col = 0; col < GRID_SIZE; col++)
-            {
-                boardGrid.add(createEmptyCell());
-            }
-        }
-    }
-
-    private JPanel createTileCell(BingoModels.Tile tile)
-    {
-        String code = String.valueOf((char) ('A' + tile.getCol())) + (tile.getRow() + 1);
-
-        JPanel cell = new JPanel(new BorderLayout());
-        cell.setBackground(tile.getTileColor());
-        cell.setPreferredSize(new Dimension(CELL_SIZE, CELL_SIZE));
-        cell.setBorder(BorderFactory.createLineBorder(ColorScheme.DARKER_GRAY_COLOR, 1));
-        cell.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-
-        JLabel label = new JLabel(code, SwingConstants.CENTER);
-        label.setFont(label.getFont().deriveFont(Font.BOLD, 8f));
-        label.setForeground(tile.getTextColor());
-        cell.add(label, BorderLayout.CENTER);
-
-        cell.setToolTipText(String.format("%s — %.1f%%", tile.getTask(), tile.getCompletionPercent()));
-
-        cell.addMouseListener(new MouseAdapter()
-        {
-            @Override
-            public void mouseClicked(MouseEvent e)
-            {
-                if (selectedTile != null && selectedTile == tile)
-                {
-                    hideTileDetail();
-                }
-                else
-                {
-                    showTileDetail(tile);
-                }
-            }
-
-            @Override
-            public void mouseEntered(MouseEvent e)
-            {
-                cell.setBorder(BorderFactory.createLineBorder(Color.WHITE, 1));
-            }
-
-            @Override
-            public void mouseExited(MouseEvent e)
-            {
-                cell.setBorder(BorderFactory.createLineBorder(ColorScheme.DARKER_GRAY_COLOR, 1));
-            }
-        });
-
-        return cell;
-    }
-
-    private JPanel createEmptyCell()
-    {
-        JPanel cell = new JPanel();
-        cell.setBackground(new Color(60, 60, 60));
-        cell.setPreferredSize(new Dimension(CELL_SIZE, CELL_SIZE));
-        cell.setBorder(BorderFactory.createLineBorder(ColorScheme.DARKER_GRAY_COLOR, 1));
-        return cell;
-    }
 
     private static String truncate(String text, int maxLen)
     {
