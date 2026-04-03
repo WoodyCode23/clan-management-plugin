@@ -102,6 +102,9 @@ public class DropLoggerPlugin extends Plugin
     @Inject
     private DrawManager drawManager;
 
+    @Inject
+    private Gson gson;
+
     private ClanPanel panel;
     private AdminPanel adminPanel;
     private NavigationButton navButton;
@@ -1041,7 +1044,7 @@ public class DropLoggerPlugin extends Plugin
                 net.runelite.client.RuneLite.RUNELITE_DIR, "clan-whitelist-cache.json");
             java.util.Map<String, Object> cacheData = new java.util.LinkedHashMap<>();
             cacheData.put("whitelist", cachedClanWhitelist);
-            String json = new Gson().toJson(cacheData);
+            String json = gson.toJson(cacheData);
             java.nio.file.Files.write(cacheFile.toPath(), json.getBytes(java.nio.charset.StandardCharsets.UTF_8));
         }
         catch (Exception e)
@@ -1122,7 +1125,7 @@ public class DropLoggerPlugin extends Plugin
             File cacheFile = getHiscoreCacheFile();
             try (FileWriter writer = new FileWriter(cacheFile))
             {
-                new Gson().toJson(toSave, writer);
+                gson.toJson(toSave, writer);
             }
         }
         catch (Exception e)
@@ -1141,7 +1144,7 @@ public class DropLoggerPlugin extends Plugin
             Type type = new TypeToken<LinkedHashMap<String, List<Map<String, Object>>>>(){}.getType();
             try (FileReader reader = new FileReader(cacheFile))
             {
-                Map<String, List<Map<String, Object>>> raw = new Gson().fromJson(reader, type);
+                Map<String, List<Map<String, Object>>> raw = gson.fromJson(reader, type);
                 if (raw == null) return;
 
                 for (Map.Entry<String, List<Map<String, Object>>> entry : raw.entrySet())
@@ -1183,7 +1186,7 @@ public class DropLoggerPlugin extends Plugin
             File cacheFile = new File(new File(System.getProperty("user.home"), ".runelite"), DROPS_CACHE_FILE);
             try (FileWriter writer = new FileWriter(cacheFile))
             {
-                new Gson().toJson(cache, writer);
+                gson.toJson(cache, writer);
             }
         }
         catch (Exception e)
@@ -1203,7 +1206,7 @@ public class DropLoggerPlugin extends Plugin
             Type type = new TypeToken<LinkedHashMap<String, Object>>(){}.getType();
             try (FileReader reader = new FileReader(cacheFile))
             {
-                Map<String, Object> cache = new Gson().fromJson(reader, type);
+                Map<String, Object> cache = gson.fromJson(reader, type);
                 if (cache == null) return;
 
                 if (cache.containsKey("leaderboard"))
