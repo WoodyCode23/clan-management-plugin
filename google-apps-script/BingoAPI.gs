@@ -769,26 +769,6 @@ function handleAdminUpdateBounty_(data) {
   return { status: "error", message: "Bounty #" + number + " not found" };
 }
 
-function handleAdminAddBounty_(data) {
-  var number = parseInt(data.number);
-  if (!number) return { status: "error", message: "Missing bounty number" };
-
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Bounties");
-  if (!sheet) return { status: "error", message: "Bounties sheet not found" };
-
-  var newRow = sheet.getLastRow() + 1;
-  sheet.getRange(newRow, 1, 1, 7).setValues([[
-    number,
-    data.description || "",
-    data.releaseTime || "",
-    data.points || 0,
-    "",
-    "FALSE",
-    "FALSE"
-  ]]);
-  return { status: "ok", message: "Bounty #" + number + " added" };
-}
-
 function handleHostAddBounty_(data) {
   var number = parseInt(data.number);
   if (!number) return { status: "error", message: "Missing bounty number" };
