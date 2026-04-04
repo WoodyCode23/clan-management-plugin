@@ -867,7 +867,8 @@ public class ClanManagementPlugin extends Plugin
         // Configure service if not already
         if (!bingoService.isConfigured()) {
             bingoService.configure(bingoUrl, bingoKey,
-                config.adminApiKey() != null ? config.adminApiKey() : "");
+                config.bingoAdminKey() != null ? config.bingoAdminKey() : "",
+                config.bingoHostKey() != null ? config.bingoHostKey() : "");
         }
 
         try
