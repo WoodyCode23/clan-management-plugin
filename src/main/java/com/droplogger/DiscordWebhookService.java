@@ -259,6 +259,167 @@ public class DiscordWebhookService
         sendEmbed(webhookUrl, embed);
     }
 
+    public void postBingoEventStart(String webhookUrl, String eventName, int gridRows, int gridCols,
+                                     java.util.List<BingoTeam> teams, String endDate)
+    {
+        if (!isValidWebhookUrl(webhookUrl)) return;
+
+        JsonObject embed = new JsonObject();
+        embed.addProperty("title", eventName + " Has Begun!");
+        embed.addProperty("color", 0x2ECC71);
+
+        StringBuilder desc = new StringBuilder();
+        desc.append("**Grid:** ").append(gridRows).append("x").append(gridCols).append("\n");
+        desc.append("**Teams:** ");
+        for (int i = 0; i < teams.size(); i++)
+        {
+            if (i > 0) desc.append(", ");
+            desc.append(teams.get(i).getName());
+        }
+        desc.append("\n**Ends:** ").append(endDate.replace("T", " ")).append(" ET");
+        embed.addProperty("description", desc.toString());
+
+        JsonObject footer = new JsonObject();
+        footer.addProperty("text", clanName + " Bingo");
+        embed.add("footer", footer);
+
+        sendEmbed(webhookUrl, embed);
+    }
+
+    public void postBingoEventEnd(String webhookUrl, String eventName, BingoStandings standings)
+    {
+        if (!isValidWebhookUrl(webhookUrl)) return;
+
+        JsonObject embed = new JsonObject();
+        embed.addProperty("title", eventName + " — Final Results!");
+        embed.addProperty("color", 0xFFD700);
+
+        StringBuilder desc = new StringBuilder();
+        desc.append("**Team Standings:**\n");
+        if (standings.getTeamStandings() != null)
+        {
+            String[] medals = {"\uD83E\uDD47", "\uD83E\uDD48", "\uD83E\uDD49"};
+            int shown = Math.min(3, standings.getTeamStandings().size());
+            for (int i = 0; i < shown; i++)
+            {
+                BingoTeam t = standings.getTeamStandings().get(i);
+                String medal = i < medals.length ? medals[i] : "#" + (i + 1);
+                desc.append(medal).append(" **").append(t.getName()).append("** — ");
+                desc.append(GP_FORMAT.format(t.getTotalPoints())).append(" pts\n");
+            }
+        }
+        desc.append("\n**Top Players:**\n");
+        if (standings.getIndividualStandings() != null)
+        {
+            String[] medals = {"\uD83E\uDD47", "\uD83E\uDD48", "\uD83E\uDD49"};
+            int shown = Math.min(3, standings.getIndividualStandings().size());
+            for (int i = 0; i < shown; i++)
+            {
+                BingoStandings.PlayerStanding p = standings.getIndividualStandings().get(i);
+                String medal = i < medals.length ? medals[i] : "#" + (i + 1);
+                desc.append(medal).append(" **").append(p.getRsn()).append("** — ");
+                desc.append(GP_FORMAT.format(p.getPoints())).append(" pts\n");
+            }
+        }
+        embed.addProperty("description", desc.toString());
+
+        JsonObject footer = new JsonObject();
+        footer.addProperty("text", clanName + " Bingo");
+        embed.add("footer", footer);
+
+        sendEmbed(webhookUrl, embed);
+    }
+
+    public void postBingoDrop(String webhookUrl, String player, String item, String team,
+                               String tileCode, double points)
+    {
+        if (!isValidWebhookUrl(webhookUrl)) return;
+
+        JsonObject embed = new JsonObject();
+        embed.addProperty("title", "Bingo Drop!");
+        embed.addProperty("color", 0xFFD700);
+
+        StringBuilder desc = new StringBuilder();
+        desc.append("**Item:** ").append(item).append("\n");
+        desc.append("**Player:** ").append(player).append("\n");
+        desc.append("**Team:** ").append(team).append("\n");
+        desc.append("**Tile:** ").append(tileCode).append("\n");
+        desc.append("**Points:** +").append(GP_FORMAT.format(points));
+        embed.addProperty("description", desc.toString());
+
+        JsonObject footer = new JsonObject();
+        footer.addProperty("text", clanName + " Bingo");
+        embed.add("footer", footer);
+
+        sendEmbed(webhookUrl, embed);
+    }
+
+    public void postBountyHint(String webhookUrl, BingoBounty bounty, int minutesBefore)
+    {
+        if (!isValidWebhookUrl(webhookUrl)) return;
+
+        JsonObject embed = new JsonObject();
+        embed.addProperty("title", "Bounty #" + bounty.getNumber() + " — Hint!");
+        embed.addProperty("color", 0xF1C40F);
+        embed.addProperty("description", "Releasing in ~" + minutesBefore + " minutes!");
+
+        JsonObject footer = new JsonObject();
+        footer.addProperty("text", clanName + " Bingo");
+        embed.add("footer", footer);
+
+        sendEmbed(webhookUrl, embed);
+    }
+
+    public void postBountyLive(String webhookUrl, BingoBounty bounty)
+    {
+        if (!isValidWebhookUrl(webhookUrl)) return;
+
+        JsonObject embed = new JsonObject();
+        embed.addProperty("title", "Bounty #" + bounty.getNumber() + " is NOW LIVE!");
+        embed.addProperty("color", 0xE74C3C);
+        embed.addProperty("description", bounty.getDescription() +
+            "\n**Reward:** " + GP_FORMAT.format(bounty.getPoints()) + " bonus points");
+
+        JsonObject footer = new JsonObject();
+        footer.addProperty("text", clanName + " Bingo");
+        embed.add("footer", footer);
+
+        sendEmbed(webhookUrl, embed);
+    }
+
+    public void postBountyWinner(String webhookUrl, BingoBounty bounty, String winner)
+    {
+        if (!isValidWebhookUrl(webhookUrl)) return;
+
+        JsonObject embed = new JsonObject();
+        embed.addProperty("title", "Bounty #" + bounty.getNumber() + " — Winner!");
+        embed.addProperty("color", 0xFFD700);
+        embed.addProperty("description", "**" + bounty.getDescription() + "**\n\n" +
+            "Won by **" + winner + "**\n+" + GP_FORMAT.format(bounty.getPoints()) + " bonus points!");
+
+        JsonObject footer = new JsonObject();
+        footer.addProperty("text", clanName + " Bingo");
+        embed.add("footer", footer);
+
+        sendEmbed(webhookUrl, embed);
+    }
+
+    public void postTileCompleted(String webhookUrl, String teamName, String tileCode, String tileName)
+    {
+        if (!isValidWebhookUrl(webhookUrl)) return;
+
+        JsonObject embed = new JsonObject();
+        embed.addProperty("title", "Tile Completed!");
+        embed.addProperty("color", 0x2ECC71);
+        embed.addProperty("description", "**" + teamName + "** completed " + tileCode + ": " + tileName + "!");
+
+        JsonObject footer = new JsonObject();
+        footer.addProperty("text", clanName + " Bingo");
+        embed.add("footer", footer);
+
+        sendEmbed(webhookUrl, embed);
+    }
+
     private boolean isValidWebhookUrl(String url)
     {
         if (url == null || url.isEmpty())
