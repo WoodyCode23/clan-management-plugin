@@ -153,4 +153,33 @@ public interface ClanManagementConfig extends Config
         secret = true
     )
     default String adminApiKey() { return ""; }
+
+    // ── Bingo ──
+
+    @ConfigSection(
+        name = "Bingo",
+        description = "Bingo event settings (requires separate bingo sheet)",
+        position = 7
+    )
+    String bingoSection = "bingo";
+
+    @ConfigItem(
+        keyName = "bingoApiUrl",
+        name = "Bingo API URL",
+        description = "Google Apps Script deployment URL for your bingo sheet (leave blank if no event)",
+        section = bingoSection,
+        position = 0,
+        secret = true
+    )
+    default String bingoApiUrl() { return ""; }
+
+    @ConfigItem(
+        keyName = "bingoApiKey",
+        name = "Bingo API Key",
+        description = "API key for the bingo sheet",
+        section = bingoSection,
+        position = 1,
+        secret = true
+    )
+    default String bingoApiKey() { return ""; }
 }
