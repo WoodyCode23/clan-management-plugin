@@ -876,6 +876,7 @@ function setupSettingsTab() {
     ["adminKey", "changeme-admin"],
     ["clanName", ""],
     ["discordWebhookUrl", ""],
+    ["womGroupId", ""],
     ["announcement", ""]
   ];
 
@@ -924,6 +925,7 @@ function getPluginConfig() {
   return {
     clanName: settings["clanName"] || "",
     discordWebhookUrl: settings["discordWebhookUrl"] || "",
+    womGroupId: settings["womGroupId"] || "",
     announcement: settings["announcement"] || ""
   };
 }
@@ -960,7 +962,7 @@ function adminSaveSettings(payload) {
       }
     }
 
-    var knownKeys = ["clanName", "discordWebhookUrl", "announcement"];
+    var knownKeys = ["clanName", "discordWebhookUrl", "womGroupId", "announcement"];
     var settingsToSave = {};
     for (var k = 0; k < knownKeys.length; k++) {
       var key = knownKeys[k];

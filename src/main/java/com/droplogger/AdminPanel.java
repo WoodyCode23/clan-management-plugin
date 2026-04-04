@@ -19,6 +19,7 @@ public class AdminPanel extends JPanel
     // ── Shared Settings ──
     private final JTextField clanNameField = new JTextField();
     private final JTextField webhookField = new JTextField();
+    private final JTextField womGroupIdField = new JTextField();
     private final JTextArea announcementArea = new JTextArea(3, 20);
 
     // ── Rotate API Key ──
@@ -66,6 +67,14 @@ public class AdminPanel extends JPanel
         add(webhookField);
         add(Box.createVerticalStrut(4));
 
+        add(createFieldLabel("WOM Group ID"));
+        womGroupIdField.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
+        womGroupIdField.setFont(SMALL_FONT);
+        womGroupIdField.setAlignmentX(Component.LEFT_ALIGNMENT);
+        womGroupIdField.setToolTipText("Wise Old Man group ID for XP tracking (found in your WOM group URL)");
+        add(womGroupIdField);
+        add(Box.createVerticalStrut(4));
+
         add(createFieldLabel("Announcement (visible to all members)"));
         announcementArea.setFont(SMALL_FONT);
         announcementArea.setLineWrap(true);
@@ -92,10 +101,11 @@ public class AdminPanel extends JPanel
         saveSettingsBtn.addActionListener(e -> {
             String clanNameVal = clanNameField.getText().trim();
             String webhook = webhookField.getText().trim();
+            String womId = womGroupIdField.getText().trim();
             String announcement = announcementArea.getText().trim();
             if (onSaveSettings != null)
             {
-                onSaveSettings.accept(new String[]{clanNameVal, webhook, announcement});
+                onSaveSettings.accept(new String[]{clanNameVal, webhook, womId, announcement});
             }
         });
 
@@ -272,6 +282,11 @@ public class AdminPanel extends JPanel
     public void setWebhookUrl(String url)
     {
         SwingUtilities.invokeLater(() -> webhookField.setText(url != null ? url : ""));
+    }
+
+    public void setWomGroupId(String id)
+    {
+        SwingUtilities.invokeLater(() -> womGroupIdField.setText(id != null ? id : ""));
     }
 
     public void setAnnouncement(String text)

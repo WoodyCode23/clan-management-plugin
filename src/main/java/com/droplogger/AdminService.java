@@ -101,12 +101,13 @@ public class AdminService
 
     public String saveSharedSettings(String apiUrl, String apiKey, String adminKey,
                                       String clanName, String discordWebhookUrl,
-                                      String announcement) throws IOException
+                                      String womGroupId, String announcement) throws IOException
     {
         JsonObject payload = new JsonObject();
         payload.addProperty("action", "adminSaveSettings");
         payload.addProperty("clanName", clanName);
         payload.addProperty("discordWebhookUrl", discordWebhookUrl);
+        payload.addProperty("womGroupId", womGroupId);
         payload.addProperty("announcement", announcement);
         return adminPost(apiUrl, apiKey, adminKey, payload);
     }

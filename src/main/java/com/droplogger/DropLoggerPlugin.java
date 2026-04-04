@@ -754,6 +754,14 @@ public class DropLoggerPlugin extends Plugin
                 panel.setClanName(getClanName());
                 discordService.setClanName(getClanName());
 
+                // Set WOM group ID from server config
+                String womId = serverConfig.getOrDefault("womGroupId", "");
+                if (!womId.isEmpty())
+                {
+                    try { womService.setGroupId(Integer.parseInt(womId)); }
+                    catch (NumberFormatException ignored) {}
+                }
+
                 // Show announcement on home tab
                 String announcement = serverConfig.getOrDefault("announcement", "");
                 if (!announcement.isEmpty())
@@ -1252,6 +1260,7 @@ public class DropLoggerPlugin extends Plugin
                 var settings = adminService.getSharedSettings(clanApiUrl, apiKey, adminKey);
                 adminPanel.setClanName(settings.getOrDefault("clanName", ""));
                 adminPanel.setWebhookUrl(settings.getOrDefault("discordWebhookUrl", ""));
+                adminPanel.setWomGroupId(settings.getOrDefault("womGroupId", ""));
                 adminPanel.setAnnouncement(settings.getOrDefault("announcement", ""));
                 adminPanel.setStatus("Settings loaded");
             }
@@ -1267,8 +1276,8 @@ public class DropLoggerPlugin extends Plugin
             {
                 adminPanel.setStatus("Saving...");
                 adminService.saveSharedSettings(clanApiUrl, apiKey, adminKey,
-                    args[0], args[1],
-                    args.length > 2 ? args[2] : "");
+                    args[0], args[1], args.length > 2 ? args[2] : "",
+                    args.length > 3 ? args[3] : "");
                 adminPanel.setStatus("Settings saved");
                 // Refresh local cached config
                 serverConfigLoaded = false;

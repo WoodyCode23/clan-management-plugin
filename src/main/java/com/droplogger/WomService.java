@@ -25,7 +25,7 @@ import java.util.concurrent.TimeUnit;
 public class WomService
 {
     private static final String WOM_API_BASE = "https://api.wiseoldman.net/v2";
-    private static final int GROUP_ID = 4983;
+    private int groupId = -1;
 
     private final OkHttpClient httpClient;
 
@@ -48,6 +48,24 @@ public class WomService
             .build();
     }
 
+    public void setGroupId(int groupId)
+    {
+        this.groupId = groupId;
+        // Clear caches when group changes
+        this.roleCache.clear();
+        this.roleCacheTime = 0;
+    }
+
+    public int getGroupId()
+    {
+        return groupId;
+    }
+
+    public boolean isConfigured()
+    {
+        return groupId > 0;
+    }
+
     /**
      * Fetch group member roles (cached for 30 min).
      */
@@ -59,7 +77,7 @@ public class WomService
             return roleCache;
         }
 
-        HttpUrl url = HttpUrl.parse(WOM_API_BASE + "/groups/" + GROUP_ID).newBuilder().build();
+        HttpUrl url = HttpUrl.parse(WOM_API_BASE + "/groups/" + groupId).newBuilder().build();
 
         Request request = new Request.Builder()
             .url(url)
@@ -109,9 +127,10 @@ public class WomService
      */
     public List<WomEntry> fetchHiscores(String metric) throws IOException
     {
+        if (!isConfigured()) throw new IOException("WOM group ID not configured");
         Map<String, String> roles = fetchRoles();
 
-        HttpUrl url = HttpUrl.parse(WOM_API_BASE + "/groups/" + GROUP_ID + "/hiscores").newBuilder()
+        HttpUrl url = HttpUrl.parse(WOM_API_BASE + "/groups/" + groupId + "/hiscores").newBuilder()
             .addQueryParameter("metric", metric)
             .addQueryParameter("limit", "20")
             .addQueryParameter("offset", "0")
@@ -161,9 +180,10 @@ public class WomService
      */
     public List<WomEntry> fetchGained(String metric, String period) throws IOException
     {
+        if (!isConfigured()) throw new IOException("WOM group ID not configured");
         Map<String, String> roles = fetchRoles();
 
-        HttpUrl url = HttpUrl.parse(WOM_API_BASE + "/groups/" + GROUP_ID + "/gained").newBuilder()
+        HttpUrl url = HttpUrl.parse(WOM_API_BASE + "/groups/" + groupId + "/gained").newBuilder()
             .addQueryParameter("metric", metric)
             .addQueryParameter("period", period)
             .addQueryParameter("limit", "20")
@@ -241,7 +261,8 @@ public class WomService
      */
     public List<ActivityEntry> fetchActivity(int limit) throws IOException
     {
-        HttpUrl url = HttpUrl.parse(WOM_API_BASE + "/groups/" + GROUP_ID + "/activity").newBuilder()
+        if (!isConfigured()) throw new IOException("WOM group ID not configured");
+        HttpUrl url = HttpUrl.parse(WOM_API_BASE + "/groups/" + groupId + "/activity").newBuilder()
             .addQueryParameter("limit", String.valueOf(limit))
             .build();
 
