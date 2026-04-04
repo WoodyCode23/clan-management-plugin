@@ -814,7 +814,23 @@ function migrateSWB26() {
     }
   }
 
-  // Create Bounties tab (empty — admin fills in for new events)
+  // Read old bounty descriptions BEFORE recreating the Bounties tab
+  var oldBountiesSheet = ss.getSheetByName("Bounties");
+  var oldBountyDescs = [];
+  if (oldBountiesSheet && oldBountiesSheet.getLastRow() > 1) {
+    var oldBountyData = oldBountiesSheet.getRange(2, 1, oldBountiesSheet.getLastRow() - 1, 7).getValues();
+    for (var i = 0; i < oldBountyData.length; i++) {
+      var num = parseInt(oldBountyData[i][0]);
+      if (!num) continue;
+      // Old format: col 2 (index 1) is Description
+      var desc = (oldBountyData[i][1] || "").toString().trim();
+      if (desc) {
+        oldBountyDescs.push([num, desc]);
+      }
+    }
+  }
+
+  // Create Bounties tab (new column order — Description column starts empty)
   createBountiesTab_(ss);
 
   // ── Board tab (visual reference) ──
@@ -839,35 +855,15 @@ function migrateSWB26() {
   var hostKey = generateHostKey_();
   createHostTab_(ss, hostEmail, hostKey);
 
-  // Move existing bounty descriptions from public Bounties tab to Host tab
-  var bountiesSheet = ss.getSheetByName("Bounties");
-  var hostSheet = ss.getSheetByName("Host");
-  if (bountiesSheet && hostSheet && bountiesSheet.getLastRow() > 1) {
-    var bountyData = bountiesSheet.getRange(2, 1, bountiesSheet.getLastRow() - 1, 7).getValues();
-    var hostDescRow = 6; // Row 6+ in Host tab (row 5 is header)
-    for (var i = 0; i < bountyData.length; i++) {
-      var num = parseInt(bountyData[i][0]);
-      if (!num) continue;
-      // Old format: col 2 is Description
-      var desc = (bountyData[i][1] || "").toString().trim();
-      if (desc) {
-        hostSheet.getRange(hostDescRow, 1).setValue(num);
-        hostSheet.getRange(hostDescRow, 2).setValue(desc);
+  // Write saved bounty descriptions into the Host tab
+  if (oldBountyDescs.length > 0) {
+    var hostSheet = ss.getSheetByName("Host");
+    if (hostSheet) {
+      var hostDescRow = 6; // Row 6+ in Host tab (row 5 is header)
+      for (var i = 0; i < oldBountyDescs.length; i++) {
+        hostSheet.getRange(hostDescRow, 1).setValue(oldBountyDescs[i][0]);
+        hostSheet.getRange(hostDescRow, 2).setValue(oldBountyDescs[i][1]);
         hostDescRow++;
-        // Clear description from public tab
-        bountiesSheet.getRange(i + 2, 2).setValue("");
-      }
-    }
-  }
-
-  // Remove hintMinutesBefore from Config tab (now in Host tab)
-  var cfgSheet = ss.getSheetByName("Config");
-  if (cfgSheet) {
-    var cfgData = cfgSheet.getRange("A2:A100").getValues();
-    for (var i = 0; i < cfgData.length; i++) {
-      if ((cfgData[i][0] || "").toString().trim() === "hintMinutesBefore") {
-        cfgSheet.deleteRow(i + 2);
-        break;
       }
     }
   }
