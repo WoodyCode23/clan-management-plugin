@@ -60,7 +60,15 @@ function setupBingoSheet() {
   // ── Item Database tab (hidden, for autocomplete) ──
   createItemDatabaseTab_(ss);
 
-  ui.alert("Bingo sheet setup complete!\n\nFill in your tiles, teams, roster, whitelist, and bounties.\nThen deploy as Web App and paste the URL into the plugin.");
+  // ── Whitelist autocomplete ──
+  applyWhitelistValidation_(ss);
+
+  ui.alert("Bingo sheet setup complete!\n\n" +
+    "Created " + teamCount + " teams (rename them in the Teams tab).\n" +
+    "Board tab shows your tile grid (updates automatically from Tiles).\n" +
+    "Whitelist has autocomplete from the Item Database (~800 items).\n\n" +
+    "Fill in your tiles, teams, roster, whitelist, and bounties.\n" +
+    "Then deploy as Web App and paste the URL into the plugin.");
 }
 
 function createConfigTab_(ss, gridSize) {
@@ -549,6 +557,23 @@ function createItemDatabaseTab_(ss) {
   sheet.hideSheet();
 }
 
+function applyWhitelistValidation_(ss) {
+  var itemDbSheet = ss.getSheetByName("Item Database");
+  var wlSheet = ss.getSheetByName("Whitelist");
+  if (!itemDbSheet || !wlSheet) return;
+
+  var lastRow = itemDbSheet.getLastRow();
+  if (lastRow < 2) return;
+
+  var rule = SpreadsheetApp.newDataValidation()
+    .requireValueInRange(itemDbSheet.getRange("A2:A" + lastRow), true)
+    .setAllowInvalid(true)
+    .build();
+
+  // Apply to Whitelist Item column (A2:A1000 — generous range for future rows)
+  wlSheet.getRange("A2:A1000").setDataValidation(rule);
+}
+
 /**
  * Create a team progress sheet for a specific team.
  * Called by BingoAPI.gs when teams are read.
@@ -735,6 +760,9 @@ function migrateSWB26() {
   // ── Item Database tab (hidden, for autocomplete) ──
   createItemDatabaseTab_(ss);
 
+  // ── Whitelist autocomplete ──
+  applyWhitelistValidation_(ss);
+
   // Create team progress sheets from existing team sheets
   var tiles = readTiles_from_sheet_(ss);
   for (var i = 0; i < foundTeams.length; i++) {
@@ -761,8 +789,9 @@ function migrateSWB26() {
   }
 
   ui.alert("Migration complete!\n\n" +
-    "Created tabs: Config, Tiles, Teams, Roster, Whitelist, Droplog, Bounties\n" +
-    "Created progress sheets for " + foundTeams.length + " teams.\n\n" +
+    "Created tabs: Config, Tiles, Teams, Roster, Whitelist, Droplog, Bounties, Board, Item Database\n" +
+    "Created progress sheets for " + foundTeams.length + " teams.\n" +
+    "Whitelist has autocomplete from the Item Database.\n\n" +
     "Original tabs are untouched. Deploy as Web App to start using the new API.");
 }
 
