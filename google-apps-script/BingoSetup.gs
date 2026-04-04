@@ -18,6 +18,19 @@ function setupBingoSheet() {
     return;
   }
 
+  var teamResult = ui.prompt(
+    "Bingo Setup",
+    "How many teams? (2-20, default 2):",
+    ui.ButtonSet.OK_CANCEL
+  );
+
+  if (teamResult.getSelectedButton() !== ui.Button.OK) return;
+  var teamCount = parseInt(teamResult.getResponseText()) || 2;
+  if (teamCount < 2 || teamCount > 20) {
+    ui.alert("Team count must be between 2 and 20.");
+    return;
+  }
+
   var ss = SpreadsheetApp.getActiveSpreadsheet();
 
   // ── Config tab ──
@@ -27,7 +40,7 @@ function setupBingoSheet() {
   createTilesTab_(ss, gridSize);
 
   // ── Teams tab ──
-  createTeamsTab_(ss);
+  createTeamsTab_(ss, teamCount);
 
   // ── Roster tab ──
   createRosterTab_(ss);
@@ -100,7 +113,7 @@ function createTilesTab_(ss, gridSize) {
   sheet.getRange(2, 3, rows.length, 1).setDataValidation(typeRule);
 }
 
-function createTeamsTab_(ss) {
+function createTeamsTab_(ss, teamCount) {
   var sheet = ss.getSheetByName("Teams");
   if (!sheet) sheet = ss.insertSheet("Teams");
   sheet.clear();
@@ -108,11 +121,12 @@ function createTeamsTab_(ss) {
   sheet.getRange("A1:B1").setValues([["Code", "Name"]]);
   sheet.getRange("A1:B1").setFontWeight("bold");
 
-  // Example teams
-  sheet.getRange(2, 1, 2, 2).setValues([
-    ["TEAM1", "Team One"],
-    ["TEAM2", "Team Two"]
-  ]);
+  // Generate placeholder teams
+  var teams = [];
+  for (var i = 1; i <= teamCount; i++) {
+    teams.push(["TEAM" + i, "Team " + i]);
+  }
+  sheet.getRange(2, 1, teams.length, 2).setValues(teams);
 }
 
 function createRosterTab_(ss) {
@@ -240,7 +254,7 @@ function migrateSWB26() {
   }
 
   // Create Teams tab from found teams
-  createTeamsTab_(ss);
+  createTeamsTab_(ss, foundTeams.length);
   var teamsSheet = ss.getSheetByName("Teams");
   teamsSheet.getRange(2, 1, foundTeams.length, 2).setValues(
     foundTeams.map(function(t) { return [t.code, t.name]; })
