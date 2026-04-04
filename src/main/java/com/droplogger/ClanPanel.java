@@ -39,6 +39,10 @@ public class ClanPanel extends PluginPanel
     private final JPanel cardContainer = new JPanel(new CardLayout());
     private static final String CARD_NOT_CONNECTED = "notConnected";
     private static final String CARD_CONNECTED = "connected";
+
+    // ── Bingo tab ──
+    private BingoPanel bingoPanel;
+    private boolean bingoTabVisible = false;
     private boolean connected = false;
 
     private Runnable onRefresh;
@@ -2086,6 +2090,51 @@ public class ClanPanel extends PluginPanel
             revalidate();
             repaint();
         });
+    }
+
+    // ══════════════════════════════════════════
+    // Bingo Tab
+    // ══════════════════════════════════════════
+
+    public void showBingoTab(BingoPanel panel)
+    {
+        if (bingoTabVisible) return;
+        this.bingoPanel = panel;
+        SwingUtilities.invokeLater(() ->
+        {
+            // Insert before Admin tab if it exists, otherwise at end
+            int adminIdx = tabbedPane.indexOfTab("Admin");
+            if (adminIdx >= 0)
+            {
+                tabbedPane.insertTab("Bingo", null, panel, null, adminIdx);
+            }
+            else
+            {
+                tabbedPane.addTab("Bingo", panel);
+            }
+            bingoTabVisible = true;
+            revalidate();
+            repaint();
+        });
+    }
+
+    public void hideBingoTab()
+    {
+        if (!bingoTabVisible) return;
+        SwingUtilities.invokeLater(() ->
+        {
+            int idx = tabbedPane.indexOfTab("Bingo");
+            if (idx >= 0) tabbedPane.removeTabAt(idx);
+            bingoTabVisible = false;
+            bingoPanel = null;
+            revalidate();
+            repaint();
+        });
+    }
+
+    public BingoPanel getBingoPanel()
+    {
+        return bingoPanel;
     }
 
     // ══════════════════════════════════════════
