@@ -180,16 +180,18 @@ function createBoardTab_(ss, gridSize) {
   for (var c = 0; c < gridSize; c++) {
     headerRow.push(String.fromCharCode(65 + c));
   }
-  sheet.getRange(1, 1, 1, headerRow.length).setValues([headerRow]);
-  sheet.getRange(1, 1, 1, headerRow.length).setFontWeight("bold");
-  sheet.getRange(1, 1, 1, headerRow.length).setHorizontalAlignment("center");
+  var headerRange = sheet.getRange(1, 1, 1, headerRow.length);
+  headerRange.setValues([headerRow]);
+  headerRange.setFontWeight("bold");
+  headerRange.setHorizontalAlignment("center");
 
   // Grid cells: row numbers in column A, formulas in grid
   for (var r = 0; r < gridSize; r++) {
     // Row number label in column A
-    sheet.getRange(r + 2, 1).setValue(r + 1);
-    sheet.getRange(r + 2, 1).setFontWeight("bold");
-    sheet.getRange(r + 2, 1).setHorizontalAlignment("center");
+    var labelCell = sheet.getRange(r + 2, 1);
+    labelCell.setValue(r + 1);
+    labelCell.setFontWeight("bold");
+    labelCell.setHorizontalAlignment("center");
 
     for (var c = 0; c < gridSize; c++) {
       var tileCode = String.fromCharCode(65 + c) + (r + 1);
@@ -198,6 +200,7 @@ function createBoardTab_(ss, gridSize) {
       cell.setFormula(formula);
       cell.setHorizontalAlignment("center");
       cell.setVerticalAlignment("middle");
+      cell.setNote(tileCode);
     }
   }
 
@@ -205,15 +208,6 @@ function createBoardTab_(ss, gridSize) {
   var gridRange = sheet.getRange(1, 1, gridSize + 1, gridSize + 1);
   gridRange.setBackground("#f0f0f0");
   gridRange.setBorder(true, true, true, true, true, true);
-
-  // Grid cells get tile code as a note for reference
-  for (var r = 0; r < gridSize; r++) {
-    for (var c = 0; c < gridSize; c++) {
-      var tileCode = String.fromCharCode(65 + c) + (r + 1);
-      var cell = sheet.getRange(r + 2, c + 2);
-      cell.setNote(tileCode);
-    }
-  }
 
   // Size columns and rows for readability
   for (var c = 1; c <= gridSize + 1; c++) {
