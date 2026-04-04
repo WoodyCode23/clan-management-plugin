@@ -102,22 +102,35 @@ function readRoster_() {
   return roster;
 }
 
-function readBounties_() {
+function readBounties_(includeDescriptions) {
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Bounties");
   if (!sheet || sheet.getLastRow() < 2) return [];
+  // New column order: Number, Release Time, Points, Winner, Hint Fired, Release Fired, Description
   var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 7).getValues();
+  var hostDescriptions = readHostBountyDescriptions_();
   var bounties = [];
   for (var i = 0; i < data.length; i++) {
     var num = parseInt(data[i][0]);
     if (!num) continue;
+    var releaseFired = (data[i][5] || "").toString().toUpperCase() === "TRUE";
+
+    var description;
+    if (releaseFired) {
+      description = (data[i][6] || "").toString().trim() || hostDescriptions[num] || "";
+    } else if (includeDescriptions) {
+      description = hostDescriptions[num] || "";
+    } else {
+      description = "???";
+    }
+
     bounties.push({
       number: num,
-      description: (data[i][1] || "").toString().trim(),
-      releaseTime: (data[i][2] || "").toString().trim(),
-      points: parseFloat(data[i][3]) || 0,
-      winner: (data[i][4] || "").toString().trim(),
-      hintFired: (data[i][5] || "").toString().toUpperCase() === "TRUE",
-      releaseFired: (data[i][6] || "").toString().toUpperCase() === "TRUE"
+      description: description,
+      releaseTime: (data[i][1] || "").toString().trim(),
+      points: parseFloat(data[i][2]) || 0,
+      winner: (data[i][3] || "").toString().trim(),
+      hintFired: (data[i][4] || "").toString().toUpperCase() === "TRUE",
+      releaseFired: releaseFired
     });
   }
   return bounties;
@@ -138,6 +151,31 @@ function readWhitelist_() {
     });
   }
   return items;
+}
+
+function readHostBountyDescriptions_() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Host");
+  if (!sheet || sheet.getLastRow() < 6) return {};
+  var data = sheet.getRange(6, 1, sheet.getLastRow() - 5, 2).getValues();
+  var descriptions = {};
+  for (var i = 0; i < data.length; i++) {
+    var num = parseInt(data[i][0]);
+    if (!num) continue;
+    descriptions[num] = (data[i][1] || "").toString().trim();
+  }
+  return descriptions;
+}
+
+function getHostConfigValue_(key) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Host");
+  if (!sheet) return null;
+  var data = sheet.getRange("A1:B4").getValues();
+  for (var i = 0; i < data.length; i++) {
+    if ((data[i][0] || "").toString().trim() === key) {
+      return (data[i][1] || "").toString().trim();
+    }
+  }
+  return null;
 }
 
 function readTeamProgress_(teamCode) {
@@ -177,7 +215,7 @@ function doGet(e) {
   if (action === "getBingoConfig") {
     var tiles = readTiles_();
     var teams = readTeams_();
-    var bounties = readBounties_();
+    var bounties = readBounties_(false);
     var roster = readRoster_();
 
     // Ensure team progress sheets exist
@@ -186,13 +224,17 @@ function doGet(e) {
       ensureTeamProgressSheet_(ss, teams[i].code, tiles);
     }
 
+    // hintMinutesBefore: try Host tab first, fall back to Config tab
+    var hintMin = getHostConfigValue_("Hint Minutes Before");
+    if (!hintMin) hintMin = getConfigValue_("hintMinutesBefore");
+
     return resp_({
       gridRows: parseInt(getConfigValue_("gridRows")) || 5,
       gridCols: parseInt(getConfigValue_("gridCols")) || 5,
       eventName: getConfigValue_("eventName") || "Bingo Event",
       startDate: getConfigValue_("startDate") || "",
       endDate: getConfigValue_("endDate") || "",
-      hintMinutesBefore: parseInt(getConfigValue_("hintMinutesBefore")) || 15,
+      hintMinutesBefore: parseInt(hintMin) || 60,
       tiles: tiles,
       teams: teams,
       bounties: bounties,
@@ -221,7 +263,7 @@ function doGet(e) {
   }
 
   if (action === "getBounties") {
-    return resp_({ bounties: readBounties_() });
+    return resp_({ bounties: readBounties_(false) });
   }
 
   return resp_({ status: "error", message: "Unknown action: " + action });
@@ -229,7 +271,7 @@ function doGet(e) {
 
 function computeAllStandings_() {
   var teams = readTeams_();
-  var bounties = readBounties_();
+  var bounties = readBounties_(false);
   var roster = readRoster_();
 
   // Build team → bounty bonus map
@@ -337,43 +379,45 @@ function doPost(e) {
     }
 
     var action = (data.action || "").trim();
-    var adminKey = getConfigValue_("adminKey") || "changeme-admin";
 
-    // ── Regular key actions ──
+    // ── Player-tier actions ──
 
-    if (action === "submitDrop") {
-      return resp_(handleSubmitDrop_(data));
+    if (action === "submitDrop") return resp_(handleSubmitDrop_(data));
+    if (action === "updateTileProgress") return resp_(handleUpdateTileProgress_(data));
+    if (action === "markBountyFired") return resp_(handleMarkBountyFired_(data));
+
+    // ── Host-tier actions ──
+
+    if (action.indexOf("host") === 0) {
+      var storedHostKey = PropertiesService.getScriptProperties().getProperty("hostKey") || "";
+      if (!storedHostKey || (data.hostKey || "") !== storedHostKey) {
+        return resp_({ status: "error", message: "Invalid host key" });
+      }
     }
 
-    if (action === "updateTileProgress") {
-      return resp_(handleUpdateTileProgress_(data));
-    }
+    if (action === "hostUpdateTile") return resp_(handleAdminUpdateTile_(data));
+    if (action === "hostAddTile") return resp_(handleAdminAddTile_(data));
+    if (action === "hostRemoveTile") return resp_(handleAdminRemoveTile_(data));
+    if (action === "hostUpdateTeam") return resp_(handleAdminUpdateTeam_(data));
+    if (action === "hostRemoveTeam") return resp_(handleAdminRemoveTeam_(data));
+    if (action === "hostUpdateBounty") return resp_(handleAdminUpdateBounty_(data));
+    if (action === "hostAddBounty") return resp_(handleHostAddBounty_(data));
+    if (action === "hostRemoveBounty") return resp_(handleAdminRemoveBounty_(data));
+    if (action === "hostUpdateConfig") return resp_(handleAdminUpdateConfig_(data));
+    if (action === "hostUpdateWhitelist") return resp_(handleAdminUpdateWhitelist_(data));
 
-    if (action === "markBountyFired") {
-      return resp_(handleMarkBountyFired_(data));
-    }
-
-    // ── Admin key actions ──
+    // ── Admin-tier actions ──
 
     if (action.indexOf("admin") === 0) {
+      var adminKey = getConfigValue_("adminKey") || "changeme-admin";
       if ((data.adminKey || "") !== adminKey) {
         return resp_({ status: "error", message: "Invalid admin key" });
       }
     }
 
-    if (action === "adminUpdateTile") return resp_(handleAdminUpdateTile_(data));
-    if (action === "adminAddTile") return resp_(handleAdminAddTile_(data));
-    if (action === "adminRemoveTile") return resp_(handleAdminRemoveTile_(data));
-    if (action === "adminUpdateTeam") return resp_(handleAdminUpdateTeam_(data));
-    if (action === "adminRemoveTeam") return resp_(handleAdminRemoveTeam_(data));
+    if (action === "adminManualProgress") return resp_(handleAdminManualProgress_(data));
     if (action === "adminUpdateRoster") return resp_(handleAdminUpdateRoster_(data));
     if (action === "adminRemoveRoster") return resp_(handleAdminRemoveRoster_(data));
-    if (action === "adminUpdateBounty") return resp_(handleAdminUpdateBounty_(data));
-    if (action === "adminAddBounty") return resp_(handleAdminAddBounty_(data));
-    if (action === "adminRemoveBounty") return resp_(handleAdminRemoveBounty_(data));
-    if (action === "adminManualProgress") return resp_(handleAdminManualProgress_(data));
-    if (action === "adminUpdateConfig") return resp_(handleAdminUpdateConfig_(data));
-    if (action === "adminUpdateWhitelist") return resp_(handleAdminUpdateWhitelist_(data));
 
     return resp_({ status: "error", message: "Unknown action: " + action });
 
@@ -512,16 +556,28 @@ function handleMarkBountyFired_(data) {
     return { status: "error", message: "Invalid number or field" };
   }
 
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Bounties");
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Bounties");
   if (!sheet || sheet.getLastRow() < 2) {
     return { status: "error", message: "Bounties sheet not found" };
   }
 
-  var colIndex = field === "hintFired" ? 6 : 7;
+  // New column order: Number(1), ReleaseTime(2), Points(3), Winner(4), HintFired(5), ReleaseFired(6), Description(7)
+  var colIndex = field === "hintFired" ? 5 : 6;
   var bountyData = sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getValues();
   for (var i = 0; i < bountyData.length; i++) {
     if (parseInt(bountyData[i][0]) === number) {
       sheet.getRange(i + 2, colIndex).setValue("TRUE");
+
+      // On release: copy description from Host tab to public Bounties tab
+      if (field === "releaseFired") {
+        var hostDescriptions = readHostBountyDescriptions_();
+        var desc = hostDescriptions[number] || "";
+        if (desc) {
+          sheet.getRange(i + 2, 7).setValue(desc);
+        }
+      }
+
       return { status: "ok", message: field + " marked for bounty #" + number };
     }
   }
@@ -674,17 +730,39 @@ function handleAdminUpdateBounty_(data) {
   var number = parseInt(data.number);
   if (!number) return { status: "error", message: "Missing bounty number" };
 
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Bounties");
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Bounties");
   if (!sheet) return { status: "error", message: "Bounties sheet not found" };
 
+  // New column order: Number(1), ReleaseTime(2), Points(3), Winner(4), HintFired(5), ReleaseFired(6), Description(7)
   var rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, 7).getValues();
   for (var i = 0; i < rows.length; i++) {
     if (parseInt(rows[i][0]) === number) {
       var r = i + 2;
-      if (data.hasOwnProperty("description")) sheet.getRange(r, 2).setValue(data.description);
-      if (data.hasOwnProperty("releaseTime")) sheet.getRange(r, 3).setValue(data.releaseTime);
-      if (data.hasOwnProperty("points")) sheet.getRange(r, 4).setValue(data.points);
-      if (data.hasOwnProperty("winner")) sheet.getRange(r, 5).setValue(data.winner);
+      if (data.hasOwnProperty("releaseTime")) sheet.getRange(r, 2).setValue(data.releaseTime);
+      if (data.hasOwnProperty("points")) sheet.getRange(r, 3).setValue(data.points);
+      if (data.hasOwnProperty("winner")) sheet.getRange(r, 4).setValue(data.winner);
+
+      // If description is provided, update in Host tab (not public tab)
+      if (data.hasOwnProperty("description")) {
+        var hostSheet = ss.getSheetByName("Host");
+        if (hostSheet) {
+          var hostData = hostSheet.getRange(6, 1, Math.max(hostSheet.getLastRow() - 5, 1), 2).getValues();
+          var found = false;
+          for (var j = 0; j < hostData.length; j++) {
+            if (parseInt(hostData[j][0]) === number) {
+              hostSheet.getRange(j + 6, 2).setValue(data.description);
+              found = true;
+              break;
+            }
+          }
+          if (!found) {
+            var newRow = hostSheet.getLastRow() + 1;
+            hostSheet.getRange(newRow, 1, 1, 2).setValues([[number, data.description]]);
+          }
+        }
+      }
+
       return { status: "ok", message: "Bounty #" + number + " updated" };
     }
   }
@@ -708,6 +786,41 @@ function handleAdminAddBounty_(data) {
     "FALSE",
     "FALSE"
   ]]);
+  return { status: "ok", message: "Bounty #" + number + " added" };
+}
+
+function handleHostAddBounty_(data) {
+  var number = parseInt(data.number);
+  if (!number) return { status: "error", message: "Missing bounty number" };
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  // Add to public Bounties tab (no description)
+  var sheet = ss.getSheetByName("Bounties");
+  if (!sheet) return { status: "error", message: "Bounties sheet not found" };
+
+  var newRow = sheet.getLastRow() + 1;
+  // New column order: Number, Release Time, Points, Winner, Hint Fired, Release Fired, Description
+  sheet.getRange(newRow, 1, 1, 7).setValues([[
+    number,
+    data.releaseTime || "",
+    data.points || 0,
+    "",
+    "FALSE",
+    "FALSE",
+    ""
+  ]]);
+
+  // Store description in Host tab
+  var description = (data.description || "").trim();
+  if (description) {
+    var hostSheet = ss.getSheetByName("Host");
+    if (hostSheet) {
+      var hostRow = hostSheet.getLastRow() + 1;
+      hostSheet.getRange(hostRow, 1, 1, 2).setValues([[number, description]]);
+    }
+  }
+
   return { status: "ok", message: "Bounty #" + number + " added" };
 }
 
