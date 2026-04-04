@@ -54,6 +54,9 @@ function setupBingoSheet() {
   // ── Bounties tab ──
   createBountiesTab_(ss);
 
+  // ── Board tab (visual reference) ──
+  createBoardTab_(ss, gridSize);
+
   ui.alert("Bingo sheet setup complete!\n\nFill in your tiles, teams, roster, whitelist, and bounties.\nThen deploy as Web App and paste the URL into the plugin.");
 }
 
@@ -165,6 +168,60 @@ function createBountiesTab_(ss) {
   var headers = ["Number", "Description", "Release Time", "Points", "Winner", "Hint Fired", "Release Fired"];
   sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
   sheet.getRange(1, 1, 1, headers.length).setFontWeight("bold");
+}
+
+function createBoardTab_(ss, gridSize) {
+  var sheet = ss.getSheetByName("Board");
+  if (!sheet) sheet = ss.insertSheet("Board");
+  sheet.clear();
+
+  // Row 1: header with column letters
+  var headerRow = [""];
+  for (var c = 0; c < gridSize; c++) {
+    headerRow.push(String.fromCharCode(65 + c));
+  }
+  sheet.getRange(1, 1, 1, headerRow.length).setValues([headerRow]);
+  sheet.getRange(1, 1, 1, headerRow.length).setFontWeight("bold");
+  sheet.getRange(1, 1, 1, headerRow.length).setHorizontalAlignment("center");
+
+  // Grid cells: row numbers in column A, formulas in grid
+  for (var r = 0; r < gridSize; r++) {
+    // Row number label in column A
+    sheet.getRange(r + 2, 1).setValue(r + 1);
+    sheet.getRange(r + 2, 1).setFontWeight("bold");
+    sheet.getRange(r + 2, 1).setHorizontalAlignment("center");
+
+    for (var c = 0; c < gridSize; c++) {
+      var tileCode = String.fromCharCode(65 + c) + (r + 1);
+      var formula = '=IFERROR(INDEX(Tiles!B:B, MATCH("' + tileCode + '", Tiles!A:A, 0)), "")';
+      var cell = sheet.getRange(r + 2, c + 2);
+      cell.setFormula(formula);
+      cell.setHorizontalAlignment("center");
+      cell.setVerticalAlignment("middle");
+    }
+  }
+
+  // Formatting
+  var gridRange = sheet.getRange(1, 1, gridSize + 1, gridSize + 1);
+  gridRange.setBackground("#f0f0f0");
+  gridRange.setBorder(true, true, true, true, true, true);
+
+  // Grid cells get tile code as a note for reference
+  for (var r = 0; r < gridSize; r++) {
+    for (var c = 0; c < gridSize; c++) {
+      var tileCode = String.fromCharCode(65 + c) + (r + 1);
+      var cell = sheet.getRange(r + 2, c + 2);
+      cell.setNote(tileCode);
+    }
+  }
+
+  // Size columns and rows for readability
+  for (var c = 1; c <= gridSize + 1; c++) {
+    sheet.setColumnWidth(c, c === 1 ? 40 : 150);
+  }
+  for (var r = 1; r <= gridSize + 1; r++) {
+    sheet.setRowHeight(r, r === 1 ? 25 : 40);
+  }
 }
 
 /**
@@ -346,6 +403,9 @@ function migrateSWB26() {
 
   // Create Bounties tab (empty — admin fills in for new events)
   createBountiesTab_(ss);
+
+  // ── Board tab (visual reference) ──
+  createBoardTab_(ss, 6);
 
   // Create team progress sheets from existing team sheets
   var tiles = readTiles_from_sheet_(ss);
