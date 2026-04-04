@@ -105,6 +105,9 @@ public class ClanManagementPlugin extends Plugin
     @Inject
     private Gson gson;
 
+    @Inject
+    private BingoService bingoService;
+
     private ClanPanel panel;
     private AdminPanel adminPanel;
     private NavigationButton navButton;
@@ -144,6 +147,13 @@ public class ClanManagementPlugin extends Plugin
     private String activeEventMetric = "";
     private String activeEventDisplayName = "";
     private String activeEventEndTime = "";
+
+    // Bingo state
+    private BingoPanel bingoPanel;
+    private BountyScheduler bountyScheduler;
+    private BingoConfig bingoConfig;
+    private boolean bingoActive = false;
+    private String playerBingoTeam = "";
 
     @Provides
     ClanManagementConfig provideConfig(ConfigManager configManager)
@@ -263,6 +273,9 @@ public class ClanManagementPlugin extends Plugin
         // Set up admin panel if admin key is configured
         setupAdminPanel();
 
+        // Initialize bingo panel (hidden until config says active)
+        bingoPanel = new BingoPanel();
+
         // Set up PB detector and fight tracker
         pbDetector = new PbDetector();
         fightTracker = new FightTracker();
@@ -279,6 +292,14 @@ public class ClanManagementPlugin extends Plugin
         if (refreshTask != null) refreshTask.cancel(true);
 
         if (fightTracker != null) fightTracker.reset();
+
+        if (bountyScheduler != null)
+        {
+            bountyScheduler.cancel();
+            bountyScheduler = null;
+        }
+        panel.hideBingoTab();
+        bingoActive = false;
 
         clientToolbar.removeNavigation(navButton);
         log.info("Clan Management plugin stopped");
@@ -797,6 +818,7 @@ public class ClanManagementPlugin extends Plugin
         refreshWomData();
         refreshClanActivity();
         refreshEventLeaderboard();
+        refreshBingo();
     }
 
     private void refreshEventLeaderboard()
@@ -827,6 +849,234 @@ public class ClanManagementPlugin extends Plugin
             panel.updateActiveEvent(activeEventType, activeEventDisplayName, activeEventEndTime, null);
             if (adminPanel != null) adminPanel.setActiveEvent(activeEventType, activeEventDisplayName, activeEventEndTime);
         }
+    }
+
+    private void refreshBingo()
+    {
+        String bingoUrl = config.bingoApiUrl();
+        String bingoKey = config.bingoApiKey();
+        if (bingoUrl == null || bingoUrl.isEmpty()) {
+            if (bingoActive) {
+                panel.hideBingoTab();
+                bingoActive = false;
+                if (bountyScheduler != null) bountyScheduler.cancel();
+            }
+            return;
+        }
+
+        // Configure service if not already
+        if (!bingoService.isConfigured()) {
+            bingoService.configure(bingoUrl, bingoKey,
+                config.adminApiKey() != null ? config.adminApiKey() : "");
+        }
+
+        try
+        {
+            // Fetch config (cached for 5 min)
+            bingoConfig = bingoService.fetchBingoConfig();
+
+            // Check if event is active based on dates
+            boolean shouldBeActive = isBingoEventActive(bingoConfig);
+
+            if (shouldBeActive && !bingoActive)
+            {
+                // Show bingo tab
+                panel.showBingoTab(bingoPanel);
+                bingoActive = true;
+
+                // Set up bounty scheduler
+                bountyScheduler = new BountyScheduler(executor, bingoService);
+                bountyScheduler.setOnHint((bounty, message) -> {
+                    clientThread.invokeLater(() ->
+                        client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", message, ""));
+                    if (fetchedDiscordWebhookUrl != null && !fetchedDiscordWebhookUrl.isEmpty())
+                    {
+                        discordService.postBountyHint(fetchedDiscordWebhookUrl, bounty,
+                            bingoConfig.getHintMinutesBefore());
+                    }
+                });
+                bountyScheduler.setOnRelease((bounty, message) -> {
+                    clientThread.invokeLater(() ->
+                        client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", message, ""));
+                    if (fetchedDiscordWebhookUrl != null && !fetchedDiscordWebhookUrl.isEmpty())
+                    {
+                        discordService.postBountyLive(fetchedDiscordWebhookUrl, bounty);
+                    }
+                });
+                bountyScheduler.schedule(bingoConfig.getBounties(), bingoConfig.getHintMinutesBefore());
+            }
+            else if (!shouldBeActive && bingoActive)
+            {
+                panel.hideBingoTab();
+                bingoActive = false;
+                if (bountyScheduler != null) bountyScheduler.cancel();
+            }
+
+            if (!bingoActive) return;
+
+            // Resolve player's team
+            String playerName = getLocalPlayerName();
+            if (playerName != null)
+            {
+                playerBingoTeam = bingoConfig.getRoster().getOrDefault(playerName.toLowerCase(), "");
+            }
+
+            // Find team name
+            String playerTeamName = null;
+            for (BingoTeam team : bingoConfig.getTeams())
+            {
+                if (team.getCode().equals(playerBingoTeam))
+                {
+                    playerTeamName = team.getName();
+                    break;
+                }
+            }
+
+            bingoPanel.updateConfig(bingoConfig, playerBingoTeam, playerTeamName);
+
+            // Fetch team progress for player's team
+            if (!playerBingoTeam.isEmpty())
+            {
+                Map<String, Double> progress = bingoService.fetchTeamProgress(playerBingoTeam);
+                bingoPanel.updateTeamProgress(progress);
+            }
+
+            // Fetch standings
+            BingoStandings standings = bingoService.fetchAllStandings();
+            bingoPanel.updateStandings(standings, playerName, playerBingoTeam);
+
+            // Fetch drops
+            List<Map<String, Object>> drops = bingoService.fetchDroplog(playerBingoTeam, 20);
+            bingoPanel.updateDropLog(drops);
+
+            // Update bounty display
+            String nextBounty = bountyScheduler != null ?
+                bountyScheduler.getNextBountyCountdown(bingoConfig.getBounties()) : null;
+            bingoPanel.updateBounties(bingoConfig.getBounties(), nextBounty);
+
+            // Update countdown
+            bingoPanel.updateCountdown(getBingoCountdown(bingoConfig));
+
+            // Push WOM data for KC/XP tiles
+            pushWomBingoProgress();
+        }
+        catch (Exception e)
+        {
+            log.debug("Failed to refresh bingo data", e);
+        }
+    }
+
+    private boolean isBingoEventActive(BingoConfig cfg)
+    {
+        try
+        {
+            java.time.ZoneId est = java.time.ZoneId.of("America/New_York");
+            java.time.ZonedDateTime now = java.time.ZonedDateTime.now(est);
+
+            if (!cfg.getStartDate().isEmpty())
+            {
+                java.time.ZonedDateTime start = java.time.LocalDateTime.parse(cfg.getStartDate()).atZone(est);
+                if (now.isBefore(start)) return false;
+            }
+            if (!cfg.getEndDate().isEmpty())
+            {
+                java.time.ZonedDateTime end = java.time.LocalDateTime.parse(cfg.getEndDate()).atZone(est);
+                if (now.isAfter(end)) return false;
+            }
+            return true;
+        }
+        catch (Exception e)
+        {
+            return true; // If dates can't be parsed, show anyway
+        }
+    }
+
+    private String getBingoCountdown(BingoConfig cfg)
+    {
+        try
+        {
+            java.time.ZoneId est = java.time.ZoneId.of("America/New_York");
+            java.time.ZonedDateTime now = java.time.ZonedDateTime.now(est);
+
+            if (!cfg.getEndDate().isEmpty())
+            {
+                java.time.ZonedDateTime end = java.time.LocalDateTime.parse(cfg.getEndDate()).atZone(est);
+                java.time.Duration remaining = java.time.Duration.between(now, end);
+                if (!remaining.isNegative())
+                {
+                    long days = remaining.toDays();
+                    long hours = remaining.toHours() % 24;
+                    long minutes = remaining.toMinutes() % 60;
+                    return "Ends in " + days + "d " + hours + "h " + minutes + "m";
+                }
+            }
+        }
+        catch (Exception ignored) {}
+        return "";
+    }
+
+    private void pushWomBingoProgress()
+    {
+        if (bingoConfig == null || !womService.isConfigured()) return;
+
+        String playerName = getLocalPlayerName();
+        if (playerName == null) return;
+
+        // Only push if player is on a team
+        if (playerBingoTeam.isEmpty()) return;
+
+        // Find KC/XP tiles and group by metric
+        Map<String, List<BingoTile>> metricTiles = new LinkedHashMap<>();
+        for (BingoTile tile : bingoConfig.getTiles())
+        {
+            if (("kc".equals(tile.getType()) || "xp".equals(tile.getType())) && !tile.getMetric().isEmpty())
+            {
+                metricTiles.computeIfAbsent(tile.getMetric(), k -> new ArrayList<>()).add(tile);
+            }
+        }
+
+        if (metricTiles.isEmpty()) return;
+
+        for (Map.Entry<String, List<BingoTile>> entry : metricTiles.entrySet())
+        {
+            String metric = entry.getKey();
+            try
+            {
+                List<WomService.WomEntry> gained = womService.fetchGained(metric, "week");
+                // Sum per team
+                Map<String, Double> teamGains = new LinkedHashMap<>();
+                for (WomService.WomEntry we : gained)
+                {
+                    String team = bingoConfig.getRoster().getOrDefault(we.username.toLowerCase(), "");
+                    if (!team.isEmpty())
+                    {
+                        teamGains.merge(team, (double) we.gained, Double::sum);
+                    }
+                }
+
+                // Push to sheet for each team/tile
+                for (BingoTile tile : entry.getValue())
+                {
+                    for (Map.Entry<String, Double> tg : teamGains.entrySet())
+                    {
+                        bingoService.updateTileProgress(tg.getKey(), tile.getCode(), tg.getValue());
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                log.debug("Failed to push WOM progress for metric: {}", metric, e);
+            }
+        }
+    }
+
+    private String getLocalPlayerName()
+    {
+        if (client.getLocalPlayer() != null)
+        {
+            return client.getLocalPlayer().getName();
+        }
+        return null;
     }
 
     /**
