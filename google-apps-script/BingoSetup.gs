@@ -57,6 +57,9 @@ function setupBingoSheet() {
   // ── Board tab (visual reference) ──
   createBoardTab_(ss, gridSize);
 
+  // ── Item Database tab (hidden, for autocomplete) ──
+  createItemDatabaseTab_(ss);
+
   ui.alert("Bingo sheet setup complete!\n\nFill in your tiles, teams, roster, whitelist, and bounties.\nThen deploy as Web App and paste the URL into the plugin.");
 }
 
@@ -216,6 +219,334 @@ function createBoardTab_(ss, gridSize) {
   for (var r = 1; r <= gridSize + 1; r++) {
     sheet.setRowHeight(r, r === 1 ? 25 : 40);
   }
+}
+
+function createItemDatabaseTab_(ss) {
+  var sheet = ss.getSheetByName("Item Database");
+  if (!sheet) sheet = ss.insertSheet("Item Database");
+  sheet.clear();
+
+  sheet.getRange("A1:B1").setValues([["Item Name", "Source"]]);
+  sheet.getRange("A1:B1").setFontWeight("bold");
+
+  var items = [];
+
+  // ── Chambers of Xeric (CoX) ──
+  var cox = ["Twisted bow", "Kodai insignia", "Elder maul", "Dragon claws",
+    "Ancestral hat", "Ancestral robe top", "Ancestral robe bottom",
+    "Dexterous prayer scroll", "Arcane prayer scroll", "Dinh's bulwark",
+    "Dragon hunter crossbow", "Twisted buckler", "Tome of water (ornament kit)",
+    "Olmlet", "Jar of stone"];
+  for (var i = 0; i < cox.length; i++) items.push([cox[i], "Chambers of Xeric"]);
+
+  // ── Theatre of Blood (ToB) ──
+  var tob = ["Scythe of vitur", "Ghrazi rapier", "Sanguinesti staff",
+    "Justiciar faceguard", "Justiciar chestguard", "Justiciar legguards",
+    "Avernic defender hilt", "Lil' zik", "Jar of darkness",
+    "Holy ornament kit", "Sanguine ornament kit"];
+  for (var i = 0; i < tob.length; i++) items.push([tob[i], "Theatre of Blood"]);
+
+  // ── Tombs of Amascut (ToA) ──
+  var toa = ["Tumeken's shadow", "Osmumten's fang", "Masori mask", "Masori body",
+    "Masori chaps", "Lightbearer", "Elidinis' ward", "Jewel of the sun",
+    "Jar of amascut"];
+  for (var i = 0; i < toa.length; i++) items.push([toa[i], "Tombs of Amascut"]);
+
+  // ── General Graardor (Bandos) ──
+  var bandos = ["Bandos chestplate", "Bandos tassets", "Bandos boots", "Bandos hilt",
+    "Pet general graardor", "Jar of spirits"];
+  for (var i = 0; i < bandos.length; i++) items.push([bandos[i], "General Graardor"]);
+
+  // ── Kree'arra (Armadyl) ──
+  var arma = ["Armadyl helmet", "Armadyl chestplate", "Armadyl chainskirt",
+    "Armadyl hilt", "Pet kree'arra", "Jar of wind"];
+  for (var i = 0; i < arma.length; i++) items.push([arma[i], "Kree'arra"]);
+
+  // ── Commander Zilyana (Saradomin) ──
+  var sara = ["Saradomin sword", "Armadyl crossbow", "Saradomin hilt",
+    "Saradomin's light", "Pet zilyana", "Jar of light"];
+  for (var i = 0; i < sara.length; i++) items.push([sara[i], "Commander Zilyana"]);
+
+  // ── K'ril Tsutsaroth (Zamorak) ──
+  var zammy = ["Staff of the dead", "Zamorakian spear", "Zamorak hilt",
+    "Steam battlestaff", "Pet k'ril tsutsaroth", "Jar of smoke"];
+  for (var i = 0; i < zammy.length; i++) items.push([zammy[i], "K'ril Tsutsaroth"]);
+
+  // ── Nex ──
+  var nex = ["Torva full helm", "Torva platebody", "Torva platelegs",
+    "Zaryte vambraces", "Nihil horn", "Ancient hilt", "Nexling", "Jar of shadows"];
+  for (var i = 0; i < nex.length; i++) items.push([nex[i], "Nex"]);
+
+  // ── Nightmare / Phosani's Nightmare ──
+  var nightmare = ["Nightmare staff", "Inquisitor's great helm", "Inquisitor's hauberk",
+    "Inquisitor's plateskirt", "Inquisitor's mace", "Eldritch orb",
+    "Harmonised orb", "Volatile orb", "Parasitic egg", "Jar of dreams"];
+  for (var i = 0; i < nightmare.length; i++) items.push([nightmare[i], "Nightmare"]);
+
+  // ── Corporeal Beast ──
+  var corp = ["Spectral sigil", "Arcane sigil", "Elysian sigil", "Spirit shield",
+    "Holy elixir", "Pet dark core", "Jar of spirits"];
+  for (var i = 0; i < corp.length; i++) items.push([corp[i], "Corporeal Beast"]);
+
+  // ── Cerberus ──
+  var cerb = ["Primordial crystal", "Pegasian crystal", "Eternal crystal",
+    "Smouldering stone", "Hellpuppy", "Jar of souls"];
+  for (var i = 0; i < cerb.length; i++) items.push([cerb[i], "Cerberus"]);
+
+  // ── Alchemical Hydra ──
+  var hydra = ["Hydra's claw", "Hydra tail", "Hydra leather", "Hydra's eye",
+    "Hydra's fang", "Hydra's heart", "Ikkle hydra", "Jar of chemicals",
+    "Brimstone ring (assembled)"];
+  for (var i = 0; i < hydra.length; i++) items.push([hydra[i], "Alchemical Hydra"]);
+
+  // ── Kraken ──
+  var kraken = ["Trident of the seas", "Kraken tentacle", "Pet kraken", "Jar of dirt"];
+  for (var i = 0; i < kraken.length; i++) items.push([kraken[i], "Kraken"]);
+
+  // ── Thermonuclear Smoke Devil ──
+  var thermy = ["Occult necklace", "Smoke battlestaff", "Dragon chainbody",
+    "Pet smoke devil", "Jar of smoke"];
+  for (var i = 0; i < thermy.length; i++) items.push([thermy[i], "Thermonuclear Smoke Devil"]);
+
+  // ── Abyssal Sire ──
+  var sire = ["Unsired", "Abyssal dagger", "Abyssal bludgeon", "Abyssal orphan",
+    "Jar of miasma"];
+  for (var i = 0; i < sire.length; i++) items.push([sire[i], "Abyssal Sire"]);
+
+  // ── Grotesque Guardians ──
+  var ggs = ["Granite maul (ornate handle)", "Black tourmaline core", "Granite gloves",
+    "Granite ring", "Granite hammer", "Noon", "Jar of stone"];
+  for (var i = 0; i < ggs.length; i++) items.push([ggs[i], "Grotesque Guardians"]);
+
+  // ── Zulrah ──
+  var zulrah = ["Tanzanite fang", "Magic fang", "Serpentine visage", "Uncut onyx",
+    "Tanzanite mutagen", "Magma mutagen", "Pet snakeling", "Jar of swamp"];
+  for (var i = 0; i < zulrah.length; i++) items.push([zulrah[i], "Zulrah"]);
+
+  // ── Vorkath ──
+  var vorkath = ["Skeletal visage", "Draconic visage", "Dragonbone necklace",
+    "Vorki", "Jar of decay"];
+  for (var i = 0; i < vorkath.length; i++) items.push([vorkath[i], "Vorkath"]);
+
+  // ── The Gauntlet / Corrupted Gauntlet ──
+  var gauntlet = ["Enhanced crystal weapon seed", "Crystal armour seed", "Youngllef",
+    "Jar of imprisonment", "Blade of saeldor (created from seed)"];
+  for (var i = 0; i < gauntlet.length; i++) items.push([gauntlet[i], "The Gauntlet"]);
+
+  // ── Dagannoth Kings ──
+  var dks = ["Berserker ring", "Archers ring", "Seers ring", "Warrior ring",
+    "Dragon axe", "Mud battlestaff", "Seercull", "Pet dagannoth prime",
+    "Pet dagannoth rex", "Pet dagannoth supreme", "Jar of stone"];
+  for (var i = 0; i < dks.length; i++) items.push([dks[i], "Dagannoth Kings"]);
+
+  // ── King Black Dragon ──
+  var kbd = ["Dragon pickaxe", "Draconic visage", "Prince black dragon",
+    "Jar of decay", "KBD heads"];
+  for (var i = 0; i < kbd.length; i++) items.push([kbd[i], "King Black Dragon"]);
+
+  // ── Giant Mole ──
+  var mole = ["Baby mole", "Jar of dirt", "Mole claw", "Mole skin"];
+  for (var i = 0; i < mole.length; i++) items.push([mole[i], "Giant Mole"]);
+
+  // ── Sarachnis ──
+  var sarachnis = ["Sarachnis cudgel", "Giant egg sac(full)", "Sraracha", "Jar of eyes"];
+  for (var i = 0; i < sarachnis.length; i++) items.push([sarachnis[i], "Sarachnis"]);
+
+  // ── Skotizo ──
+  var skotizo = ["Dark claw", "Uncut onyx", "Skotos", "Jar of darkness"];
+  for (var i = 0; i < skotizo.length; i++) items.push([skotizo[i], "Skotizo"]);
+
+  // ── Kalphite Queen ──
+  var kq = ["Dragon chainbody", "Dragon 2h sword", "Kalphite princess",
+    "Jar of sand", "KQ head"];
+  for (var i = 0; i < kq.length; i++) items.push([kq[i], "Kalphite Queen"]);
+
+  // ── Duke Sucellus (DT2) ──
+  var duke = ["Virtus mask", "Virtus robe top", "Virtus robe bottom", "Magus ring",
+    "Chromium ingot", "Baron", "Jar of the duke"];
+  for (var i = 0; i < duke.length; i++) items.push([duke[i], "Duke Sucellus"]);
+
+  // ── The Leviathan (DT2) ──
+  var levi = ["Leviathan's lure", "Venator ring", "Lil'viathan", "Jar of the leviathan"];
+  for (var i = 0; i < levi.length; i++) items.push([levi[i], "The Leviathan"]);
+
+  // ── Vardorvis (DT2) ──
+  var vard = ["Executioner's axe head", "Ultor ring", "Butch", "Jar of vardorvis"];
+  for (var i = 0; i < vard.length; i++) items.push([vard[i], "Vardorvis"]);
+
+  // ── The Whisperer (DT2) ──
+  var whisp = ["Bellator ring", "Chromium ingot", "Wisp", "Jar of the whisperer"];
+  for (var i = 0; i < whisp.length; i++) items.push([whisp[i], "The Whisperer"]);
+
+  // ── Wilderness Bosses (Reworked) ──
+  var wildy = ["Voidwaker blade", "Voidwaker hilt", "Voidwaker gem",
+    "Ursine chainmace", "Webweaver bow", "Accursed sceptre",
+    "Fangs of venenatis", "Skull of vet'ion", "Claws of callisto",
+    "Dragon pickaxe", "Ring of the gods", "Treasonous ring", "Tyrannical ring",
+    "Venenatis spiderling", "Vet'ion jr.", "Callisto cub",
+    "Scorpia's offspring", "Chaos elemental pet"];
+  for (var i = 0; i < wildy.length; i++) items.push([wildy[i], "Wilderness Bosses"]);
+
+  // ── Chaos Fanatic / Crazy Archaeologist / Scorpia ──
+  var wildyMinor = ["Odium shard", "Malediction shard",
+    "Dragon pickaxe (Chaos Elemental)", "Scorpia's offspring"];
+  for (var i = 0; i < wildyMinor.length; i++) items.push([wildyMinor[i], "Chaos Fanatic / Scorpia"]);
+
+  // ── Tempoross ──
+  var tempoross = ["Dragon harpoon", "Tome of water", "Tiny tempor",
+    "Big harpoonfish", "Spirit flakes", "Soaked page", "Fish barrel", "Tackle box"];
+  for (var i = 0; i < tempoross.length; i++) items.push([tempoross[i], "Tempoross"]);
+
+  // ── Wintertodt ──
+  var wt = ["Dragon axe", "Tome of fire", "Phoenix", "Warm gloves",
+    "Bruma torch", "Pyromancer garb (set pieces)"];
+  for (var i = 0; i < wt.length; i++) items.push([wt[i], "Wintertodt"]);
+
+  // ── Guardians of the Rift ──
+  var gotr = ["Abyssal needle", "Abyssal lantern lens", "Ring of the elements",
+    "Abyssal protector"];
+  for (var i = 0; i < gotr.length; i++) items.push([gotr[i], "Guardians of the Rift"]);
+
+  // ── Zalcano ──
+  var zalcano = ["Crystal tool seed", "Zalcano shard", "Smolcano"];
+  for (var i = 0; i < zalcano.length; i++) items.push([zalcano[i], "Zalcano"]);
+
+  // ── Clue Scroll (Easy) ──
+  var clueEasy = [
+    "Black beret", "Blue beret", "White beret", "Red beret", "Highwayman mask",
+    "Team cape zero", "Team cape i", "Team cape x",
+    "Amulet of magic (t)", "Black full helm (t)", "Black platebody (t)",
+    "Black platelegs (t)", "Black plateskirt (t)", "Black kiteshield (t)",
+    "Black full helm (g)", "Black platebody (g)", "Black platelegs (g)",
+    "Black plateskirt (g)", "Black kiteshield (g)",
+    "Black shield (h1-h5)", "Black helm (h1-h5)",
+    "Studded body (t)", "Studded body (g)", "Studded chaps (t)", "Studded chaps (g)",
+    "Blue wizard hat (t)", "Blue wizard hat (g)", "Blue wizard robe (t)",
+    "Blue wizard robe (g)", "Blue skirt (t)", "Blue skirt (g)",
+    "Saradomin page 1-4", "Zamorak page 1-4", "Guthix page 1-4",
+    "Bronze pickaxe (or)", "Iron pickaxe (or)", "Wooden shield (g)",
+    "Flared trousers", "Bob's red shirt", "Bob's blue shirt", "Bob's green shirt",
+    "Bob's purple shirt", "Bob's black shirt", "A powdered wig", "Beanie",
+    "Imp mask", "Monk's robe top (t)", "Monk's robe (t)", "Amulet of defence (t)",
+    "Sandwich lady hat", "Shoulder parrot", "Cape of skulls", "Rain bow"
+  ];
+  for (var i = 0; i < clueEasy.length; i++) items.push([clueEasy[i], "Clue Scroll (Easy)"]);
+
+  // ── Clue Scroll (Medium) ──
+  var clueMed = [
+    "Ranger boots", "Wizard boots", "Holy sandals", "Spiked manacles",
+    "Climbing boots (g)",
+    "Adamant full helm (t)", "Adamant platebody (t)", "Adamant platelegs (t)",
+    "Adamant plateskirt (t)", "Adamant kiteshield (t)",
+    "Adamant full helm (g)", "Adamant platebody (g)", "Adamant platelegs (g)",
+    "Adamant plateskirt (g)", "Adamant kiteshield (g)",
+    "Mithril full helm (t)", "Mithril platebody (t)", "Mithril platelegs (t)",
+    "Mithril plateskirt (t)", "Mithril kiteshield (t)",
+    "Mithril full helm (g)", "Mithril platebody (g)", "Mithril platelegs (g)",
+    "Mithril plateskirt (g)", "Mithril kiteshield (g)",
+    "Green d'hide body (t)", "Green d'hide body (g)",
+    "Green d'hide chaps (t)", "Green d'hide chaps (g)",
+    "Saradomin mitre", "Guthix mitre", "Zamorak mitre",
+    "Saradomin cloak", "Guthix cloak", "Zamorak cloak",
+    "Ancient mitre", "Ancient cloak", "Ancient stole",
+    "Bandos mitre", "Bandos cloak", "Bandos stole",
+    "Armadyl mitre", "Armadyl cloak", "Armadyl stole",
+    "Gnomish firelighter", "Purple firelighter", "White firelighter",
+    "Cat mask", "Penguin mask", "Leprechaun hat",
+    "Black unicorn mask", "White unicorn mask",
+    "Crier hat", "Crier coat", "Crier bell"
+  ];
+  for (var i = 0; i < clueMed.length; i++) items.push([clueMed[i], "Clue Scroll (Medium)"]);
+
+  // ── Clue Scroll (Hard) ──
+  var clueHard = [
+    "Robin hood hat",
+    "Gilded full helm", "Gilded platebody", "Gilded platelegs",
+    "Gilded plateskirt", "Gilded kiteshield", "Gilded med helm",
+    "Gilded chainbody", "Gilded sq shield", "Gilded boots",
+    "Gilded scimitar", "Gilded spear", "Gilded hasta",
+    "3rd age full helmet", "3rd age platebody", "3rd age platelegs",
+    "3rd age plateskirt", "3rd age kiteshield",
+    "3rd age range top", "3rd age range legs", "3rd age range coif",
+    "3rd age vambraces",
+    "3rd age mage hat", "3rd age robe top", "3rd age robe", "3rd age amulet",
+    "Rune full helm (t)", "Rune platebody (t)", "Rune platelegs (t)",
+    "Rune plateskirt (t)", "Rune kiteshield (t)",
+    "Rune full helm (g)", "Rune platebody (g)", "Rune platelegs (g)",
+    "Rune plateskirt (g)", "Rune kiteshield (g)",
+    "Rune shield (h1-h5)", "Rune helm (h1-h5)",
+    "Saradomin d'hide body", "Saradomin d'hide boots",
+    "Saradomin d'hide shield", "Saradomin bracers",
+    "Saradomin coif", "Saradomin chaps",
+    "Guthix d'hide body", "Guthix d'hide boots",
+    "Guthix d'hide shield", "Guthix bracers", "Guthix coif", "Guthix chaps",
+    "Zamorak d'hide body", "Zamorak d'hide boots",
+    "Zamorak d'hide shield", "Zamorak bracers", "Zamorak coif", "Zamorak chaps",
+    "Ancient d'hide body", "Ancient d'hide boots",
+    "Ancient d'hide shield", "Ancient bracers", "Ancient coif", "Ancient chaps",
+    "Armadyl d'hide body", "Armadyl d'hide boots",
+    "Armadyl d'hide shield", "Armadyl bracers", "Armadyl coif", "Armadyl chaps",
+    "Bandos d'hide body", "Bandos d'hide boots",
+    "Bandos d'hide shield", "Bandos bracers", "Bandos coif", "Bandos chaps",
+    "Enchanted hat", "Enchanted top", "Enchanted robe",
+    "Zombie head", "Cyclops head", "Pirate hat", "Red pirate hat"
+  ];
+  for (var i = 0; i < clueHard.length; i++) items.push([clueHard[i], "Clue Scroll (Hard)"]);
+
+  // ── Clue Scroll (Elite) ──
+  var clueElite = [
+    "Dragon full helm ornament kit", "Dragon chainbody ornament kit",
+    "Dragon platebody ornament kit", "Dragon platelegs/skirt ornament kit",
+    "Dragon sq shield ornament kit", "Dragon scimitar ornament kit",
+    "Light infinity colour kit", "Dark infinity colour kit", "Fury ornament kit",
+    "3rd age longsword", "3rd age wand", "3rd age cloak", "3rd age bow",
+    "Royal crown", "Royal gown top", "Royal gown bottom", "Royal sceptre",
+    "Musketeer hat", "Musketeer tabard", "Musketeer pants",
+    "Dark bow tie", "Dark tuxedo jacket", "Dark tuxedo cuffs", "Dark tuxedo shoes",
+    "Light bow tie", "Light tuxedo jacket", "Light tuxedo cuffs", "Light tuxedo shoes",
+    "Briefcase", "Sagacious spectacles", "Fremennik kilt", "Rangers' tunic",
+    "Holy wraps", "Ranger gloves",
+    "Gilded 2h sword", "Gilded pickaxe", "Gilded axe", "Gilded spade"
+  ];
+  for (var i = 0; i < clueElite.length; i++) items.push([clueElite[i], "Clue Scroll (Elite)"]);
+
+  // ── Clue Scroll (Master) ──
+  var clueMaster = [
+    "3rd age pickaxe", "3rd age axe", "3rd age druidic staff",
+    "3rd age druidic robe top", "3rd age druidic robe bottoms",
+    "3rd age druidic cloak",
+    "Bucket helm (g)", "Ring of coins", "Ring of nature", "Left eye patch",
+    "Obsidian cape (r)", "Samurai kasa", "Samurai shirt", "Samurai gloves",
+    "Samurai greaves", "Samurai boots",
+    "Arceuus scarf", "Hosidius scarf", "Lovakengj scarf",
+    "Piscarilius scarf", "Shayzien scarf",
+    "Ankou mask", "Ankou top", "Ankou gloves", "Ankou socks",
+    "Mummy's head", "Mummy's body", "Mummy's hands", "Mummy's legs", "Mummy's feet",
+    "Dragon defender ornament kit", "Occult necklace ornament kit",
+    "Torture ornament kit", "Anguish ornament kit", "Tormented ornament kit",
+    "Dragon platebody ornament kit", "Gilded zenyte", "Bowl wig", "Bloodhound"
+  ];
+  for (var i = 0; i < clueMaster.length; i++) items.push([clueMaster[i], "Clue Scroll (Master)"]);
+
+  // ── Miscellaneous / Other ──
+  var misc = ["Basilisk jaw", "Leaf-bladed battleaxe", "Granite longsword",
+    "Granite boots", "Drake's tooth", "Drake's claw", "Brittle key",
+    "Ancient shard", "Dark totem", "Brimstone key rewards",
+    "Long bone", "Curved bone", "Giant key", "Shield left half",
+    "Dragon spear", "Dragon med helm"];
+  for (var i = 0; i < misc.length; i++) items.push([misc[i], "Miscellaneous"]);
+
+  // Write all items
+  if (items.length > 0) {
+    sheet.getRange(2, 1, items.length, 2).setValues(items);
+  }
+
+  // Formatting
+  sheet.setColumnWidth(1, 300);
+  sheet.setColumnWidth(2, 200);
+
+  // Hide the tab by default
+  sheet.hideSheet();
 }
 
 /**
@@ -400,6 +731,9 @@ function migrateSWB26() {
 
   // ── Board tab (visual reference) ──
   createBoardTab_(ss, 6);
+
+  // ── Item Database tab (hidden, for autocomplete) ──
+  createItemDatabaseTab_(ss);
 
   // Create team progress sheets from existing team sheets
   var tiles = readTiles_from_sheet_(ss);
