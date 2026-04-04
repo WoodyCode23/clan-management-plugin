@@ -25,6 +25,14 @@ public class ClanPanel extends PluginPanel
     private final JPanel announcementsPanel = new JPanel();
     private final JPanel activityPanel = new JPanel();
 
+    // ── Event card components ──
+    private final JPanel eventCardPanel = new JPanel();
+    private final JLabel eventTitleLabel = new JLabel();
+    private final JLabel eventCountdownLabel = new JLabel();
+    private final JPanel eventLeaderboardPanel = new JPanel();
+    private javax.swing.Timer eventCountdownTimer;
+    private String eventEndTimeStr;
+
     // ── Layout ──
     private final JTabbedPane tabbedPane = new JTabbedPane();
     private final JPanel notConnectedPanel = new JPanel();
@@ -161,6 +169,35 @@ public class ClanPanel extends PluginPanel
         home.add(Box.createVerticalStrut(8));
         home.add(createNavCard("Activity", "Clan joins, leaves & rank changes", new Color(100, 180, 255), "Activity"));
         home.add(Box.createVerticalStrut(20));
+
+        // ── Active Event card ──
+        eventCardPanel.setLayout(new BoxLayout(eventCardPanel, BoxLayout.Y_AXIS));
+        eventCardPanel.setBackground(new Color(40, 40, 40));
+        eventCardPanel.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(new Color(60, 60, 60)),
+            new EmptyBorder(10, 10, 10, 10)));
+        eventCardPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        eventCardPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 300));
+        eventCardPanel.setVisible(false);
+
+        eventTitleLabel.setFont(new Font("Segoe UI", Font.BOLD, 13));
+        eventTitleLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        eventCardPanel.add(eventTitleLabel);
+        eventCardPanel.add(Box.createVerticalStrut(2));
+
+        eventCountdownLabel.setFont(READABLE_FONT_SMALL);
+        eventCountdownLabel.setForeground(new Color(170, 170, 170));
+        eventCountdownLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        eventCardPanel.add(eventCountdownLabel);
+        eventCardPanel.add(Box.createVerticalStrut(6));
+
+        eventLeaderboardPanel.setLayout(new BoxLayout(eventLeaderboardPanel, BoxLayout.Y_AXIS));
+        eventLeaderboardPanel.setBackground(new Color(40, 40, 40));
+        eventLeaderboardPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        eventCardPanel.add(eventLeaderboardPanel);
+
+        home.add(eventCardPanel);
+        home.add(Box.createVerticalStrut(12));
 
         // ── Announcements section ──
         JLabel announcementsTitle = new JLabel("Announcements");
@@ -345,6 +382,116 @@ public class ClanPanel extends PluginPanel
             announcementsPanel.revalidate();
             announcementsPanel.repaint();
         });
+    }
+
+    /**
+     * Update the active event card on the Home tab.
+     */
+    public void updateActiveEvent(String type, String displayName, String endTime,
+                                  List<WomService.WomEntry> leaderboard)
+    {
+        SwingUtilities.invokeLater(() ->
+        {
+            if (type == null || type.isEmpty())
+            {
+                eventCardPanel.setVisible(false);
+                stopEventCountdown();
+                return;
+            }
+
+            boolean isBoss = "boss".equals(type);
+            String title = isBoss ? "Boss of the Week" : "Skill of the Week";
+            Color accentColor = isBoss ? new Color(231, 76, 60) : new Color(46, 204, 113);
+
+            eventTitleLabel.setText(title + ": " + displayName);
+            eventTitleLabel.setForeground(accentColor);
+
+            // Store end time and start countdown
+            eventEndTimeStr = endTime;
+            updateEventCountdownText();
+            startEventCountdown();
+
+            // Update leaderboard
+            eventLeaderboardPanel.removeAll();
+            if (leaderboard != null && !leaderboard.isEmpty())
+            {
+                String unit = isBoss ? " KC" : " XP";
+                String[] medals = {"\uD83E\uDD47", "\uD83E\uDD48", "\uD83E\uDD49"};
+                int shown = Math.min(5, leaderboard.size());
+                for (int i = 0; i < shown; i++)
+                {
+                    WomService.WomEntry entry = leaderboard.get(i);
+                    String prefix = i < medals.length ? medals[i] + " " : "#" + (i + 1) + " ";
+                    JLabel row = new JLabel(prefix + entry.username + " — " +
+                        java.text.NumberFormat.getNumberInstance(java.util.Locale.US).format(entry.gained) + unit);
+                    row.setFont(READABLE_FONT_SMALL);
+                    row.setForeground(new Color(200, 200, 200));
+                    row.setAlignmentX(Component.LEFT_ALIGNMENT);
+                    eventLeaderboardPanel.add(row);
+                    eventLeaderboardPanel.add(Box.createVerticalStrut(2));
+                }
+            }
+            else
+            {
+                JLabel noData = new JLabel("No participants yet");
+                noData.setFont(READABLE_FONT_ITALIC);
+                noData.setForeground(new Color(100, 100, 100));
+                noData.setAlignmentX(Component.LEFT_ALIGNMENT);
+                eventLeaderboardPanel.add(noData);
+            }
+
+            eventCardPanel.setVisible(true);
+            eventCardPanel.revalidate();
+            eventCardPanel.repaint();
+        });
+    }
+
+    private void updateEventCountdownText()
+    {
+        if (eventEndTimeStr == null || eventEndTimeStr.isEmpty())
+        {
+            eventCountdownLabel.setText("");
+            return;
+        }
+        try
+        {
+            java.time.LocalDateTime endDt = java.time.LocalDateTime.parse(eventEndTimeStr);
+            java.time.ZonedDateTime endZoned = endDt.atZone(java.time.ZoneId.of("America/New_York"));
+            java.time.Duration remaining = java.time.Duration.between(java.time.ZonedDateTime.now(
+                java.time.ZoneId.of("America/New_York")), endZoned);
+            if (remaining.isNegative())
+            {
+                eventCountdownLabel.setText("Event has ended");
+            }
+            else
+            {
+                long days = remaining.toDays();
+                long hours = remaining.toHours() % 24;
+                long minutes = remaining.toMinutes() % 60;
+                eventCountdownLabel.setText("Ends in " + days + "d " + hours + "h " + minutes + "m");
+            }
+        }
+        catch (Exception e)
+        {
+            eventCountdownLabel.setText("Ends: " + eventEndTimeStr);
+        }
+    }
+
+    private void startEventCountdown()
+    {
+        stopEventCountdown();
+        eventCountdownTimer = new javax.swing.Timer(60_000, e -> updateEventCountdownText());
+        eventCountdownTimer.setInitialDelay(0);
+        eventCountdownTimer.start();
+    }
+
+    private void stopEventCountdown()
+    {
+        if (eventCountdownTimer != null)
+        {
+            eventCountdownTimer.stop();
+            eventCountdownTimer = null;
+        }
     }
 
     /**

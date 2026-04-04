@@ -22,6 +22,11 @@ public class AdminPanel extends JPanel
     private final JTextField womGroupIdField = new JTextField();
     private final JTextArea announcementArea = new JTextArea(3, 20);
 
+    // ── Weekly Events ──
+    private final JComboBox<String> eventTypeBox = new JComboBox<>(new String[]{"Boss of the Week", "Skill of the Week"});
+    private final JComboBox<String> eventMetricBox = new JComboBox<>();
+    private final JLabel activeEventLabel = new JLabel("No active event");
+
     // ── Rotate API Key ──
     private final JTextField newApiKeyField = new JTextField();
     private final JLabel newBoardCodeLabel = new JLabel(" ");
@@ -31,6 +36,8 @@ public class AdminPanel extends JPanel
     private Runnable onLoadSettings;
     private Consumer<String[]> onRemoveHiscore;
     private Consumer<String> onRotateApiKey;
+    private Consumer<String[]> onStartEvent;
+    private Runnable onEndEvent;
 
     public AdminPanel()
     {
@@ -112,6 +119,73 @@ public class AdminPanel extends JPanel
         settingsButtons.add(loadSettingsBtn);
         settingsButtons.add(saveSettingsBtn);
         add(settingsButtons);
+
+        add(Box.createVerticalStrut(8));
+        add(createSeparator());
+        add(Box.createVerticalStrut(6));
+
+        // ══════════════════════════════════
+        // Weekly Events
+        // ══════════════════════════════════
+        add(createSectionTitle("Weekly Events"));
+        add(Box.createVerticalStrut(4));
+
+        activeEventLabel.setFont(SMALL_ITALIC);
+        activeEventLabel.setForeground(new Color(150, 150, 150));
+        activeEventLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        add(activeEventLabel);
+        add(Box.createVerticalStrut(6));
+
+        add(createFieldLabel("Event Type"));
+        eventTypeBox.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
+        eventTypeBox.setFont(SMALL_FONT);
+        eventTypeBox.setAlignmentX(Component.LEFT_ALIGNMENT);
+        add(eventTypeBox);
+        add(Box.createVerticalStrut(4));
+
+        add(createFieldLabel("Metric"));
+        eventMetricBox.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
+        eventMetricBox.setFont(SMALL_FONT);
+        eventMetricBox.setAlignmentX(Component.LEFT_ALIGNMENT);
+        add(eventMetricBox);
+        add(Box.createVerticalStrut(4));
+
+        // Populate metric dropdown based on event type
+        populateMetricBox();
+        eventTypeBox.addActionListener(e -> populateMetricBox());
+
+        JPanel eventButtons = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+        eventButtons.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        eventButtons.setAlignmentX(Component.LEFT_ALIGNMENT);
+        eventButtons.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+
+        JButton startEventBtn = createButton("Start Event");
+        startEventBtn.addActionListener(e -> {
+            String typeLabel = (String) eventTypeBox.getSelectedItem();
+            String displayName = (String) eventMetricBox.getSelectedItem();
+            if (typeLabel == null || displayName == null) return;
+
+            String type = typeLabel.startsWith("Boss") ? "boss" : "skill";
+            String metric = EventMetrics.metricFromDisplayName(displayName);
+            if (metric == null) return;
+
+            if (confirmAction("Start " + typeLabel + ": " + displayName + "?\nThis will run for 7 days."))
+            {
+                if (onStartEvent != null) onStartEvent.accept(new String[]{type, metric, displayName});
+            }
+        });
+
+        JButton endEventBtn = createButton("End Event");
+        endEventBtn.addActionListener(e -> {
+            if (confirmAction("End the current event?"))
+            {
+                if (onEndEvent != null) onEndEvent.run();
+            }
+        });
+
+        eventButtons.add(startEventBtn);
+        eventButtons.add(endEventBtn);
+        add(eventButtons);
 
         add(Box.createVerticalStrut(8));
         add(createSeparator());
@@ -300,10 +374,43 @@ public class AdminPanel extends JPanel
     public void setOnLoadSettings(Runnable cb) { this.onLoadSettings = cb; }
     public void setOnRemoveHiscore(Consumer<String[]> cb) { this.onRemoveHiscore = cb; }
     public void setOnRotateApiKey(Consumer<String> cb) { this.onRotateApiKey = cb; }
+    public void setOnStartEvent(Consumer<String[]> cb) { this.onStartEvent = cb; }
+    public void setOnEndEvent(Runnable cb) { this.onEndEvent = cb; }
 
     public void setNewBoardCode(String code)
     {
         SwingUtilities.invokeLater(() -> newBoardCodeLabel.setText("New code: " + code));
+    }
+
+    public void setActiveEvent(String type, String displayName, String endTime)
+    {
+        SwingUtilities.invokeLater(() -> {
+            if (type == null || type.isEmpty())
+            {
+                activeEventLabel.setText("No active event");
+                activeEventLabel.setForeground(new Color(150, 150, 150));
+            }
+            else
+            {
+                String typeLabel = "boss".equals(type) ? "Boss" : "Skill";
+                activeEventLabel.setText("Active: " + typeLabel + " — " + displayName + " (ends " + endTime.replace("T", " ") + " ET)");
+                activeEventLabel.setForeground("boss".equals(type) ? new Color(231, 76, 60) : new Color(46, 204, 113));
+            }
+        });
+    }
+
+    private void populateMetricBox()
+    {
+        eventMetricBox.removeAllItems();
+        String selected = (String) eventTypeBox.getSelectedItem();
+        if (selected != null && selected.startsWith("Boss"))
+        {
+            for (String name : EventMetrics.getBossDisplayNames()) eventMetricBox.addItem(name);
+        }
+        else
+        {
+            for (String name : EventMetrics.getSkillDisplayNames()) eventMetricBox.addItem(name);
+        }
     }
 
     // ── Helpers ──

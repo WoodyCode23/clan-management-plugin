@@ -170,6 +170,59 @@ function doPost(e) {
       return resp(adminSaveSettings(data));
     }
 
+    // ── Admin: Start weekly event ──
+    if (action === "adminStartEvent") {
+      var adminKey = data.adminKey || "";
+      if (adminKey !== getAdminKeyFromProps()) {
+        return resp({ status: "error", message: "Invalid admin key" });
+      }
+      var eventType = (data.eventType || "").trim();
+      var eventMetric = (data.eventMetric || "").trim();
+      var eventDisplayName = (data.eventDisplayName || "").trim();
+      if (!eventType || !eventMetric || !eventDisplayName) {
+        return resp({ status: "error", message: "Missing event type, metric, or display name" });
+      }
+      var now = new Date();
+      var end = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+      var startTime = Utilities.formatDate(now, "America/New_York", "yyyy-MM-dd'T'HH:mm");
+      var endTime = Utilities.formatDate(end, "America/New_York", "yyyy-MM-dd'T'HH:mm");
+      var eventPayload = {
+        eventType: eventType,
+        eventMetric: eventMetric,
+        eventDisplayName: eventDisplayName,
+        eventStartTime: startTime,
+        eventEndTime: endTime
+      };
+      // Reuse adminSaveSettings to write the event keys
+      var result = adminSaveSettings(eventPayload);
+      if (result.status === "ok") {
+        result.message = "Event started: " + eventDisplayName;
+        result.eventStartTime = startTime;
+        result.eventEndTime = endTime;
+      }
+      return resp(result);
+    }
+
+    // ── Admin: End weekly event ──
+    if (action === "adminEndEvent") {
+      var adminKey = data.adminKey || "";
+      if (adminKey !== getAdminKeyFromProps()) {
+        return resp({ status: "error", message: "Invalid admin key" });
+      }
+      var clearPayload = {
+        eventType: "",
+        eventMetric: "",
+        eventDisplayName: "",
+        eventStartTime: "",
+        eventEndTime: ""
+      };
+      var result = adminSaveSettings(clearPayload);
+      if (result.status === "ok") {
+        result.message = "Event ended";
+      }
+      return resp(result);
+    }
+
     // ── Hiscore: Submit PB ──
     if (action === "submitPb") {
       return resp(handleSubmitPb(data));
@@ -926,7 +979,12 @@ function getPluginConfig() {
     clanName: settings["clanName"] || "",
     discordWebhookUrl: settings["discordWebhookUrl"] || "",
     womGroupId: settings["womGroupId"] || "",
-    announcement: settings["announcement"] || ""
+    announcement: settings["announcement"] || "",
+    eventType: settings["eventType"] || "",
+    eventMetric: settings["eventMetric"] || "",
+    eventDisplayName: settings["eventDisplayName"] || "",
+    eventStartTime: settings["eventStartTime"] || "",
+    eventEndTime: settings["eventEndTime"] || ""
   };
 }
 
@@ -962,7 +1020,8 @@ function adminSaveSettings(payload) {
       }
     }
 
-    var knownKeys = ["clanName", "discordWebhookUrl", "womGroupId", "announcement"];
+    var knownKeys = ["clanName", "discordWebhookUrl", "womGroupId", "announcement",
+                     "eventType", "eventMetric", "eventDisplayName", "eventStartTime", "eventEndTime"];
     var settingsToSave = {};
     for (var k = 0; k < knownKeys.length; k++) {
       var key = knownKeys[k];

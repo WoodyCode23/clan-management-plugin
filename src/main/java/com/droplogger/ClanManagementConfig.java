@@ -6,7 +6,7 @@ import net.runelite.client.config.ConfigItem;
 import net.runelite.client.config.ConfigSection;
 
 @ConfigGroup("droplogger")
-public interface DropLoggerConfig extends Config
+public interface ClanManagementConfig extends Config
 {
     // ── General ──
 

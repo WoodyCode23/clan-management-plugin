@@ -198,6 +198,67 @@ public class DiscordWebhookService
         });
     }
 
+    public void postEventStart(String webhookUrl, String type, String displayName, String endTime)
+    {
+        if (!isValidWebhookUrl(webhookUrl)) return;
+
+        String title = "boss".equals(type) ? "Boss of the Week" : "Skill of the Week";
+        int color = "boss".equals(type) ? 0xE74C3C : 0x2ECC71; // red for boss, green for skill
+
+        JsonObject embed = new JsonObject();
+        embed.addProperty("title", title + " Started!");
+        embed.addProperty("color", color);
+
+        StringBuilder desc = new StringBuilder();
+        desc.append("**").append(displayName).append("**\n\n");
+        desc.append("Ends: ").append(endTime.replace("T", " ")).append(" ET");
+        embed.addProperty("description", desc.toString());
+
+        JsonObject footer = new JsonObject();
+        footer.addProperty("text", clanName + " Events");
+        embed.add("footer", footer);
+
+        sendEmbed(webhookUrl, embed);
+    }
+
+    public void postEventEnd(String webhookUrl, String type, String displayName,
+                             java.util.List<WomService.WomEntry> topEntries)
+    {
+        if (!isValidWebhookUrl(webhookUrl)) return;
+
+        String title = "boss".equals(type) ? "Boss of the Week" : "Skill of the Week";
+        int color = "boss".equals(type) ? 0xE74C3C : 0x2ECC71;
+
+        JsonObject embed = new JsonObject();
+        embed.addProperty("title", title + " Ended: " + displayName);
+        embed.addProperty("color", color);
+
+        StringBuilder desc = new StringBuilder();
+        if (topEntries != null && !topEntries.isEmpty())
+        {
+            String[] medals = {"\uD83E\uDD47", "\uD83E\uDD48", "\uD83E\uDD49"};
+            String unit = "boss".equals(type) ? " KC" : " XP";
+            for (int i = 0; i < Math.min(3, topEntries.size()); i++)
+            {
+                WomService.WomEntry e = topEntries.get(i);
+                String medal = i < medals.length ? medals[i] : "#" + (i + 1);
+                desc.append(medal).append(" **").append(e.username).append("** — ");
+                desc.append(GP_FORMAT.format(e.gained)).append(unit).append("\n");
+            }
+        }
+        else
+        {
+            desc.append("No participants recorded.");
+        }
+        embed.addProperty("description", desc.toString());
+
+        JsonObject footer = new JsonObject();
+        footer.addProperty("text", clanName + " Events");
+        embed.add("footer", footer);
+
+        sendEmbed(webhookUrl, embed);
+    }
+
     private boolean isValidWebhookUrl(String url)
     {
         if (url == null || url.isEmpty())

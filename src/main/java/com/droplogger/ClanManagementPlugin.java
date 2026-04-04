@@ -56,7 +56,7 @@ import java.util.regex.Pattern;
     description = "Clan management plugin — drops, hiscores, and more",
     tags = {"clan", "management", "drop", "logger", "discord", "hiscores"}
 )
-public class DropLoggerPlugin extends Plugin
+public class ClanManagementPlugin extends Plugin
 {
     private static final Pattern VALUABLE_DROP_PATTERN =
         Pattern.compile("Valuable drop: (.+?) \\(([\\d,]+) coins\\)");
@@ -70,7 +70,7 @@ public class DropLoggerPlugin extends Plugin
     private ClientThread clientThread;
 
     @Inject
-    private DropLoggerConfig config;
+    private ClanManagementConfig config;
 
     @Inject
     private ClientToolbar clientToolbar;
@@ -139,10 +139,16 @@ public class DropLoggerPlugin extends Plugin
     private List<Map<String, String>> cachedClanWhitelist;
     private boolean dropsTabLoaded = false;
 
+    // Active event state
+    private String activeEventType = "";
+    private String activeEventMetric = "";
+    private String activeEventDisplayName = "";
+    private String activeEventEndTime = "";
+
     @Provides
-    DropLoggerConfig provideConfig(ConfigManager configManager)
+    ClanManagementConfig provideConfig(ConfigManager configManager)
     {
-        return configManager.getConfig(DropLoggerConfig.class);
+        return configManager.getConfig(ClanManagementConfig.class);
     }
 
     /**
@@ -769,6 +775,12 @@ public class DropLoggerPlugin extends Plugin
                     panel.setAnnouncements(java.util.Collections.singletonList(announcement));
                 }
 
+                // Load active event from config
+                activeEventType = serverConfig.getOrDefault("eventType", "");
+                activeEventMetric = serverConfig.getOrDefault("eventMetric", "");
+                activeEventDisplayName = serverConfig.getOrDefault("eventDisplayName", "");
+                activeEventEndTime = serverConfig.getOrDefault("eventEndTime", "");
+
                 log.info("Server config loaded — clanName={}, clanLog={}, discord={}",
                     getClanName(), !fetchedClanDropLogUrl.isEmpty(), !fetchedDiscordWebhookUrl.isEmpty());
 
@@ -784,6 +796,37 @@ public class DropLoggerPlugin extends Plugin
         // Auto-refresh WOM data on same cycle
         refreshWomData();
         refreshClanActivity();
+        refreshEventLeaderboard();
+    }
+
+    private void refreshEventLeaderboard()
+    {
+        if (activeEventType.isEmpty() || activeEventMetric.isEmpty())
+        {
+            panel.updateActiveEvent(null, null, null, null);
+            if (adminPanel != null) adminPanel.setActiveEvent(null, null, null);
+            return;
+        }
+
+        if (!womService.isConfigured())
+        {
+            panel.updateActiveEvent(activeEventType, activeEventDisplayName, activeEventEndTime, null);
+            if (adminPanel != null) adminPanel.setActiveEvent(activeEventType, activeEventDisplayName, activeEventEndTime);
+            return;
+        }
+
+        try
+        {
+            List<WomService.WomEntry> entries = womService.fetchGained(activeEventMetric, "week");
+            panel.updateActiveEvent(activeEventType, activeEventDisplayName, activeEventEndTime, entries);
+            if (adminPanel != null) adminPanel.setActiveEvent(activeEventType, activeEventDisplayName, activeEventEndTime);
+        }
+        catch (Exception e)
+        {
+            log.debug("Failed to fetch event leaderboard", e);
+            panel.updateActiveEvent(activeEventType, activeEventDisplayName, activeEventEndTime, null);
+            if (adminPanel != null) adminPanel.setActiveEvent(activeEventType, activeEventDisplayName, activeEventEndTime);
+        }
     }
 
     /**
@@ -1331,6 +1374,89 @@ public class DropLoggerPlugin extends Plugin
                 adminPanel.setStatus("Error: " + e.getMessage());
             }
         }));
+
+        // Start weekly event
+        adminPanel.setOnStartEvent(args -> executor.submit(() -> {
+            try
+            {
+                String type = args[0];
+                String metric = args[1];
+                String displayName = args[2];
+                adminPanel.setStatus("Starting event...");
+                adminService.startEvent(clanApiUrl, apiKey, adminKey, type, metric, displayName);
+                adminPanel.setStatus("Event started: " + displayName);
+
+                // Update local state
+                activeEventType = type;
+                activeEventMetric = metric;
+                activeEventDisplayName = displayName;
+                // End time will be fetched on next config refresh, but estimate for immediate display
+                java.time.ZonedDateTime endZoned = java.time.ZonedDateTime.now(
+                    java.time.ZoneId.of("America/New_York")).plusDays(7);
+                activeEventEndTime = endZoned.toLocalDateTime()
+                    .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm"));
+
+                serverConfigLoaded = false; // Force config re-fetch
+
+                // Post to Discord
+                if (fetchedDiscordWebhookUrl != null && !fetchedDiscordWebhookUrl.isEmpty())
+                {
+                    discordService.postEventStart(fetchedDiscordWebhookUrl, type, displayName, activeEventEndTime);
+                }
+
+                // Immediately refresh event display
+                refreshEventLeaderboard();
+            }
+            catch (Exception e)
+            {
+                adminPanel.setStatus("Error: " + e.getMessage());
+            }
+        }));
+
+        // End weekly event
+        adminPanel.setOnEndEvent(() -> executor.submit(() -> {
+            try
+            {
+                adminPanel.setStatus("Ending event...");
+
+                // Fetch final leaderboard for Discord before clearing
+                List<WomService.WomEntry> finalLeaderboard = null;
+                if (womService.isConfigured() && !activeEventMetric.isEmpty())
+                {
+                    try { finalLeaderboard = womService.fetchGained(activeEventMetric, "week"); }
+                    catch (Exception ignored) {}
+                }
+
+                // Post results to Discord
+                if (fetchedDiscordWebhookUrl != null && !fetchedDiscordWebhookUrl.isEmpty())
+                {
+                    discordService.postEventEnd(fetchedDiscordWebhookUrl, activeEventType,
+                        activeEventDisplayName, finalLeaderboard);
+                }
+
+                adminService.endEvent(clanApiUrl, apiKey, adminKey);
+                adminPanel.setStatus("Event ended");
+
+                // Clear local state
+                activeEventType = "";
+                activeEventMetric = "";
+                activeEventDisplayName = "";
+                activeEventEndTime = "";
+                serverConfigLoaded = false;
+
+                refreshEventLeaderboard();
+            }
+            catch (Exception e)
+            {
+                adminPanel.setStatus("Error: " + e.getMessage());
+            }
+        }));
+
+        // Show active event state in admin panel on load
+        if (!activeEventType.isEmpty())
+        {
+            adminPanel.setActiveEvent(activeEventType, activeEventDisplayName, activeEventEndTime);
+        }
 
         log.info("Admin panel enabled");
     }

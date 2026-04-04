@@ -122,6 +122,30 @@ public class AdminService
     }
 
     /**
+     * Start a weekly event (boss or skill of the week).
+     */
+    public String startEvent(String apiUrl, String apiKey, String adminKey,
+                             String eventType, String metric, String displayName) throws IOException
+    {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("action", "adminStartEvent");
+        payload.addProperty("eventType", eventType);
+        payload.addProperty("eventMetric", metric);
+        payload.addProperty("eventDisplayName", displayName);
+        return adminPost(apiUrl, apiKey, adminKey, payload);
+    }
+
+    /**
+     * End the current weekly event.
+     */
+    public String endEvent(String apiUrl, String apiKey, String adminKey) throws IOException
+    {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("action", "adminEndEvent");
+        return adminPost(apiUrl, apiKey, adminKey, payload);
+    }
+
+    /**
      * Remove a hiscore entry by category key and rank.
      */
     public String removeHiscoreEntryV2(String apiUrl, String apiKey, String adminKey,

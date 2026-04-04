@@ -32,7 +32,7 @@ tasks.withType(JavaCompile) {
 
 task runClient(type: JavaExec) {
     classpath = sourceSets.test.runtimeClasspath
-    mainClass = 'com.droplogger.DropLoggerPluginTest'
+    mainClass = 'com.droplogger.ClanManagementPluginTest'
     jvmArgs = [
         '-ea',
         '-Drunelite.insecure-skip-tls-verification=true'
