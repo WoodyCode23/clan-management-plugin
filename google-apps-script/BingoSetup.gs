@@ -215,9 +215,11 @@ function createHostTab_(ss, hostEmail, hostKey) {
   sheet.clear();
 
   // Settings section (rows 1-3)
-  sheet.getRange("A1:B1").setValues([["Host Email", hostEmail]]);
-  sheet.getRange("A2:B2").setValues([["Host Key", hostKey]]);
-  sheet.getRange("A3:B3").setValues([["Hint Minutes Before", 60]]);
+  sheet.getRange("A1:B3").setValues([
+    ["Host Email", hostEmail],
+    ["Host Key", hostKey],
+    ["Hint Minutes Before", 60]
+  ]);
   sheet.getRange("A1:A3").setFontWeight("bold");
   sheet.setColumnWidth(1, 200);
   sheet.setColumnWidth(2, 400);
@@ -231,14 +233,9 @@ function createHostTab_(ss, hostEmail, hostKey) {
 
   // Protect — only host email can edit
   var protection = sheet.protect().setDescription("Host only — do not unhide");
+  protection.removeEditors(protection.getEditors());
+  if (protection.canDomainEdit()) protection.setDomainEdit(false);
   protection.addEditor(hostEmail);
-  // Remove all other editors
-  var editors = protection.getEditors();
-  for (var i = 0; i < editors.length; i++) {
-    if (editors[i].getEmail() !== hostEmail) {
-      protection.removeEditor(editors[i]);
-    }
-  }
 
   // Store host key in PropertiesService
   PropertiesService.getScriptProperties().setProperty("hostKey", hostKey);
@@ -843,27 +840,37 @@ function migrateSWB26() {
   applyWhitelistValidation_(ss);
 
   // ── Host tab: create with bounty description migration ──
+  var hostEmail = "";
+  var hostKey = "";
   var migrateHostEmail = ui.prompt(
     "Host Permissions",
     "Enter host email (Google account for Host tab protection):",
     ui.ButtonSet.OK_CANCEL
   );
-  var hostEmail = "owner@gmail.com";
-  if (migrateHostEmail.getSelectedButton() === ui.Button.OK && migrateHostEmail.getResponseText().trim()) {
+  if (migrateHostEmail.getSelectedButton() !== ui.Button.OK || !migrateHostEmail.getResponseText().trim()) {
+    ui.alert("Host email is required. Migration will continue without Host tab.\nRe-run migration to add the Host tab later.");
+  } else {
     hostEmail = migrateHostEmail.getResponseText().trim();
-  }
-  var hostKey = generateHostKey_();
-  createHostTab_(ss, hostEmail, hostKey);
+    hostKey = generateHostKey_();
+    createHostTab_(ss, hostEmail, hostKey);
 
-  // Write saved bounty descriptions into the Host tab
-  if (oldBountyDescs.length > 0) {
-    var hostSheet = ss.getSheetByName("Host");
-    if (hostSheet) {
-      var hostDescRow = 6; // Row 6+ in Host tab (row 5 is header)
-      for (var i = 0; i < oldBountyDescs.length; i++) {
-        hostSheet.getRange(hostDescRow, 1).setValue(oldBountyDescs[i][0]);
-        hostSheet.getRange(hostDescRow, 2).setValue(oldBountyDescs[i][1]);
-        hostDescRow++;
+    // Write saved bounty descriptions into the Host tab (bulk write)
+    if (oldBountyDescs.length > 0) {
+      var hostSheet = ss.getSheetByName("Host");
+      if (hostSheet) {
+        hostSheet.getRange(6, 1, oldBountyDescs.length, 2).setValues(oldBountyDescs);
+      }
+    }
+  }
+
+  // Remove hintMinutesBefore from Config tab if it exists (now in Host tab)
+  var cfgSheet = ss.getSheetByName("Config");
+  if (cfgSheet) {
+    var cfgData = cfgSheet.getRange("A2:A100").getValues();
+    for (var i = 0; i < cfgData.length; i++) {
+      if ((cfgData[i][0] || "").toString().trim() === "hintMinutesBefore") {
+        cfgSheet.deleteRow(i + 2);
+        break;
       }
     }
   }
@@ -893,14 +900,17 @@ function migrateSWB26() {
     }
   }
 
-  ui.alert("Migration complete!\n\n" +
-    "Host Key (save this — you'll need it in the plugin):\n" +
-    hostKey + "\n\n" +
+  var successMsg = "Migration complete!\n\n" +
     "Created standardized tabs from SWB26 format.\n" +
     "Board tab shows your tile grid.\n" +
-    "Whitelist has autocomplete from the Item Database.\n" +
-    "Host tab is hidden and protected (only " + hostEmail + " can edit).\n\n" +
-    "Review the new tabs, then deploy as Web App.");
+    "Whitelist has autocomplete from the Item Database.\n\n";
+  if (hostKey) {
+    successMsg += "Host Key (save this — you'll need it in the plugin):\n" +
+      hostKey + "\n\n" +
+      "Host tab is hidden and protected (only " + hostEmail + " can edit).\n\n";
+  }
+  successMsg += "Review the new tabs, then deploy as Web App.";
+  ui.alert(successMsg);
 }
 
 /** Helper: read tiles from the Tiles sheet (used during migration). */
