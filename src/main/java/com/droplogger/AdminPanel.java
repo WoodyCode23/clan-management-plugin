@@ -31,6 +31,12 @@ public class AdminPanel extends JPanel
     private final JTextField newApiKeyField = new JTextField();
     private final JLabel newBoardCodeLabel = new JLabel(" ");
 
+    // ── Bingo Admin ──
+    private JPanel bingoAdminSection;
+
+    // ── Bingo Host ──
+    private JPanel bingoHostSection;
+
     // Callbacks
     private Consumer<String[]> onSaveSettings;
     private Runnable onLoadSettings;
@@ -38,6 +44,11 @@ public class AdminPanel extends JPanel
     private Consumer<String> onRotateApiKey;
     private Consumer<String[]> onStartEvent;
     private Runnable onEndEvent;
+    private Consumer<String[]> onBingoAssignRoster;
+    private Consumer<String> onBingoRemoveRoster;
+    private Consumer<String[]> onBingoAdjustProgress;
+    private Consumer<String[]> onBingoAddBounty;
+    private Consumer<String[]> onBingoSetWinner;
 
     public AdminPanel()
     {
@@ -332,6 +343,238 @@ public class AdminPanel extends JPanel
         add(removeHiscoreBtn);
         add(Box.createVerticalStrut(8));
 
+        // ══════════════════════════════════
+        // Bingo Admin (hidden until bingo keys configured)
+        // ══════════════════════════════════
+        bingoAdminSection = new JPanel();
+        bingoAdminSection.setLayout(new BoxLayout(bingoAdminSection, BoxLayout.Y_AXIS));
+        bingoAdminSection.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        bingoAdminSection.setAlignmentX(Component.LEFT_ALIGNMENT);
+        bingoAdminSection.setMaximumSize(new Dimension(Integer.MAX_VALUE, Integer.MAX_VALUE));
+
+        {
+            bingoAdminSection.add(createSeparator());
+            bingoAdminSection.add(Box.createVerticalStrut(6));
+
+            JLabel bingoAdminTitle = new JLabel("Bingo Admin");
+            bingoAdminTitle.setFont(SECTION_FONT);
+            bingoAdminTitle.setForeground(new Color(255, 180, 100));
+            bingoAdminTitle.setAlignmentX(Component.LEFT_ALIGNMENT);
+            bingoAdminSection.add(bingoAdminTitle);
+            bingoAdminSection.add(Box.createVerticalStrut(4));
+
+            // ── Roster Management ──
+            JTextField bingoRsnField = new JTextField();
+            bingoRsnField.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
+            bingoRsnField.setFont(SMALL_FONT);
+            bingoRsnField.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+            JTextField bingoRosterTeamField = new JTextField();
+            bingoRosterTeamField.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
+            bingoRosterTeamField.setFont(SMALL_FONT);
+            bingoRosterTeamField.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+            bingoAdminSection.add(createFieldLabel("RSN"));
+            bingoAdminSection.add(bingoRsnField);
+            bingoAdminSection.add(Box.createVerticalStrut(4));
+
+            bingoAdminSection.add(createFieldLabel("Team Code"));
+            bingoAdminSection.add(bingoRosterTeamField);
+            bingoAdminSection.add(Box.createVerticalStrut(4));
+
+            JPanel rosterButtons = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+            rosterButtons.setBackground(ColorScheme.DARK_GRAY_COLOR);
+            rosterButtons.setAlignmentX(Component.LEFT_ALIGNMENT);
+            rosterButtons.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+
+            JButton assignRosterBtn = createButton("Assign to Team");
+            assignRosterBtn.addActionListener(e -> {
+                String rsn = bingoRsnField.getText().trim();
+                String team = bingoRosterTeamField.getText().trim();
+                if (onBingoAssignRoster != null) onBingoAssignRoster.accept(new String[]{rsn, team});
+            });
+
+            JButton removeRosterBtn = createButton("Remove from Roster");
+            removeRosterBtn.addActionListener(e -> {
+                String rsn = bingoRsnField.getText().trim();
+                if (onBingoRemoveRoster != null) onBingoRemoveRoster.accept(rsn);
+            });
+
+            rosterButtons.add(assignRosterBtn);
+            rosterButtons.add(removeRosterBtn);
+            bingoAdminSection.add(rosterButtons);
+            bingoAdminSection.add(Box.createVerticalStrut(6));
+
+            bingoAdminSection.add(createSeparator());
+            bingoAdminSection.add(Box.createVerticalStrut(6));
+
+            // ── Progress Adjustment ──
+            JTextField bingoProgressTeamField = new JTextField();
+            bingoProgressTeamField.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
+            bingoProgressTeamField.setFont(SMALL_FONT);
+            bingoProgressTeamField.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+            JTextField bingoTileCodeField = new JTextField();
+            bingoTileCodeField.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
+            bingoTileCodeField.setFont(SMALL_FONT);
+            bingoTileCodeField.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+            JTextField bingoProgressPointsField = new JTextField();
+            bingoProgressPointsField.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
+            bingoProgressPointsField.setFont(SMALL_FONT);
+            bingoProgressPointsField.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+            bingoAdminSection.add(createFieldLabel("Team Code"));
+            bingoAdminSection.add(bingoProgressTeamField);
+            bingoAdminSection.add(Box.createVerticalStrut(4));
+
+            bingoAdminSection.add(createFieldLabel("Tile Code"));
+            bingoAdminSection.add(bingoTileCodeField);
+            bingoAdminSection.add(Box.createVerticalStrut(4));
+
+            bingoAdminSection.add(createFieldLabel("Points"));
+            bingoAdminSection.add(bingoProgressPointsField);
+            bingoAdminSection.add(Box.createVerticalStrut(4));
+
+            JPanel adjustProgressPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+            adjustProgressPanel.setBackground(ColorScheme.DARK_GRAY_COLOR);
+            adjustProgressPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
+            adjustProgressPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+
+            JButton adjustProgressBtn = createButton("Adjust Progress");
+            adjustProgressBtn.addActionListener(e -> {
+                String team = bingoProgressTeamField.getText().trim();
+                String tileCode = bingoTileCodeField.getText().trim();
+                String points = bingoProgressPointsField.getText().trim();
+                if (onBingoAdjustProgress != null) onBingoAdjustProgress.accept(new String[]{team, tileCode, points});
+            });
+
+            adjustProgressPanel.add(adjustProgressBtn);
+            bingoAdminSection.add(adjustProgressPanel);
+            bingoAdminSection.add(Box.createVerticalStrut(8));
+        }
+
+        bingoAdminSection.setVisible(false);
+        add(bingoAdminSection);
+
+        // ══════════════════════════════════
+        // Bingo Host (hidden until bingo keys configured)
+        // ══════════════════════════════════
+        bingoHostSection = new JPanel();
+        bingoHostSection.setLayout(new BoxLayout(bingoHostSection, BoxLayout.Y_AXIS));
+        bingoHostSection.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        bingoHostSection.setAlignmentX(Component.LEFT_ALIGNMENT);
+        bingoHostSection.setMaximumSize(new Dimension(Integer.MAX_VALUE, Integer.MAX_VALUE));
+
+        {
+            bingoHostSection.add(createSeparator());
+            bingoHostSection.add(Box.createVerticalStrut(6));
+
+            JLabel bingoHostTitle = new JLabel("Bingo Host");
+            bingoHostTitle.setFont(SECTION_FONT);
+            bingoHostTitle.setForeground(new Color(255, 100, 100));
+            bingoHostTitle.setAlignmentX(Component.LEFT_ALIGNMENT);
+            bingoHostSection.add(bingoHostTitle);
+            bingoHostSection.add(Box.createVerticalStrut(4));
+
+            // ── Add Bounty ──
+            JTextField bountyNumberField = new JTextField();
+            bountyNumberField.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
+            bountyNumberField.setFont(SMALL_FONT);
+            bountyNumberField.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+            JTextField bountyDescField = new JTextField();
+            bountyDescField.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
+            bountyDescField.setFont(SMALL_FONT);
+            bountyDescField.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+            JTextField bountyReleaseTimeField = new JTextField();
+            bountyReleaseTimeField.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
+            bountyReleaseTimeField.setFont(SMALL_FONT);
+            bountyReleaseTimeField.setAlignmentX(Component.LEFT_ALIGNMENT);
+            bountyReleaseTimeField.setToolTipText("e.g. 2026-04-15T18:00");
+
+            JTextField bountyPointsField = new JTextField();
+            bountyPointsField.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
+            bountyPointsField.setFont(SMALL_FONT);
+            bountyPointsField.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+            bingoHostSection.add(createFieldLabel("Bounty Number"));
+            bingoHostSection.add(bountyNumberField);
+            bingoHostSection.add(Box.createVerticalStrut(4));
+
+            bingoHostSection.add(createFieldLabel("Description"));
+            bingoHostSection.add(bountyDescField);
+            bingoHostSection.add(Box.createVerticalStrut(4));
+
+            bingoHostSection.add(createFieldLabel("Release Time (e.g. 2026-04-15T18:00)"));
+            bingoHostSection.add(bountyReleaseTimeField);
+            bingoHostSection.add(Box.createVerticalStrut(4));
+
+            bingoHostSection.add(createFieldLabel("Points"));
+            bingoHostSection.add(bountyPointsField);
+            bingoHostSection.add(Box.createVerticalStrut(4));
+
+            JPanel addBountyPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+            addBountyPanel.setBackground(ColorScheme.DARK_GRAY_COLOR);
+            addBountyPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
+            addBountyPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+
+            JButton addBountyBtn = createButton("Add Bounty");
+            addBountyBtn.addActionListener(e -> {
+                String number = bountyNumberField.getText().trim();
+                String description = bountyDescField.getText().trim();
+                String releaseTime = bountyReleaseTimeField.getText().trim();
+                String points = bountyPointsField.getText().trim();
+                if (onBingoAddBounty != null) onBingoAddBounty.accept(new String[]{number, description, releaseTime, points});
+            });
+
+            addBountyPanel.add(addBountyBtn);
+            bingoHostSection.add(addBountyPanel);
+            bingoHostSection.add(Box.createVerticalStrut(6));
+
+            bingoHostSection.add(createSeparator());
+            bingoHostSection.add(Box.createVerticalStrut(6));
+
+            // ── Set Winner ──
+            JTextField winnerBountyNumberField = new JTextField();
+            winnerBountyNumberField.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
+            winnerBountyNumberField.setFont(SMALL_FONT);
+            winnerBountyNumberField.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+            JTextField winnerField = new JTextField();
+            winnerField.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
+            winnerField.setFont(SMALL_FONT);
+            winnerField.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+            bingoHostSection.add(createFieldLabel("Bounty Number"));
+            bingoHostSection.add(winnerBountyNumberField);
+            bingoHostSection.add(Box.createVerticalStrut(4));
+
+            bingoHostSection.add(createFieldLabel("Winner (Team Code or RSN)"));
+            bingoHostSection.add(winnerField);
+            bingoHostSection.add(Box.createVerticalStrut(4));
+
+            JPanel setWinnerPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+            setWinnerPanel.setBackground(ColorScheme.DARK_GRAY_COLOR);
+            setWinnerPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
+            setWinnerPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+
+            JButton setWinnerBtn = createButton("Set Winner");
+            setWinnerBtn.addActionListener(e -> {
+                String number = winnerBountyNumberField.getText().trim();
+                String winner = winnerField.getText().trim();
+                if (onBingoSetWinner != null) onBingoSetWinner.accept(new String[]{number, winner});
+            });
+
+            setWinnerPanel.add(setWinnerBtn);
+            bingoHostSection.add(setWinnerPanel);
+            bingoHostSection.add(Box.createVerticalStrut(8));
+        }
+
+        bingoHostSection.setVisible(false);
+        add(bingoHostSection);
+
         // ── Status bar ──
         add(createSeparator());
         add(Box.createVerticalStrut(4));
@@ -376,6 +619,21 @@ public class AdminPanel extends JPanel
     public void setOnRotateApiKey(Consumer<String> cb) { this.onRotateApiKey = cb; }
     public void setOnStartEvent(Consumer<String[]> cb) { this.onStartEvent = cb; }
     public void setOnEndEvent(Runnable cb) { this.onEndEvent = cb; }
+    public void setOnBingoAssignRoster(Consumer<String[]> cb) { this.onBingoAssignRoster = cb; }
+    public void setOnBingoRemoveRoster(Consumer<String> cb) { this.onBingoRemoveRoster = cb; }
+    public void setOnBingoAdjustProgress(Consumer<String[]> cb) { this.onBingoAdjustProgress = cb; }
+    public void setOnBingoAddBounty(Consumer<String[]> cb) { this.onBingoAddBounty = cb; }
+    public void setOnBingoSetWinner(Consumer<String[]> cb) { this.onBingoSetWinner = cb; }
+
+    public void showBingoAdminSection(boolean visible)
+    {
+        SwingUtilities.invokeLater(() -> bingoAdminSection.setVisible(visible));
+    }
+
+    public void showBingoHostSection(boolean visible)
+    {
+        SwingUtilities.invokeLater(() -> bingoHostSection.setVisible(visible));
+    }
 
     public void setNewBoardCode(String code)
     {
