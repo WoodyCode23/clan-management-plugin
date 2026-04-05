@@ -290,6 +290,14 @@ public class BingoService
         return doPost(payload, true);
     }
 
+    public String adminRemoveRoster(String rsn) throws IOException
+    {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("action", "adminRemoveRoster");
+        payload.addProperty("rsn", rsn);
+        return doPost(payload, true);
+    }
+
     // Host-tier methods
 
     public String hostUpdateTile(String tileCode, String name, String type, String metric,
