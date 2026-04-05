@@ -423,12 +423,11 @@ public class ClanPanel extends PluginPanel
             if (leaderboard != null && !leaderboard.isEmpty())
             {
                 String unit = EventMetrics.unitFromType(type);
-                String[] medals = {"\uD83E\uDD47", "\uD83E\uDD48", "\uD83E\uDD49"};
                 int shown = Math.min(5, leaderboard.size());
                 for (int i = 0; i < shown; i++)
                 {
                     WomService.WomEntry entry = leaderboard.get(i);
-                    String prefix = i < medals.length ? medals[i] + " " : "#" + (i + 1) + " ";
+                    String prefix = "#" + (i + 1) + " ";
                     JLabel row = new JLabel(prefix + entry.username + " — " +
                         java.text.NumberFormat.getNumberInstance(java.util.Locale.US).format(entry.gained) + unit);
                     row.setFont(READABLE_FONT_SMALL);
@@ -1752,12 +1751,7 @@ public class ClanPanel extends PluginPanel
                     row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 18));
                     row.setBorder(new EmptyBorder(1, 4, 1, 4));
 
-                    // Medal for top 3
-                    String prefix;
-                    if (rank == 1) prefix = "\uD83E\uDD47 ";
-                    else if (rank == 2) prefix = "\uD83E\uDD48 ";
-                    else if (rank == 3) prefix = "\uD83E\uDD49 ";
-                    else prefix = rank + ". ";
+                    String prefix = "#" + rank + " ";
 
                     JLabel nameLabel = new JLabel(prefix + truncate(rsn, 13));
                     nameLabel.setFont(new Font("Segoe UI",
