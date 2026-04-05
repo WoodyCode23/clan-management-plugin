@@ -62,6 +62,8 @@ public class ClanManagementPlugin extends Plugin
         Pattern.compile("Valuable drop: (.+?) \\(([\\d,]+) coins\\)");
     private static final Pattern COLLECTION_LOG_PATTERN =
         Pattern.compile("New item added to your collection log: (.+)");
+    private static final Pattern CLUE_COMPLETION_PATTERN =
+        Pattern.compile("You have completed (\\d+) (easy|medium|hard|elite|master|beginner) Treasure Trails\\.");
 
     @Inject
     private Client client;
@@ -387,6 +389,15 @@ public class ClanManagementPlugin extends Plugin
         if (config.enablePbSubmission())
         {
             handleCompletionTime(cleanedMessage);
+        }
+
+        // ── Clue completion detection (set source for upcoming drop message) ──
+        Matcher clueMatcher = CLUE_COMPLETION_PATTERN.matcher(cleanedMessage);
+        if (clueMatcher.find())
+        {
+            String tier = clueMatcher.group(2);
+            lastKilledNpc = tier.substring(0, 1).toUpperCase() + tier.substring(1) + " Clue Scroll";
+            lastKillTime = System.currentTimeMillis();
         }
 
         // ── Drop Logging (clan drop log) ──
