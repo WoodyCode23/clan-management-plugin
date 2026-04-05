@@ -10,6 +10,7 @@ import net.runelite.api.clan.ClanChannel;
 import net.runelite.api.clan.ClanChannelMember;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.GameState;
+import net.runelite.api.WorldType;
 import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
@@ -213,6 +214,20 @@ public class ClanManagementPlugin extends Plugin
         return parts != null ? parts[1] : "";
     }
 
+    /**
+     * Check if the player is on a non-standard world (leagues, deadman, tournament, etc.).
+     * Drops and PBs from these worlds should not be tracked.
+     */
+    private boolean isNonStandardWorld()
+    {
+        java.util.EnumSet<WorldType> worldTypes = client.getWorldType();
+        if (worldTypes == null) return false;
+        return worldTypes.contains(WorldType.SEASONAL)
+            || worldTypes.contains(WorldType.DEADMAN)
+            || worldTypes.contains(WorldType.TOURNAMENT_WORLD)
+            || worldTypes.contains(WorldType.FRESH_START_WORLD);
+    }
+
     /** Get the clan name from server config, defaulting to "Clan". */
     String getClanName()
     {
@@ -382,6 +397,12 @@ public class ClanManagementPlugin extends Plugin
 
         String rawMessage = event.getMessage();
         String cleanedMessage = Text.removeTags(rawMessage);
+
+        // ── Skip non-standard worlds (leagues, deadman, tournaments) ──
+        if (isNonStandardWorld())
+        {
+            return;
+        }
 
         // ── Hiscore submission (always update context, even if submission is disabled) ──
         pbDetector.processMessage(cleanedMessage);
@@ -753,6 +774,8 @@ public class ClanManagementPlugin extends Plugin
     @Subscribe
     public void onNpcLootReceived(NpcLootReceived event)
     {
+        if (isNonStandardWorld()) return;
+
         NPC npc = event.getNpc();
         if (npc != null)
         {
