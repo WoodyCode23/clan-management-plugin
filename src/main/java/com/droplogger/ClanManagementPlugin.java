@@ -1325,16 +1325,8 @@ public class ClanManagementPlugin extends Plugin
     {
         try
         {
-            if (period != null)
-            {
-                List<WomService.WomEntry> entries = womService.fetchGained(metric, period);
-                panel.updateWomLeaderboard(entries, true);
-            }
-            else
-            {
-                List<WomService.WomEntry> entries = womService.fetchHiscores(metric);
-                panel.updateWomLeaderboard(entries, false);
-            }
+            List<WomService.WomEntry> entries = womService.fetchGained(metric, period);
+            panel.updateWomLeaderboard(entries, true);
         }
         catch (Exception e)
         {

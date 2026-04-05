@@ -77,7 +77,7 @@ public class ClanPanel extends PluginPanel
     private final JPanel womLeaderboardPanel = new JPanel();
     private final JComboBox<String> womMetricCombo = new JComboBox<>();
     private final JComboBox<String> womPeriodCombo = new JComboBox<>(new String[]{"Day", "Week", "Month", "Year"});
-    private final JComboBox<String> womModeCombo = new JComboBox<>(new String[]{"XP Gained", "Total XP"});
+    private final JComboBox<String> womModeCombo = new JComboBox<>(new String[]{"XP Gained"});
     private java.util.function.BiConsumer<String, String> onFetchWomData;
 
     // Dynamic clan name labels
@@ -689,18 +689,21 @@ public class ClanPanel extends PluginPanel
     private void triggerWomFetch()
     {
         if (onFetchWomData == null) return;
-        String metric = ((String) womMetricCombo.getSelectedItem()).toLowerCase();
-        String mode = (String) womModeCombo.getSelectedItem();
 
-        if ("XP Gained".equals(mode))
-        {
-            String period = ((String) womPeriodCombo.getSelectedItem()).toLowerCase();
-            onFetchWomData.accept(metric, period);
-        }
-        else
-        {
-            onFetchWomData.accept(metric, null);
-        }
+        // Show loading indicator
+        SwingUtilities.invokeLater(() -> {
+            womLeaderboardPanel.removeAll();
+            JLabel loading = new JLabel("Loading...");
+            loading.setFont(READABLE_FONT_ITALIC);
+            loading.setForeground(Color.GRAY);
+            womLeaderboardPanel.add(loading);
+            womLeaderboardPanel.revalidate();
+            womLeaderboardPanel.repaint();
+        });
+
+        String metric = ((String) womMetricCombo.getSelectedItem()).toLowerCase();
+        String period = ((String) womPeriodCombo.getSelectedItem()).toLowerCase();
+        onFetchWomData.accept(metric, period);
     }
 
     public void setOnFetchWomData(java.util.function.BiConsumer<String, String> callback)
