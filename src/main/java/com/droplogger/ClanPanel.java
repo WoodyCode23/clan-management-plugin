@@ -309,8 +309,8 @@ public class ClanPanel extends PluginPanel
         card.add(textPanel, BorderLayout.CENTER);
 
         // Arrow indicator
-        JLabel arrow = new JLabel("\u25B6");
-        arrow.setFont(arrow.getFont().deriveFont(10f));
+        JLabel arrow = new JLabel(">");
+        arrow.setFont(arrow.getFont().deriveFont(Font.BOLD, 12f));
         arrow.setForeground(new Color(100, 100, 100));
         card.add(arrow, BorderLayout.EAST);
 

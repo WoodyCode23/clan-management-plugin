@@ -22,6 +22,7 @@ public class BingoService
     private String apiUrl;
     private String apiKey;
     private String adminKey;
+    private String hostKey;
 
     // Cached config — refreshed every 5 minutes
     private BingoConfig cachedConfig;
@@ -41,11 +42,12 @@ public class BingoService
         this.gson = gson;
     }
 
-    public void configure(String apiUrl, String apiKey, String adminKey)
+    public void configure(String apiUrl, String apiKey, String adminKey, String hostKey)
     {
         this.apiUrl = apiUrl;
         this.apiKey = apiKey;
         this.adminKey = adminKey;
+        this.hostKey = hostKey;
         this.cachedConfig = null;
         this.configFetchTime = 0;
     }
@@ -266,11 +268,7 @@ public class BingoService
 
     public String adminUpdateBounty(int number, String winner) throws IOException
     {
-        JsonObject payload = new JsonObject();
-        payload.addProperty("action", "adminUpdateBounty");
-        payload.addProperty("number", number);
-        payload.addProperty("winner", winner);
-        return doPost(payload, true);
+        return hostUpdateBounty(number, winner);
     }
 
     public String adminManualProgress(String team, String tileCode, double points) throws IOException
@@ -290,6 +288,80 @@ public class BingoService
         payload.addProperty("rsn", rsn);
         payload.addProperty("team", team);
         return doPost(payload, true);
+    }
+
+    public String adminRemoveRoster(String rsn) throws IOException
+    {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("action", "adminRemoveRoster");
+        payload.addProperty("rsn", rsn);
+        return doPost(payload, true);
+    }
+
+    // Host-tier methods
+
+    public String hostUpdateTile(String tileCode, String name, String type, String metric,
+                                  double threshold, double max) throws IOException
+    {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("action", "hostUpdateTile");
+        payload.addProperty("tileCode", tileCode);
+        if (name != null) payload.addProperty("name", name);
+        if (type != null) payload.addProperty("type", type);
+        if (metric != null) payload.addProperty("metric", metric);
+        payload.addProperty("threshold", threshold);
+        payload.addProperty("max", max);
+        return doPostHost(payload);
+    }
+
+    public String hostAddBounty(int number, String description, String releaseTime,
+                                 double points) throws IOException
+    {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("action", "hostAddBounty");
+        payload.addProperty("number", number);
+        payload.addProperty("description", description);
+        payload.addProperty("releaseTime", releaseTime);
+        payload.addProperty("points", points);
+        return doPostHost(payload);
+    }
+
+    public String hostUpdateBounty(int number, String winner) throws IOException
+    {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("action", "hostUpdateBounty");
+        payload.addProperty("number", number);
+        if (winner != null) payload.addProperty("winner", winner);
+        return doPostHost(payload);
+    }
+
+    public String hostRemoveBounty(int number) throws IOException
+    {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("action", "hostRemoveBounty");
+        payload.addProperty("number", number);
+        return doPostHost(payload);
+    }
+
+    public String hostUpdateConfig(String configKey, String configValue) throws IOException
+    {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("action", "hostUpdateConfig");
+        payload.addProperty("configKey", configKey);
+        payload.addProperty("configValue", configValue);
+        return doPostHost(payload);
+    }
+
+    public String hostUpdateWhitelist(String whitelistAction, String item,
+                                       String tileCode, double points) throws IOException
+    {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("action", "hostUpdateWhitelist");
+        payload.addProperty("whitelistAction", whitelistAction);
+        payload.addProperty("item", item);
+        if (tileCode != null) payload.addProperty("tileCode", tileCode);
+        payload.addProperty("points", points);
+        return doPostHost(payload);
     }
 
     public void invalidateConfigCache()
@@ -334,6 +406,34 @@ public class BingoService
         {
             payload.addProperty("adminKey", adminKey != null ? adminKey : "");
         }
+
+        RequestBody body = RequestBody.create(JSON_TYPE, gson.toJson(payload));
+        Request request = new Request.Builder().url(apiUrl).post(body).build();
+
+        try (Response response = httpClient.newCall(request).execute())
+        {
+            if (!response.isSuccessful())
+            {
+                throw new IOException("Bingo API POST returned status: " + response.code());
+            }
+            String responseBody = response.body().string();
+            JsonObject root = new JsonParser().parse(responseBody).getAsJsonObject();
+
+            if (root.has("status") && "error".equals(root.get("status").getAsString()))
+            {
+                String message = root.has("message") ? root.get("message").getAsString() : "Unknown error";
+                throw new IOException(message);
+            }
+            return root.has("message") ? root.get("message").getAsString() : "OK";
+        }
+    }
+
+    private String doPostHost(JsonObject payload) throws IOException
+    {
+        if (!isConfigured()) throw new IOException("Bingo API not configured");
+
+        payload.addProperty("key", apiKey != null ? apiKey : "");
+        payload.addProperty("hostKey", hostKey != null ? hostKey : "");
 
         RequestBody body = RequestBody.create(JSON_TYPE, gson.toJson(payload));
         Request request = new Request.Builder().url(apiUrl).post(body).build();

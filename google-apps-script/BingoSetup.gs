@@ -31,6 +31,21 @@ function setupBingoSheet() {
     return;
   }
 
+  var hostResult = ui.prompt(
+    "Bingo Setup",
+    "Enter host email (Google account for Host tab protection):",
+    ui.ButtonSet.OK_CANCEL
+  );
+
+  if (hostResult.getSelectedButton() !== ui.Button.OK) return;
+  var hostEmail = hostResult.getResponseText().trim();
+  if (!hostEmail) {
+    ui.alert("Host email is required.");
+    return;
+  }
+
+  var hostKey = generateHostKey_();
+
   var ss = SpreadsheetApp.getActiveSpreadsheet();
 
   // ── Config tab ──
@@ -54,6 +69,9 @@ function setupBingoSheet() {
   // ── Bounties tab ──
   createBountiesTab_(ss);
 
+  // ── Host tab (hidden, protected) ──
+  createHostTab_(ss, hostEmail, hostKey);
+
   // ── Board tab (visual reference) ──
   createBoardTab_(ss, gridSize);
 
@@ -64,10 +82,12 @@ function setupBingoSheet() {
   applyWhitelistValidation_(ss);
 
   ui.alert("Bingo sheet setup complete!\n\n" +
+    "Host Key (save this — you'll need it in the plugin):\n" +
+    hostKey + "\n\n" +
     "Created " + teamCount + " teams (rename them in the Teams tab).\n" +
     "Board tab shows your tile grid (updates automatically from Tiles).\n" +
     "Whitelist has autocomplete from the Item Database (~800 items).\n\n" +
-    "Fill in your tiles, teams, roster, whitelist, and bounties.\n" +
+    "Fill in tiles, teams, roster, whitelist, and bounties.\n" +
     "Then deploy as Web App and paste the URL into the plugin.");
 }
 
@@ -91,8 +111,7 @@ function createConfigTab_(ss, gridSize) {
     ["startDate", startStr],
     ["endDate", endStr],
     ["apiKey", "changeme"],
-    ["adminKey", "changeme-admin"],
-    ["hintMinutesBefore", "15"]
+    ["adminKey", "changeme-admin"]
   ];
   sheet.getRange(2, 1, settings.length, 2).setValues(settings);
   sheet.setColumnWidth(1, 200);
@@ -176,9 +195,50 @@ function createBountiesTab_(ss) {
   if (!sheet) sheet = ss.insertSheet("Bounties");
   sheet.clear();
 
-  var headers = ["Number", "Description", "Release Time", "Points", "Winner", "Hint Fired", "Release Fired"];
+  var headers = ["Number", "Release Time", "Points", "Winner", "Hint Fired", "Release Fired", "Description"];
   sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
   sheet.getRange(1, 1, 1, headers.length).setFontWeight("bold");
+}
+
+function generateHostKey_() {
+  var chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  var key = "";
+  for (var i = 0; i < 32; i++) {
+    key += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return key;
+}
+
+function createHostTab_(ss, hostEmail, hostKey) {
+  var sheet = ss.getSheetByName("Host");
+  if (!sheet) sheet = ss.insertSheet("Host");
+  sheet.clear();
+
+  // Settings section (rows 1-3)
+  sheet.getRange("A1:B3").setValues([
+    ["Host Email", hostEmail],
+    ["Host Key", hostKey],
+    ["Hint Minutes Before", 60]
+  ]);
+  sheet.getRange("A1:A3").setFontWeight("bold");
+  sheet.setColumnWidth(1, 200);
+  sheet.setColumnWidth(2, 400);
+
+  // Blank row 4, then bounty descriptions header at row 5
+  sheet.getRange("A5:B5").setValues([["Bounty #", "Description"]]);
+  sheet.getRange("A5:B5").setFontWeight("bold");
+
+  // Hide the sheet
+  sheet.hideSheet();
+
+  // Protect — only host email can edit
+  var protection = sheet.protect().setDescription("Host only — do not unhide");
+  protection.removeEditors(protection.getEditors());
+  if (protection.canDomainEdit()) protection.setDomainEdit(false);
+  protection.addEditor(hostEmail);
+
+  // Store host key in PropertiesService
+  PropertiesService.getScriptProperties().setProperty("hostKey", hostKey);
 }
 
 function createBoardTab_(ss, gridSize) {
@@ -751,7 +811,23 @@ function migrateSWB26() {
     }
   }
 
-  // Create Bounties tab (empty — admin fills in for new events)
+  // Read old bounty descriptions BEFORE recreating the Bounties tab
+  var oldBountiesSheet = ss.getSheetByName("Bounties");
+  var oldBountyDescs = [];
+  if (oldBountiesSheet && oldBountiesSheet.getLastRow() > 1) {
+    var oldBountyData = oldBountiesSheet.getRange(2, 1, oldBountiesSheet.getLastRow() - 1, 7).getValues();
+    for (var i = 0; i < oldBountyData.length; i++) {
+      var num = parseInt(oldBountyData[i][0]);
+      if (!num) continue;
+      // Old format: col 2 (index 1) is Description
+      var desc = (oldBountyData[i][1] || "").toString().trim();
+      if (desc) {
+        oldBountyDescs.push([num, desc]);
+      }
+    }
+  }
+
+  // Create Bounties tab (new column order — Description column starts empty)
   createBountiesTab_(ss);
 
   // ── Board tab (visual reference) ──
@@ -762,6 +838,42 @@ function migrateSWB26() {
 
   // ── Whitelist autocomplete ──
   applyWhitelistValidation_(ss);
+
+  // ── Host tab: create with bounty description migration ──
+  var hostEmail = "";
+  var hostKey = "";
+  var migrateHostEmail = ui.prompt(
+    "Host Permissions",
+    "Enter host email (Google account for Host tab protection):",
+    ui.ButtonSet.OK_CANCEL
+  );
+  if (migrateHostEmail.getSelectedButton() !== ui.Button.OK || !migrateHostEmail.getResponseText().trim()) {
+    ui.alert("Host email is required. Migration will continue without Host tab.\nRe-run migration to add the Host tab later.");
+  } else {
+    hostEmail = migrateHostEmail.getResponseText().trim();
+    hostKey = generateHostKey_();
+    createHostTab_(ss, hostEmail, hostKey);
+
+    // Write saved bounty descriptions into the Host tab (bulk write)
+    if (oldBountyDescs.length > 0) {
+      var hostSheet = ss.getSheetByName("Host");
+      if (hostSheet) {
+        hostSheet.getRange(6, 1, oldBountyDescs.length, 2).setValues(oldBountyDescs);
+      }
+    }
+  }
+
+  // Remove hintMinutesBefore from Config tab if it exists (now in Host tab)
+  var cfgSheet = ss.getSheetByName("Config");
+  if (cfgSheet) {
+    var cfgData = cfgSheet.getRange("A2:A100").getValues();
+    for (var i = 0; i < cfgData.length; i++) {
+      if ((cfgData[i][0] || "").toString().trim() === "hintMinutesBefore") {
+        cfgSheet.deleteRow(i + 2);
+        break;
+      }
+    }
+  }
 
   // Create team progress sheets from existing team sheets
   var tiles = readTiles_from_sheet_(ss);
@@ -788,11 +900,17 @@ function migrateSWB26() {
     }
   }
 
-  ui.alert("Migration complete!\n\n" +
-    "Created tabs: Config, Tiles, Teams, Roster, Whitelist, Droplog, Bounties, Board, Item Database\n" +
-    "Created progress sheets for " + foundTeams.length + " teams.\n" +
-    "Whitelist has autocomplete from the Item Database.\n\n" +
-    "Original tabs are untouched. Deploy as Web App to start using the new API.");
+  var successMsg = "Migration complete!\n\n" +
+    "Created standardized tabs from SWB26 format.\n" +
+    "Board tab shows your tile grid.\n" +
+    "Whitelist has autocomplete from the Item Database.\n\n";
+  if (hostKey) {
+    successMsg += "Host Key (save this — you'll need it in the plugin):\n" +
+      hostKey + "\n\n" +
+      "Host tab is hidden and protected (only " + hostEmail + " can edit).\n\n";
+  }
+  successMsg += "Review the new tabs, then deploy as Web App.";
+  ui.alert(successMsg);
 }
 
 /** Helper: read tiles from the Tiles sheet (used during migration). */

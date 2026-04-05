@@ -182,4 +182,24 @@ public interface ClanManagementConfig extends Config
         secret = true
     )
     default String bingoApiKey() { return ""; }
+
+    @ConfigItem(
+        keyName = "bingoAdminKey",
+        name = "Bingo Admin Key",
+        description = "Admin key for bingo roster/progress management (leave blank if not an admin)",
+        section = bingoSection,
+        position = 2,
+        secret = true
+    )
+    default String bingoAdminKey() { return ""; }
+
+    @ConfigItem(
+        keyName = "bingoHostKey",
+        name = "Bingo Host Key",
+        description = "Host key for full bingo board management (leave blank if not the host)",
+        section = bingoSection,
+        position = 3,
+        secret = true
+    )
+    default String bingoHostKey() { return ""; }
 }

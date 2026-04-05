@@ -62,6 +62,8 @@ public class ClanManagementPlugin extends Plugin
         Pattern.compile("Valuable drop: (.+?) \\(([\\d,]+) coins\\)");
     private static final Pattern COLLECTION_LOG_PATTERN =
         Pattern.compile("New item added to your collection log: (.+)");
+    private static final Pattern CLUE_COMPLETION_PATTERN =
+        Pattern.compile("You have completed (\\d+) (easy|medium|hard|elite|master|beginner) Treasure Trails\\.");
 
     @Inject
     private Client client;
@@ -117,6 +119,7 @@ public class ClanManagementPlugin extends Plugin
     // Track last killed NPC for correlating drops
     private String lastKilledNpc = "Unknown";
     private int lastKillCount = 0;
+    private long lastKillTime = 0;
 
     private PbDetector pbDetector;
     private FightTracker fightTracker;
@@ -388,6 +391,15 @@ public class ClanManagementPlugin extends Plugin
             handleCompletionTime(cleanedMessage);
         }
 
+        // ── Clue completion detection (set source for upcoming drop message) ──
+        Matcher clueMatcher = CLUE_COMPLETION_PATTERN.matcher(cleanedMessage);
+        if (clueMatcher.find())
+        {
+            String tier = clueMatcher.group(2);
+            lastKilledNpc = tier.substring(0, 1).toUpperCase() + tier.substring(1) + " Clue Scroll";
+            lastKillTime = System.currentTimeMillis();
+        }
+
         // ── Drop Logging (clan drop log) ──
         if (config.enableClanDropLog())
         {
@@ -431,8 +443,13 @@ public class ClanManagementPlugin extends Plugin
             ? client.getLocalPlayer().getWorldLocation()
             : new WorldPoint(0, 0, 0);
 
+        // Only attribute to last NPC if killed recently (within 30s) — avoids
+        // clue casket drops being attributed to a stale NPC like "Brassican Mage"
+        String npcSource = (System.currentTimeMillis() - lastKillTime < 30_000)
+            ? lastKilledNpc : "Unknown";
+
         DropEntry drop = new DropEntry(
-            itemName, value, lastKilledNpc, lastKillCount,
+            itemName, value, npcSource, lastKillCount,
             wp.getX(), wp.getY(), wp.getPlane(), playerName
         );
 
@@ -741,6 +758,7 @@ public class ClanManagementPlugin extends Plugin
         {
             lastKilledNpc = npc.getName();
             lastKillCount = pbDetector.getLastKillCount();
+            lastKillTime = System.currentTimeMillis();
         }
     }
 
@@ -867,7 +885,8 @@ public class ClanManagementPlugin extends Plugin
         // Configure service if not already
         if (!bingoService.isConfigured()) {
             bingoService.configure(bingoUrl, bingoKey,
-                config.adminApiKey() != null ? config.adminApiKey() : "");
+                config.bingoAdminKey() != null ? config.bingoAdminKey() : "",
+                config.bingoHostKey() != null ? config.bingoHostKey() : "");
         }
 
         try
@@ -1707,6 +1726,94 @@ public class ClanManagementPlugin extends Plugin
         {
             adminPanel.setActiveEvent(activeEventType, activeEventDisplayName, activeEventEndTime);
         }
+
+        // Show bingo sections if keys are configured
+        String bingoAdminKey = config.bingoAdminKey();
+        String bingoHostKey = config.bingoHostKey();
+
+        if (bingoAdminKey != null && !bingoAdminKey.isEmpty())
+        {
+            adminPanel.showBingoAdminSection(true);
+        }
+        if (bingoHostKey != null && !bingoHostKey.isEmpty())
+        {
+            adminPanel.showBingoHostSection(true);
+        }
+
+        // Bingo admin callbacks
+        adminPanel.setOnBingoAssignRoster(args -> executor.submit(() -> {
+            try
+            {
+                adminPanel.setStatus("Assigning " + args[0] + " to " + args[1] + "...");
+                bingoService.adminUpdateRoster(args[0], args[1]);
+                adminPanel.setStatus("Assigned " + args[0] + " to team " + args[1]);
+                bingoService.invalidateConfigCache();
+            }
+            catch (Exception e)
+            {
+                adminPanel.setStatus("Error: " + e.getMessage());
+            }
+        }));
+
+        adminPanel.setOnBingoRemoveRoster(rsn -> executor.submit(() -> {
+            try
+            {
+                adminPanel.setStatus("Removing " + rsn + "...");
+                bingoService.adminRemoveRoster(rsn);
+                adminPanel.setStatus("Removed " + rsn + " from roster");
+                bingoService.invalidateConfigCache();
+            }
+            catch (Exception e)
+            {
+                adminPanel.setStatus("Error: " + e.getMessage());
+            }
+        }));
+
+        adminPanel.setOnBingoAdjustProgress(args -> executor.submit(() -> {
+            try
+            {
+                adminPanel.setStatus("Adjusting progress...");
+                double points = Double.parseDouble(args[2]);
+                bingoService.adminManualProgress(args[0], args[1], points);
+                adminPanel.setStatus("Added " + args[2] + " points to " + args[0] + "/" + args[1]);
+            }
+            catch (Exception e)
+            {
+                adminPanel.setStatus("Error: " + e.getMessage());
+            }
+        }));
+
+        // Bingo host callbacks
+        adminPanel.setOnBingoAddBounty(args -> executor.submit(() -> {
+            try
+            {
+                adminPanel.setStatus("Adding bounty...");
+                int number = Integer.parseInt(args[0]);
+                double points = Double.parseDouble(args[3]);
+                bingoService.hostAddBounty(number, args[1], args[2], points);
+                adminPanel.setStatus("Bounty #" + args[0] + " added");
+                bingoService.invalidateConfigCache();
+            }
+            catch (Exception e)
+            {
+                adminPanel.setStatus("Error: " + e.getMessage());
+            }
+        }));
+
+        adminPanel.setOnBingoSetWinner(args -> executor.submit(() -> {
+            try
+            {
+                adminPanel.setStatus("Setting winner...");
+                int number = Integer.parseInt(args[0]);
+                bingoService.hostUpdateBounty(number, args[1]);
+                adminPanel.setStatus("Bounty #" + args[0] + " winner set to " + args[1]);
+                bingoService.invalidateConfigCache();
+            }
+            catch (Exception e)
+            {
+                adminPanel.setStatus("Error: " + e.getMessage());
+            }
+        }));
 
         log.info("Admin panel enabled");
     }
