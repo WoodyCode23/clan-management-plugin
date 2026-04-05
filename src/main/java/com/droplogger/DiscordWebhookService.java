@@ -53,7 +53,10 @@ public class DiscordWebhookService
         desc.append("**Item:** ").append(drop.getItemName()).append("\n");
         desc.append("**Value:** ").append(GP_FORMAT.format(drop.getValue())).append(" gp\n");
         desc.append("**Monster:** ").append(drop.getMonsterName()).append("\n");
-        desc.append("**KC:** ").append(drop.getKillCount()).append("\n");
+        if (drop.getKillCount() > 0)
+        {
+            desc.append("**KC:** ").append(drop.getKillCount()).append("\n");
+        }
         desc.append("**Player:** ").append(drop.getPlayerName());
         embed.addProperty("description", desc.toString());
 
