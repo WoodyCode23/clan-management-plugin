@@ -1188,7 +1188,7 @@ public class ClanManagementPlugin extends Plugin
             hiscoreCacheV2.putAll(allTimes);
             hiscoreV2BatchFetched = true;
             saveHiscoreCacheV2ToDisk();
-            panel.setRecentCategories(new java.util.LinkedHashSet<>(hiscoreCacheV2.keySet()));
+            panel.setRecentCategories(new java.util.LinkedHashSet<>(hiscoreCacheV2.keySet()), new java.util.LinkedHashMap<>(hiscoreCacheV2));
             log.info("Batch-fetched hiscores: {} categories", allTimes.size());
         }
         catch (Exception e)
@@ -1546,7 +1546,7 @@ public class ClanManagementPlugin extends Plugin
                     }
                     hiscoreCacheV2.put(entry.getKey(), entries);
                 }
-                panel.setRecentCategories(new java.util.LinkedHashSet<>(hiscoreCacheV2.keySet()));
+                panel.setRecentCategories(new java.util.LinkedHashSet<>(hiscoreCacheV2.keySet()), new java.util.LinkedHashMap<>(hiscoreCacheV2));
                 log.info("Loaded hiscore cache from disk: {} categories", hiscoreCacheV2.size());
             }
         }

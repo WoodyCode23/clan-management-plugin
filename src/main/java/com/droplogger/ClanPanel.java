@@ -61,6 +61,7 @@ public class ClanPanel extends PluginPanel
     private Runnable onClearHiscoreCache;
     private boolean hiscoreDropdownsUpdating = false;
     private Set<String> recentCategoryKeys = new java.util.LinkedHashSet<>();
+    private Map<String, List<HiscoreEntry>> recentCategoryEntries = new java.util.LinkedHashMap<>();
 
     // ── Drops tab components ──
     private final JPanel dropsLeaderboardPanel = new JPanel();
@@ -1302,23 +1303,19 @@ public class ClanPanel extends PluginPanel
 
         if ("Recent".equals(selectedGroup))
         {
-            // Show bosses that have data in cache
-            Set<String> shown = new java.util.LinkedHashSet<>();
-            for (String catKey : recentCategoryKeys)
-            {
-                BossCategory cat = BossCategory.fromKey(catKey);
-                if (cat != null && !shown.contains(cat.getDisplayName()))
-                {
-                    shown.add(cat.getDisplayName());
-                    hiscoreBossCombo.addItem(cat.getDisplayName());
-                }
-            }
-            if (shown.isEmpty())
-            {
-                hiscoreBossCombo.addItem("No recent PBs");
-            }
+            // Hide boss/size dropdowns — show combined recent view directly
+            hiscoreBossLabel.setVisible(false);
+            hiscoreBossCombo.setVisible(false);
+            hiscoreSizeLabel.setVisible(false);
+            hiscoreSizeCombo.setVisible(false);
+            showRecentPbsOverview();
+            return;
         }
-        else if ("Search Results".equals(selectedGroup))
+        // Show boss combo for non-Recent selections
+        hiscoreBossLabel.setVisible(!"Search Results".equals(selectedGroup));
+        hiscoreBossCombo.setVisible(true);
+
+        if ("Search Results".equals(selectedGroup))
         {
             // Populated by onSearchChanged
         }
@@ -1453,13 +1450,14 @@ public class ClanPanel extends PluginPanel
     }
 
     /**
-     * Set the category keys that have recent PB data (from hiscore cache).
+     * Set the category keys and entries that have recent PB data (from hiscore cache).
      * Called by the plugin after loading hiscore data.
      */
-    public void setRecentCategories(Set<String> categoryKeys)
+    public void setRecentCategories(Set<String> categoryKeys, Map<String, List<HiscoreEntry>> entries)
     {
         this.recentCategoryKeys = categoryKeys;
-        // If currently showing "Recent", refresh the boss combo
+        this.recentCategoryEntries = entries != null ? entries : new java.util.LinkedHashMap<>();
+        // If currently showing "Recent", refresh the view
         SwingUtilities.invokeLater(() ->
         {
             if ("Recent".equals(hiscoreGroupCombo.getSelectedItem()))
@@ -1469,6 +1467,74 @@ public class ClanPanel extends PluginPanel
                 hiscoreDropdownsUpdating = false;
             }
         });
+    }
+
+    private void showRecentPbsOverview()
+    {
+        hiscoreTimesPanel.removeAll();
+
+        if (recentCategoryEntries.isEmpty())
+        {
+            JLabel noData = new JLabel("No recent PBs");
+            noData.setFont(READABLE_FONT_ITALIC);
+            noData.setForeground(new Color(100, 100, 100));
+            noData.setBorder(new EmptyBorder(12, 10, 12, 10));
+            hiscoreTimesPanel.add(noData);
+        }
+        else
+        {
+            int count = 0;
+            for (Map.Entry<String, List<HiscoreEntry>> entry : recentCategoryEntries.entrySet())
+            {
+                if (count >= 10) break; // limit to 10 recent categories
+                List<HiscoreEntry> times = entry.getValue();
+                if (times == null || times.isEmpty()) continue;
+
+                BossCategory cat = BossCategory.fromKey(entry.getKey());
+                String bossName = cat != null ? cat.getDisplayName() : entry.getKey();
+                String sizeLabel = cat != null && cat.getMaxPlayers() > 1 ? " (" + cat.getSizeLabel() + ")" : "";
+                HiscoreEntry best = times.get(0);
+
+                JPanel row = new JPanel(new BorderLayout(4, 0));
+                row.setBackground(count % 2 == 0 ? new Color(18, 18, 18) : new Color(28, 28, 28));
+                row.setAlignmentX(Component.LEFT_ALIGNMENT);
+                row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 32));
+                row.setBorder(new EmptyBorder(4, 8, 4, 8));
+
+                // Left: boss name
+                JPanel leftPanel = new JPanel();
+                leftPanel.setLayout(new BoxLayout(leftPanel, BoxLayout.Y_AXIS));
+                leftPanel.setBackground(row.getBackground());
+
+                JLabel bossLabel = new JLabel(bossName + sizeLabel);
+                bossLabel.setFont(READABLE_FONT.deriveFont(Font.BOLD));
+                bossLabel.setForeground(new Color(100, 149, 237));
+                leftPanel.add(bossLabel);
+
+                JLabel detailLabel = new JLabel(best.getFormattedTime() + " — " + best.getRsns());
+                detailLabel.setFont(READABLE_FONT_SMALL);
+                detailLabel.setForeground(new Color(170, 170, 170));
+                leftPanel.add(detailLabel);
+
+                row.add(leftPanel, BorderLayout.CENTER);
+
+                // Right: date
+                String date = best.getDate() != null ? best.getDate().trim() : "";
+                if (!date.isEmpty())
+                {
+                    JLabel dateLabel = new JLabel(date);
+                    dateLabel.setFont(READABLE_FONT_SMALL);
+                    dateLabel.setForeground(new Color(100, 100, 100));
+                    row.add(dateLabel, BorderLayout.EAST);
+                }
+
+                hiscoreTimesPanel.add(row);
+                count++;
+            }
+        }
+
+        hiscoreTimesPanel.revalidate();
+        hiscoreTimesPanel.repaint();
     }
 
     private void fetchTimesForCurrentSelection()
