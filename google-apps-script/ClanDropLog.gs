@@ -523,7 +523,7 @@ function getTopTimes(category, limit) {
         time: (data[i][1] || "").toString(),
         timeSeconds: parseFloat(data[i][2]) || 0,
         rsns: (data[i][3] || "").toString(),
-        date: (data[i][4] || "").toString(),
+        date: formatDateField_(data[i][4]),
         partySize: parseInt(data[i][5]) || 1,
         submitted: (data[i][6] || "").toString()
       });
@@ -576,7 +576,7 @@ function getAllTopTimes(limit) {
       time: (data[i][1] || "").toString(),
       timeSeconds: parseFloat(data[i][2]) || 0,
       rsns: (data[i][3] || "").toString(),
-      date: (data[i][4] || "").toString(),
+      date: formatDateField_(data[i][4]),
       partySize: parseInt(data[i][5]) || 1
     });
   }
@@ -1044,6 +1044,15 @@ function adminSaveSettings(payload) {
     lock.releaseLock();
     return { status: "error", message: err.toString() };
   }
+}
+
+/** Safely format a date cell value to MM/dd string. Sheets may auto-parse "04/05" into a Date object. */
+function formatDateField_(val) {
+  if (!val) return "";
+  if (val instanceof Date) {
+    return Utilities.formatDate(val, "America/New_York", "MM/dd");
+  }
+  return val.toString();
 }
 
 function resp(data) {
