@@ -494,15 +494,41 @@ public class ClanManagementPlugin extends Plugin
             wp.getX(), wp.getY(), wp.getPlane(), playerName
         );
 
-        executor.submit(() -> sheetsService.logClanDrop(clanLogUrl, drop, getApiKey()));
-        log.debug("Clan drop logged: {} ({} gp)", itemName, value);
-
-        // Post to Discord
+        // Capture screenshot for Discord
+        final BufferedImage[] screenshotHolder = {null};
         if (config.postDrops() && fetchedDiscordWebhookUrl != null && !fetchedDiscordWebhookUrl.isEmpty())
         {
-            String webhookUrl = fetchedDiscordWebhookUrl;
-            executor.submit(() -> discordService.postDrop(webhookUrl, drop));
+            try
+            {
+                drawManager.requestNextFrameListener(image ->
+                {
+                    screenshotHolder[0] = new BufferedImage(
+                        image.getWidth(null), image.getHeight(null), BufferedImage.TYPE_INT_ARGB);
+                    java.awt.Graphics2D g = screenshotHolder[0].createGraphics();
+                    g.drawImage(image, 0, 0, null);
+                    g.dispose();
+                });
+            }
+            catch (Exception e)
+            {
+                log.warn("Failed to capture drop screenshot", e);
+            }
         }
+
+        executor.submit(() ->
+        {
+            // Small delay to ensure screenshot capture completes
+            try { Thread.sleep(500); } catch (InterruptedException ignored) {}
+
+            sheetsService.logClanDrop(clanLogUrl, drop, getApiKey());
+            log.debug("Clan drop logged: {} ({} gp)", itemName, value);
+
+            // Post to Discord with screenshot
+            if (config.postDrops() && fetchedDiscordWebhookUrl != null && !fetchedDiscordWebhookUrl.isEmpty())
+            {
+                discordService.postDrop(fetchedDiscordWebhookUrl, drop, screenshotHolder[0]);
+            }
+        });
 
         // Chat confirmation
         if (config.chatConfirmation())

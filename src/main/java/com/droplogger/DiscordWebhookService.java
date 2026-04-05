@@ -38,7 +38,7 @@ public class DiscordWebhookService
         this.gson = gson;
     }
 
-    public void postDrop(String webhookUrl, DropEntry drop)
+    public void postDrop(String webhookUrl, DropEntry drop, BufferedImage screenshot)
     {
         if (!isValidWebhookUrl(webhookUrl))
         {
@@ -61,7 +61,14 @@ public class DiscordWebhookService
         footer.addProperty("text", clanName);
         embed.add("footer", footer);
 
-        sendEmbed(webhookUrl, embed);
+        if (screenshot != null)
+        {
+            sendEmbedWithImage(webhookUrl, embed, screenshot);
+        }
+        else
+        {
+            sendEmbed(webhookUrl, embed);
+        }
     }
 
     public void postPb(String webhookUrl, String formattedTime, int placed, String categoryName,
