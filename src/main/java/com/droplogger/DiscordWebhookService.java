@@ -202,8 +202,8 @@ public class DiscordWebhookService
     {
         if (!isValidWebhookUrl(webhookUrl)) return;
 
-        String title = "boss".equals(type) ? "Boss of the Week" : "Skill of the Week";
-        int color = "boss".equals(type) ? 0xE74C3C : 0x2ECC71; // red for boss, green for skill
+        String title = EventMetrics.labelFromType(type);
+        int color = EventMetrics.discordColorFromType(type);
 
         JsonObject embed = new JsonObject();
         embed.addProperty("title", title + " Started!");
@@ -226,8 +226,8 @@ public class DiscordWebhookService
     {
         if (!isValidWebhookUrl(webhookUrl)) return;
 
-        String title = "boss".equals(type) ? "Boss of the Week" : "Skill of the Week";
-        int color = "boss".equals(type) ? 0xE74C3C : 0x2ECC71;
+        String title = EventMetrics.labelFromType(type);
+        int color = EventMetrics.discordColorFromType(type);
 
         JsonObject embed = new JsonObject();
         embed.addProperty("title", title + " Ended: " + displayName);
@@ -237,7 +237,7 @@ public class DiscordWebhookService
         if (topEntries != null && !topEntries.isEmpty())
         {
             String[] medals = {"\uD83E\uDD47", "\uD83E\uDD48", "\uD83E\uDD49"};
-            String unit = "boss".equals(type) ? " KC" : " XP";
+            String unit = EventMetrics.unitFromType(type);
             for (int i = 0; i < Math.min(3, topEntries.size()); i++)
             {
                 WomService.WomEntry e = topEntries.get(i);

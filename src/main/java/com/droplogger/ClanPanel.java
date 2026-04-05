@@ -403,9 +403,8 @@ public class ClanPanel extends PluginPanel
                 return;
             }
 
-            boolean isBoss = "boss".equals(type);
-            String title = isBoss ? "Boss of the Week" : "Skill of the Week";
-            Color accentColor = isBoss ? new Color(231, 76, 60) : new Color(46, 204, 113);
+            String title = EventMetrics.labelFromType(type);
+            Color accentColor = EventMetrics.colorFromType(type);
 
             eventTitleLabel.setText(title + ": " + displayName);
             eventTitleLabel.setForeground(accentColor);
@@ -419,7 +418,7 @@ public class ClanPanel extends PluginPanel
             eventLeaderboardPanel.removeAll();
             if (leaderboard != null && !leaderboard.isEmpty())
             {
-                String unit = isBoss ? " KC" : " XP";
+                String unit = EventMetrics.unitFromType(type);
                 String[] medals = {"\uD83E\uDD47", "\uD83E\uDD48", "\uD83E\uDD49"};
                 int shown = Math.min(5, leaderboard.size());
                 for (int i = 0; i < shown; i++)

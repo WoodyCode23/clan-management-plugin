@@ -23,7 +23,7 @@ public class AdminPanel extends JPanel
     private final JTextArea announcementArea = new JTextArea(3, 20);
 
     // ── Weekly Events ──
-    private final JComboBox<String> eventTypeBox = new JComboBox<>(new String[]{"Boss of the Week", "Skill of the Week"});
+    private final JComboBox<String> eventTypeBox = new JComboBox<>(new String[]{"Boss of the Week", "Skill of the Week", "Gamer of the Week", "Clue Hunter of the Week"});
     private final JComboBox<String> eventMetricBox = new JComboBox<>();
     private final JLabel activeEventLabel = new JLabel("No active event");
 
@@ -176,7 +176,7 @@ public class AdminPanel extends JPanel
             String displayName = (String) eventMetricBox.getSelectedItem();
             if (typeLabel == null || displayName == null) return;
 
-            String type = typeLabel.startsWith("Boss") ? "boss" : "skill";
+            String type = EventMetrics.typeFromLabel(typeLabel);
             String metric = EventMetrics.metricFromDisplayName(displayName);
             if (metric == null) return;
 
@@ -661,13 +661,23 @@ public class AdminPanel extends JPanel
     {
         eventMetricBox.removeAllItems();
         String selected = (String) eventTypeBox.getSelectedItem();
-        if (selected != null && selected.startsWith("Boss"))
+        if (selected == null) return;
+        String type = EventMetrics.typeFromLabel(selected);
+        if (type == null) return;
+        switch (type)
         {
-            for (String name : EventMetrics.getBossDisplayNames()) eventMetricBox.addItem(name);
-        }
-        else
-        {
-            for (String name : EventMetrics.getSkillDisplayNames()) eventMetricBox.addItem(name);
+            case "boss":
+                for (String name : EventMetrics.getBossDisplayNames()) eventMetricBox.addItem(name);
+                break;
+            case "skill":
+                for (String name : EventMetrics.getSkillDisplayNames()) eventMetricBox.addItem(name);
+                break;
+            case "gamer":
+                for (String name : EventMetrics.getActivityDisplayNames()) eventMetricBox.addItem(name);
+                break;
+            case "clue":
+                for (String name : EventMetrics.getClueDisplayNames()) eventMetricBox.addItem(name);
+                break;
         }
     }
 

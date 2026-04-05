@@ -16,6 +16,12 @@ public final class EventMetrics
     /** Boss metrics: WOM metric name -> display name. */
     public static final Map<String, String> BOSSES = new LinkedHashMap<>();
 
+    /** Activity metrics: WOM metric name -> display name. */
+    public static final Map<String, String> ACTIVITIES = new LinkedHashMap<>();
+
+    /** Clue metrics: WOM metric name -> display name. */
+    public static final Map<String, String> CLUES = new LinkedHashMap<>();
+
     static
     {
         // Skills
@@ -111,6 +117,27 @@ public final class EventMetrics
         BOSSES.put("yama", "Yama");
         BOSSES.put("zalcano", "Zalcano");
         BOSSES.put("zulrah", "Zulrah");
+
+        // Activities (alphabetical by display name)
+        ACTIVITIES.put("bounty_hunter_hunter", "Bounty Hunter — Hunter");
+        ACTIVITIES.put("bounty_hunter_rogue", "Bounty Hunter — Rogue");
+        ACTIVITIES.put("colosseum_glory", "Colosseum Glory");
+        ACTIVITIES.put("guardians_of_the_rift", "Guardians of the Rift");
+        ACTIVITIES.put("last_man_standing", "Last Man Standing");
+        ACTIVITIES.put("league_points", "League Points");
+        ACTIVITIES.put("pvp_arena", "PvP Arena");
+        ACTIVITIES.put("rifts_closed", "Rifts Closed");
+        ACTIVITIES.put("soul_wars_zeal", "Soul Wars");
+        ACTIVITIES.put("volcanic_mine", "Volcanic Mine");
+
+        // Clue tiers
+        CLUES.put("clue_scrolls_all", "All Clues");
+        CLUES.put("clue_scrolls_beginner", "Beginner");
+        CLUES.put("clue_scrolls_easy", "Easy");
+        CLUES.put("clue_scrolls_medium", "Medium");
+        CLUES.put("clue_scrolls_hard", "Hard");
+        CLUES.put("clue_scrolls_elite", "Elite");
+        CLUES.put("clue_scrolls_master", "Master");
     }
 
     /** Get display names sorted for a dropdown. */
@@ -124,6 +151,16 @@ public final class EventMetrics
         return BOSSES.values().toArray(new String[0]);
     }
 
+    public static String[] getActivityDisplayNames()
+    {
+        return ACTIVITIES.values().toArray(new String[0]);
+    }
+
+    public static String[] getClueDisplayNames()
+    {
+        return CLUES.values().toArray(new String[0]);
+    }
+
     /** Look up WOM metric name from display name. */
     public static String metricFromDisplayName(String displayName)
     {
@@ -135,6 +172,81 @@ public final class EventMetrics
         {
             if (entry.getValue().equals(displayName)) return entry.getKey();
         }
+        for (Map.Entry<String, String> entry : ACTIVITIES.entrySet())
+        {
+            if (entry.getValue().equals(displayName)) return entry.getKey();
+        }
+        for (Map.Entry<String, String> entry : CLUES.entrySet())
+        {
+            if (entry.getValue().equals(displayName)) return entry.getKey();
+        }
         return null;
+    }
+
+    /** Get the event type string from an event type label. */
+    public static String typeFromLabel(String label)
+    {
+        if (label == null) return null;
+        if (label.startsWith("Boss")) return "boss";
+        if (label.startsWith("Skill")) return "skill";
+        if (label.startsWith("Gamer")) return "gamer";
+        if (label.startsWith("Clue")) return "clue";
+        return null;
+    }
+
+    /** Get the display label for an event type. */
+    public static String labelFromType(String type)
+    {
+        if (type == null) return "Event";
+        switch (type)
+        {
+            case "boss": return "Boss of the Week";
+            case "skill": return "Skill of the Week";
+            case "gamer": return "Gamer of the Week";
+            case "clue": return "Clue Hunter of the Week";
+            default: return "Event";
+        }
+    }
+
+    /** Get the accent color for an event type. */
+    public static java.awt.Color colorFromType(String type)
+    {
+        if (type == null) return new java.awt.Color(200, 200, 200);
+        switch (type)
+        {
+            case "boss": return new java.awt.Color(231, 76, 60);      // red
+            case "skill": return new java.awt.Color(46, 204, 113);     // green
+            case "gamer": return new java.awt.Color(155, 89, 182);     // purple
+            case "clue": return new java.awt.Color(243, 156, 18);      // orange
+            default: return new java.awt.Color(200, 200, 200);
+        }
+    }
+
+    /** Get the Discord embed color for an event type. */
+    public static int discordColorFromType(String type)
+    {
+        if (type == null) return 0x95A5A6;
+        switch (type)
+        {
+            case "boss": return 0xE74C3C;
+            case "skill": return 0x2ECC71;
+            case "gamer": return 0x9B59B6;
+            case "clue": return 0xF39C12;
+            default: return 0x95A5A6;
+        }
+    }
+
+    /** Get the unit string for leaderboard display. */
+    public static String unitFromType(String type)
+    {
+        if (type == null) return "";
+        switch (type)
+        {
+            case "boss": return " KC";
+            case "skill": return " XP";
+            case "gamer": return " score";
+            case "clue": return " completed";
+            default: return "";
+        }
     }
 }
