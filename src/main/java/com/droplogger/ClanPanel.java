@@ -50,13 +50,17 @@ public class ClanPanel extends PluginPanel
     // ── Hiscores tab components ──
     private final JPanel hiscoresContentPanel = new JPanel();
     private final JPanel hiscoreTimesPanel = new JPanel();
+    private final JTextField hiscoreSearchField = new JTextField();
     private final JComboBox<String> hiscoreGroupCombo = new JComboBox<>();
     private final JComboBox<String> hiscoreBossCombo = new JComboBox<>();
     private final JComboBox<String> hiscoreSizeCombo = new JComboBox<>();
     private final JLabel hiscoreSizeLabel = new JLabel("Size:");
+    private final JLabel hiscoreGroupLabel = new JLabel("Category:");
+    private final JLabel hiscoreBossLabel = new JLabel("Boss:");
     private java.util.function.BiConsumer<BossCategory, JPanel> onFetchTimes;
     private Runnable onClearHiscoreCache;
     private boolean hiscoreDropdownsUpdating = false;
+    private Set<String> recentCategoryKeys = new java.util.LinkedHashSet<>();
 
     // ── Drops tab components ──
     private final JPanel dropsLeaderboardPanel = new JPanel();
@@ -1135,12 +1139,59 @@ public class ClanPanel extends PluginPanel
         wrapper.add(hiscoreDesc);
         wrapper.add(Box.createVerticalStrut(8));
 
+        // ── Search field ──
+        hiscoreSearchField.setBackground(new Color(30, 30, 30));
+        hiscoreSearchField.setForeground(Color.WHITE);
+        hiscoreSearchField.setCaretColor(Color.WHITE);
+        hiscoreSearchField.setFont(READABLE_FONT);
+        hiscoreSearchField.setAlignmentX(Component.LEFT_ALIGNMENT);
+        hiscoreSearchField.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
+        hiscoreSearchField.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(new Color(60, 60, 60)),
+            new EmptyBorder(2, 6, 2, 6)
+        ));
+        hiscoreSearchField.setToolTipText("Search bosses...");
+
+        // Placeholder text
+        hiscoreSearchField.addFocusListener(new java.awt.event.FocusAdapter()
+        {
+            @Override
+            public void focusGained(java.awt.event.FocusEvent e)
+            {
+                if (hiscoreSearchField.getText().equals("Search bosses..."))
+                {
+                    hiscoreSearchField.setText("");
+                    hiscoreSearchField.setForeground(Color.WHITE);
+                }
+            }
+            @Override
+            public void focusLost(java.awt.event.FocusEvent e)
+            {
+                if (hiscoreSearchField.getText().isEmpty())
+                {
+                    hiscoreSearchField.setText("Search bosses...");
+                    hiscoreSearchField.setForeground(new Color(100, 100, 100));
+                }
+            }
+        });
+        hiscoreSearchField.setText("Search bosses...");
+        hiscoreSearchField.setForeground(new Color(100, 100, 100));
+
+        hiscoreSearchField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener()
+        {
+            public void insertUpdate(javax.swing.event.DocumentEvent e) { onSearchChanged(); }
+            public void removeUpdate(javax.swing.event.DocumentEvent e) { onSearchChanged(); }
+            public void changedUpdate(javax.swing.event.DocumentEvent e) { onSearchChanged(); }
+        });
+
+        wrapper.add(hiscoreSearchField);
+        wrapper.add(Box.createVerticalStrut(6));
+
         // ── Boss Group dropdown ──
-        JLabel groupLabel = new JLabel("Category:");
-        groupLabel.setFont(READABLE_FONT);
-        groupLabel.setForeground(new Color(180, 180, 180));
-        groupLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
-        wrapper.add(groupLabel);
+        hiscoreGroupLabel.setFont(READABLE_FONT);
+        hiscoreGroupLabel.setForeground(new Color(180, 180, 180));
+        hiscoreGroupLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        wrapper.add(hiscoreGroupLabel);
         wrapper.add(Box.createVerticalStrut(2));
 
         hiscoreGroupCombo.setBackground(new Color(30, 30, 30));
@@ -1152,11 +1203,10 @@ public class ClanPanel extends PluginPanel
         wrapper.add(Box.createVerticalStrut(6));
 
         // ── Boss dropdown ──
-        JLabel bossLabel = new JLabel("Boss:");
-        bossLabel.setFont(READABLE_FONT);
-        bossLabel.setForeground(new Color(180, 180, 180));
-        bossLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
-        wrapper.add(bossLabel);
+        hiscoreBossLabel.setFont(READABLE_FONT);
+        hiscoreBossLabel.setForeground(new Color(180, 180, 180));
+        hiscoreBossLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        wrapper.add(hiscoreBossLabel);
         wrapper.add(Box.createVerticalStrut(2));
 
         hiscoreBossCombo.setBackground(new Color(30, 30, 30));
@@ -1182,7 +1232,8 @@ public class ClanPanel extends PluginPanel
         wrapper.add(hiscoreSizeCombo);
         wrapper.add(Box.createVerticalStrut(8));
 
-        // Populate group dropdown
+        // Populate group dropdown — "Recent" first, then all groups
+        hiscoreGroupCombo.addItem("Recent");
         for (String groupName : BossCategory.getDisplayGroupNames())
         {
             hiscoreGroupCombo.addItem(groupName);
@@ -1250,9 +1301,34 @@ public class ClanPanel extends PluginPanel
         String selectedGroup = (String) hiscoreGroupCombo.getSelectedItem();
         if (selectedGroup == null) return;
 
-        for (String bossName : BossCategory.getBossNamesInGroup(selectedGroup))
+        if ("Recent".equals(selectedGroup))
         {
-            hiscoreBossCombo.addItem(bossName);
+            // Show bosses that have data in cache
+            Set<String> shown = new java.util.LinkedHashSet<>();
+            for (String catKey : recentCategoryKeys)
+            {
+                BossCategory cat = BossCategory.fromKey(catKey);
+                if (cat != null && !shown.contains(cat.getDisplayName()))
+                {
+                    shown.add(cat.getDisplayName());
+                    hiscoreBossCombo.addItem(cat.getDisplayName());
+                }
+            }
+            if (shown.isEmpty())
+            {
+                hiscoreBossCombo.addItem("No recent PBs");
+            }
+        }
+        else if ("Search Results".equals(selectedGroup))
+        {
+            // Populated by onSearchChanged
+        }
+        else
+        {
+            for (String bossName : BossCategory.getBossNamesInGroup(selectedGroup))
+            {
+                hiscoreBossCombo.addItem(bossName);
+            }
         }
 
         populateSizeCombo();
@@ -1265,7 +1341,15 @@ public class ClanPanel extends PluginPanel
         String selectedBoss = (String) hiscoreBossCombo.getSelectedItem();
         if (selectedGroup == null || selectedBoss == null) return;
 
-        List<BossCategory> cats = BossCategory.getCategoriesForBoss(selectedGroup, selectedBoss);
+        List<BossCategory> cats;
+        if ("Recent".equals(selectedGroup) || "Search Results".equals(selectedGroup))
+        {
+            cats = BossCategory.getCategoriesForBossAnyGroup(selectedBoss);
+        }
+        else
+        {
+            cats = BossCategory.getCategoriesForBoss(selectedGroup, selectedBoss);
+        }
 
         if (cats.size() <= 1)
         {
@@ -1299,7 +1383,15 @@ public class ClanPanel extends PluginPanel
         String selectedSize = (String) hiscoreSizeCombo.getSelectedItem();
         if (selectedGroup == null || selectedBoss == null) return null;
 
-        List<BossCategory> cats = BossCategory.getCategoriesForBoss(selectedGroup, selectedBoss);
+        List<BossCategory> cats;
+        if ("Recent".equals(selectedGroup) || "Search Results".equals(selectedGroup))
+        {
+            cats = BossCategory.getCategoriesForBossAnyGroup(selectedBoss);
+        }
+        else
+        {
+            cats = BossCategory.getCategoriesForBoss(selectedGroup, selectedBoss);
+        }
         if (cats.isEmpty()) return null;
 
         if (cats.size() == 1) return cats.get(0);
@@ -1317,6 +1409,67 @@ public class ClanPanel extends PluginPanel
         }
 
         return cats.get(0);
+    }
+
+    private void onSearchChanged()
+    {
+        String text = hiscoreSearchField.getText().trim();
+        if (text.equals("Search bosses...") || text.isEmpty())
+        {
+            // Revert to normal mode — select "Recent" if available
+            hiscoreDropdownsUpdating = true;
+            hiscoreGroupCombo.setSelectedItem("Recent");
+            hiscoreGroupLabel.setVisible(true);
+            hiscoreGroupCombo.setVisible(true);
+            populateBossCombo();
+            hiscoreDropdownsUpdating = false;
+            return;
+        }
+
+        // Search mode — hide group dropdown, show filtered results in boss combo
+        hiscoreDropdownsUpdating = true;
+        hiscoreGroupLabel.setVisible(false);
+        hiscoreGroupCombo.setVisible(false);
+
+        // Temporarily set group to "Search Results" for size/category lookups
+        if (hiscoreGroupCombo.getItemCount() == 0 || !"Search Results".equals(hiscoreGroupCombo.getItemAt(0)))
+        {
+            hiscoreGroupCombo.insertItemAt("Search Results", 0);
+        }
+        hiscoreGroupCombo.setSelectedItem("Search Results");
+
+        hiscoreBossCombo.removeAllItems();
+        List<String> matches = BossCategory.searchBossNames(text);
+        for (String name : matches)
+        {
+            hiscoreBossCombo.addItem(name);
+        }
+        if (matches.isEmpty())
+        {
+            hiscoreBossCombo.addItem("No matches");
+        }
+
+        hiscoreDropdownsUpdating = false;
+        populateSizeCombo();
+    }
+
+    /**
+     * Set the category keys that have recent PB data (from hiscore cache).
+     * Called by the plugin after loading hiscore data.
+     */
+    public void setRecentCategories(Set<String> categoryKeys)
+    {
+        this.recentCategoryKeys = categoryKeys;
+        // If currently showing "Recent", refresh the boss combo
+        SwingUtilities.invokeLater(() ->
+        {
+            if ("Recent".equals(hiscoreGroupCombo.getSelectedItem()))
+            {
+                hiscoreDropdownsUpdating = true;
+                populateBossCombo();
+                hiscoreDropdownsUpdating = false;
+            }
+        });
     }
 
     private void fetchTimesForCurrentSelection()

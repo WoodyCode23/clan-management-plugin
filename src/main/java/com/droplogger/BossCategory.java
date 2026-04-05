@@ -387,6 +387,51 @@ public class BossCategory
     }
 
     /**
+     * Get all categories matching a boss display name across all groups.
+     */
+    public static List<BossCategory> getCategoriesForBossAnyGroup(String displayName)
+    {
+        List<BossCategory> result = new ArrayList<>();
+        for (BossCategory cat : ALL)
+        {
+            if (cat.displayName.equals(displayName))
+            {
+                result.add(cat);
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Look up a BossCategory by its key (e.g. "cox_solo").
+     */
+    public static BossCategory fromKey(String key)
+    {
+        for (BossCategory cat : ALL)
+        {
+            if (cat.key.equals(key)) return cat;
+        }
+        return null;
+    }
+
+    /**
+     * Search all boss display names (case-insensitive), return unique matches.
+     */
+    public static List<String> searchBossNames(String query)
+    {
+        String lower = query.toLowerCase();
+        List<String> results = new ArrayList<>();
+        for (BossCategory cat : ALL)
+        {
+            if (cat.displayName.toLowerCase().contains(lower) && !results.contains(cat.displayName))
+            {
+                results.add(cat.displayName);
+            }
+        }
+        return results;
+    }
+
+    /**
      * Get all display group names in registration order.
      */
     public static List<String> getDisplayGroupNames()
