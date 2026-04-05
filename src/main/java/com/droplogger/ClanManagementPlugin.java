@@ -117,6 +117,7 @@ public class ClanManagementPlugin extends Plugin
     // Track last killed NPC for correlating drops
     private String lastKilledNpc = "Unknown";
     private int lastKillCount = 0;
+    private long lastKillTime = 0;
 
     private PbDetector pbDetector;
     private FightTracker fightTracker;
@@ -431,8 +432,13 @@ public class ClanManagementPlugin extends Plugin
             ? client.getLocalPlayer().getWorldLocation()
             : new WorldPoint(0, 0, 0);
 
+        // Only attribute to last NPC if killed recently (within 30s) — avoids
+        // clue casket drops being attributed to a stale NPC like "Brassican Mage"
+        String npcSource = (System.currentTimeMillis() - lastKillTime < 30_000)
+            ? lastKilledNpc : "Unknown";
+
         DropEntry drop = new DropEntry(
-            itemName, value, lastKilledNpc, lastKillCount,
+            itemName, value, npcSource, lastKillCount,
             wp.getX(), wp.getY(), wp.getPlane(), playerName
         );
 
@@ -741,6 +747,7 @@ public class ClanManagementPlugin extends Plugin
         {
             lastKilledNpc = npc.getName();
             lastKillCount = pbDetector.getLastKillCount();
+            lastKillTime = System.currentTimeMillis();
         }
     }
 
