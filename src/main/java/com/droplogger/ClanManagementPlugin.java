@@ -1709,6 +1709,94 @@ public class ClanManagementPlugin extends Plugin
             adminPanel.setActiveEvent(activeEventType, activeEventDisplayName, activeEventEndTime);
         }
 
+        // Show bingo sections if keys are configured
+        String bingoAdminKey = config.bingoAdminKey();
+        String bingoHostKey = config.bingoHostKey();
+
+        if (bingoAdminKey != null && !bingoAdminKey.isEmpty())
+        {
+            adminPanel.showBingoAdminSection(true);
+        }
+        if (bingoHostKey != null && !bingoHostKey.isEmpty())
+        {
+            adminPanel.showBingoHostSection(true);
+        }
+
+        // Bingo admin callbacks
+        adminPanel.setOnBingoAssignRoster(args -> executor.submit(() -> {
+            try
+            {
+                adminPanel.setStatus("Assigning " + args[0] + " to " + args[1] + "...");
+                bingoService.adminUpdateRoster(args[0], args[1]);
+                adminPanel.setStatus("Assigned " + args[0] + " to team " + args[1]);
+                bingoService.invalidateConfigCache();
+            }
+            catch (Exception e)
+            {
+                adminPanel.setStatus("Error: " + e.getMessage());
+            }
+        }));
+
+        adminPanel.setOnBingoRemoveRoster(rsn -> executor.submit(() -> {
+            try
+            {
+                adminPanel.setStatus("Removing " + rsn + "...");
+                bingoService.adminRemoveRoster(rsn);
+                adminPanel.setStatus("Removed " + rsn + " from roster");
+                bingoService.invalidateConfigCache();
+            }
+            catch (Exception e)
+            {
+                adminPanel.setStatus("Error: " + e.getMessage());
+            }
+        }));
+
+        adminPanel.setOnBingoAdjustProgress(args -> executor.submit(() -> {
+            try
+            {
+                adminPanel.setStatus("Adjusting progress...");
+                double points = Double.parseDouble(args[2]);
+                bingoService.adminManualProgress(args[0], args[1], points);
+                adminPanel.setStatus("Added " + args[2] + " points to " + args[0] + "/" + args[1]);
+            }
+            catch (Exception e)
+            {
+                adminPanel.setStatus("Error: " + e.getMessage());
+            }
+        }));
+
+        // Bingo host callbacks
+        adminPanel.setOnBingoAddBounty(args -> executor.submit(() -> {
+            try
+            {
+                adminPanel.setStatus("Adding bounty...");
+                int number = Integer.parseInt(args[0]);
+                double points = Double.parseDouble(args[3]);
+                bingoService.hostAddBounty(number, args[1], args[2], points);
+                adminPanel.setStatus("Bounty #" + args[0] + " added");
+                bingoService.invalidateConfigCache();
+            }
+            catch (Exception e)
+            {
+                adminPanel.setStatus("Error: " + e.getMessage());
+            }
+        }));
+
+        adminPanel.setOnBingoSetWinner(args -> executor.submit(() -> {
+            try
+            {
+                adminPanel.setStatus("Setting winner...");
+                int number = Integer.parseInt(args[0]);
+                bingoService.hostUpdateBounty(number, args[1]);
+                adminPanel.setStatus("Bounty #" + args[0] + " winner set to " + args[1]);
+                bingoService.invalidateConfigCache();
+            }
+            catch (Exception e)
+            {
+                adminPanel.setStatus("Error: " + e.getMessage());
+            }
+        }));
+
         log.info("Admin panel enabled");
     }
 }
