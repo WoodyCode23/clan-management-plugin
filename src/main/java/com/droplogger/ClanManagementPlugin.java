@@ -450,6 +450,26 @@ public class ClanManagementPlugin extends Plugin
             return;
         }
 
+        // Only log items that are on the clan whitelist (if whitelist is loaded)
+        if (cachedClanWhitelist != null && !cachedClanWhitelist.isEmpty())
+        {
+            boolean onWhitelist = false;
+            for (Map<String, String> entry : cachedClanWhitelist)
+            {
+                String whitelistName = entry.get("item");
+                if (whitelistName != null && whitelistName.equalsIgnoreCase(itemName))
+                {
+                    onWhitelist = true;
+                    break;
+                }
+            }
+            if (!onWhitelist)
+            {
+                log.debug("Drop '{}' not on whitelist, skipping", itemName);
+                return;
+            }
+        }
+
         String clanLogUrl = getClanApiUrl();
         if (clanLogUrl.isEmpty())
         {
