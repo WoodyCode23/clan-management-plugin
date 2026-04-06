@@ -111,6 +111,9 @@ public class ClanManagementPlugin extends Plugin
     @Inject
     private BingoService bingoService;
 
+    @Inject
+    private PlatformApiService platformApiService;
+
     private ClanPanel panel;
     private AdminPanel adminPanel;
     private NavigationButton navButton;
@@ -226,6 +229,16 @@ public class ClanManagementPlugin extends Plugin
             || worldTypes.contains(WorldType.DEADMAN)
             || worldTypes.contains(WorldType.TOURNAMENT_WORLD)
             || worldTypes.contains(WorldType.FRESH_START_WORLD);
+    }
+
+    private boolean isPlatformConfigured()
+    {
+        String url = config.platformApiUrl();
+        String key = config.platformApiKey();
+        String slug = config.platformClanSlug();
+        return url != null && !url.isEmpty()
+            && key != null && !key.isEmpty()
+            && slug != null && !slug.isEmpty();
     }
 
     /** Get the clan name from server config, defaulting to "Clan". */
@@ -528,6 +541,17 @@ public class ClanManagementPlugin extends Plugin
             {
                 discordService.postDrop(fetchedDiscordWebhookUrl, drop, screenshotHolder[0]);
             }
+
+            // Platform API (dual mode)
+            if (isPlatformConfigured())
+            {
+                platformApiService.submitDrop(
+                    config.platformApiUrl(),
+                    config.platformApiKey(),
+                    config.platformClanSlug(),
+                    drop
+                );
+            }
         });
 
         // Chat confirmation
@@ -568,6 +592,20 @@ public class ClanManagementPlugin extends Plugin
             String clanLogUrl = fetchedClanDropLogUrl;
             executor.submit(() -> sheetsService.logClanDrop(clanLogUrl, drop, getApiKey(), "collection_log"));
             log.debug("Collection log entry submitted: {} for {}", itemName, playerName);
+        }
+
+        // Platform API (dual mode)
+        if (isPlatformConfigured())
+        {
+            final String pRsn = playerName;
+            final String pItem = itemName;
+            executor.submit(() -> platformApiService.submitCollectionLogEntry(
+                config.platformApiUrl(),
+                config.platformApiKey(),
+                config.platformClanSlug(),
+                pRsn,
+                pItem
+            ));
         }
     }
 
@@ -723,6 +761,21 @@ public class ClanManagementPlugin extends Plugin
             {
                 discordService.postPb(fetchedDiscordWebhookUrl, formattedTime, placed,
                     finalCategoryName, rsns, screenshotHolder[0]);
+            }
+
+            // Platform API (dual mode)
+            if (isPlatformConfigured())
+            {
+                int timeMs = (int) (timeSeconds * 1000);
+                platformApiService.submitPb(
+                    config.platformApiUrl(),
+                    config.platformApiKey(),
+                    config.platformClanSlug(),
+                    rsns,
+                    categoryKey,
+                    finalPartySize,
+                    timeMs
+                );
             }
         });
     }

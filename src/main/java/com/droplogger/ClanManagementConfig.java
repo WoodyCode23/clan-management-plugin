@@ -202,4 +202,41 @@ public interface ClanManagementConfig extends Config
         secret = true
     )
     default String bingoHostKey() { return ""; }
+
+    // ── Platform ──
+
+    @ConfigSection(
+        name = "Platform",
+        description = "Connect to the clan platform API for advanced features (optional)",
+        position = 8
+    )
+    String platformSection = "platform";
+
+    @ConfigItem(
+        keyName = "platformApiUrl",
+        name = "Platform API URL",
+        description = "Base URL of your clan platform API (e.g. https://api.yourclan.gg). Leave blank to use Google Sheets only.",
+        section = platformSection,
+        position = 0
+    )
+    default String platformApiUrl() { return ""; }
+
+    @ConfigItem(
+        keyName = "platformApiKey",
+        name = "Platform API Key",
+        description = "API key for your clan on the platform",
+        section = platformSection,
+        position = 1,
+        secret = true
+    )
+    default String platformApiKey() { return ""; }
+
+    @ConfigItem(
+        keyName = "platformClanSlug",
+        name = "Clan Slug",
+        description = "Your clan's URL slug on the platform (e.g. 'solus')",
+        section = platformSection,
+        position = 2
+    )
+    default String platformClanSlug() { return ""; }
 }
