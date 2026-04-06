@@ -49,6 +49,7 @@ public class AdminPanel extends JPanel
     private Consumer<String[]> onBingoAdjustProgress;
     private Consumer<String[]> onBingoAddBounty;
     private Consumer<String[]> onBingoSetWinner;
+    private Runnable onSyncRoster;
 
     public AdminPanel()
     {
@@ -197,6 +198,29 @@ public class AdminPanel extends JPanel
         eventButtons.add(startEventBtn);
         eventButtons.add(endEventBtn);
         add(eventButtons);
+
+        add(Box.createVerticalStrut(8));
+        add(createSeparator());
+        add(Box.createVerticalStrut(6));
+
+        // ══════════════════════════════════
+        // Clan Roster
+        // ══════════════════════════════════
+        add(createSectionTitle("Clan Roster"));
+        add(Box.createVerticalStrut(4));
+
+        JLabel rosterDesc = new JLabel("Sync full member list & ranks to the platform");
+        rosterDesc.setFont(SMALL_FONT);
+        rosterDesc.setForeground(new Color(150, 150, 150));
+        rosterDesc.setAlignmentX(Component.LEFT_ALIGNMENT);
+        add(rosterDesc);
+        add(Box.createVerticalStrut(4));
+
+        JButton syncRosterBtn = createButton("Sync Roster");
+        syncRosterBtn.addActionListener(e -> {
+            if (onSyncRoster != null) onSyncRoster.run();
+        });
+        add(syncRosterBtn);
 
         add(Box.createVerticalStrut(8));
         add(createSeparator());
@@ -624,6 +648,7 @@ public class AdminPanel extends JPanel
     public void setOnBingoAdjustProgress(Consumer<String[]> cb) { this.onBingoAdjustProgress = cb; }
     public void setOnBingoAddBounty(Consumer<String[]> cb) { this.onBingoAddBounty = cb; }
     public void setOnBingoSetWinner(Consumer<String[]> cb) { this.onBingoSetWinner = cb; }
+    public void setOnSyncRoster(Runnable cb) { this.onSyncRoster = cb; }
 
     public void showBingoAdminSection(boolean visible)
     {

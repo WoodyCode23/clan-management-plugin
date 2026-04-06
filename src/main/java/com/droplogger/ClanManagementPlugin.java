@@ -11,10 +11,16 @@ import net.runelite.api.clan.ClanChannelMember;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.GameState;
 import net.runelite.api.WorldType;
+import net.runelite.api.EnumComposition;
+import net.runelite.api.MenuAction;
+import net.runelite.api.StructComposition;
 import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
+import net.runelite.api.events.ScriptPreFired;
 import net.runelite.api.events.ScriptPostFired;
+import net.runelite.api.events.WidgetLoaded;
+import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
@@ -42,6 +48,7 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -67,6 +74,8 @@ public class ClanManagementPlugin extends Plugin
         Pattern.compile("New item added to your collection log: (.+)");
     private static final Pattern CLUE_COMPLETION_PATTERN =
         Pattern.compile("You have completed (\\d+) (easy|medium|hard|elite|master|beginner) Treasure Trails\\.");
+    private static final Pattern CLOG_PB_PATTERN =
+        Pattern.compile("Fastest (?:kill|time|completion)[:\\s]+([\\d]+:[\\d.]+)");
 
     @Inject
     private Client client;
@@ -116,6 +125,9 @@ public class ClanManagementPlugin extends Plugin
     @Inject
     private PlatformApiService platformApiService;
 
+    @Inject
+    private RsHiscoreTracker hiscoreTracker;
+
     private ClanPanel panel;
     private AdminPanel adminPanel;
     private NavigationButton navButton;
@@ -164,9 +176,26 @@ public class ClanManagementPlugin extends Plugin
     private boolean bingoActive = false;
     private String playerBingoTeam = "";
 
-    // Collection log sync state
-    private boolean clogSyncActive = false;
-    private final Set<String> clogSyncItems = Collections.synchronizedSet(new HashSet<>());
+    // Collection log sync state (automatic — like WikiSync/RuneProfile)
+    private final Map<String, ClogItem> clogSyncItems = Collections.synchronizedMap(new LinkedHashMap<>());
+    private Map<Integer, String[]> clogItemCategoryMap = null; // itemId -> [tab, category]
+    private int clogDebounceTicksRemaining = -1;
+    private boolean clogSearchPending = false;
+    private static final int CLOG_DEBOUNCE_TICKS = 10;
+    private static final int SCRIPT_CLOG_ITEM = 4100;
+    private static final int SEARCH_TOGGLE_PACKED = 40697932; // InterfaceID.Collection.SEARCH_TOGGLE
+    private static final int CLOG_TABS_ENUM = 2102;
+    private static final int PARAM_TAB_NAME = 682;
+    private static final int PARAM_TAB_CATEGORIES_ENUM = 683;
+    private static final int PARAM_CATEGORY_NAME = 689;
+    private static final int PARAM_CATEGORY_ITEMS_ENUM = 690;
+
+    // Adventure log PB sync state
+    private int adventureLogPbTicksRemaining = -1;
+    private static final int JOURNALSCROLL_GROUP = 741;
+    private static final int ADVENTURE_LOG_PB_DELAY_TICKS = 3;
+    private static final Pattern ADVENTURE_PB_PATTERN =
+        Pattern.compile("Fastest (?:kill|time|run|completion)(?:\\s*-\\s*\\(Team size:\\s*(.+?)\\))?[:\\s]+([\\d]+:[\\d.]+)");
 
     @Provides
     ClanManagementConfig provideConfig(ConfigManager configManager)
@@ -274,78 +303,7 @@ public class ClanManagementPlugin extends Plugin
         panel.setOnFetchPlayerDrops((rsn) -> executor.submit(() -> fetchPlayerDrops(rsn)));
         panel.setOnRefreshWhitelist(() -> executor.submit(this::refreshClanWhitelist));
         panel.setOnFetchWomData((metric, period) -> executor.submit(() -> fetchWomData(metric, period)));
-        panel.setOnClogSync(new Runnable[] {
-            // Start sync
-            () -> {
-                if (!isPlatformConfigured())
-                {
-                    panel.setClogSyncStatus("Configure Platform API first");
-                    return;
-                }
-                clogSyncActive = true;
-                clogSyncItems.clear();
-                panel.setClogSyncMode(true);
-                panel.setClogSyncStatus("Open your Collection Log and browse through categories...");
-                panel.updateClogSyncCount(0);
-            },
-            // Finish sync
-            () -> {
-                clogSyncActive = false;
-                if (clogSyncItems.isEmpty())
-                {
-                    panel.setClogSyncStatus("No items captured. Open your Collection Log first.");
-                    panel.setClogSyncMode(false);
-                    return;
-                }
-
-                String rsn = client.getLocalPlayer() != null
-                    ? client.getLocalPlayer().getName() : "Unknown";
-                List<String> items = new ArrayList<>(clogSyncItems);
-                panel.setClogSyncStatus("Uploading " + items.size() + " items...");
-
-                executor.submit(() -> platformApiService.bulkSyncCollectionLog(
-                    config.platformApiUrl(),
-                    config.platformApiKey(),
-                    config.platformClanSlug(),
-                    rsn,
-                    items,
-                    new okhttp3.Callback()
-                    {
-                        @Override
-                        public void onFailure(okhttp3.Call call, java.io.IOException e)
-                        {
-                            log.error("Collection log sync failed", e);
-                            panel.setClogSyncStatus("Upload failed: " + e.getMessage());
-                            panel.setClogSyncMode(false);
-                        }
-
-                        @Override
-                        public void onResponse(okhttp3.Call call, okhttp3.Response response)
-                        {
-                            response.close();
-                            if (response.isSuccessful())
-                            {
-                                panel.setClogSyncStatus("Synced " + items.size() + " items!");
-                                panel.setClogSyncMode(false);
-                                clogSyncItems.clear();
-                            }
-                            else
-                            {
-                                panel.setClogSyncStatus("Upload failed: HTTP " + response.code());
-                                panel.setClogSyncMode(false);
-                            }
-                        }
-                    }
-                ));
-            },
-            // Cancel sync
-            () -> {
-                clogSyncActive = false;
-                clogSyncItems.clear();
-                panel.setClogSyncMode(false);
-                panel.setClogSyncStatus("");
-            }
-        });
+        // Collection log sync is automatic — no callbacks needed
         // Load caches from disk (avoids re-fetching every startup)
         loadHiscoreCacheFromDisk();
         loadDropsCacheFromDisk();
@@ -402,6 +360,8 @@ public class ClanManagementPlugin extends Plugin
 
         if (fightTracker != null) fightTracker.reset();
 
+        hiscoreTracker.reset();
+
         if (bountyScheduler != null)
         {
             bountyScheduler.cancel();
@@ -410,8 +370,11 @@ public class ClanManagementPlugin extends Plugin
         panel.hideBingoTab();
         bingoActive = false;
 
-        clogSyncActive = false;
         clogSyncItems.clear();
+        clogDebounceTicksRemaining = -1;
+        clogSearchPending = false;
+        pbReadPending = false;
+        adventureLogPbTicksRemaining = -1;
 
         clientToolbar.removeNavigation(navButton);
         log.info("Clan Management plugin stopped");
@@ -437,6 +400,48 @@ public class ClanManagementPlugin extends Plugin
     @Subscribe
     public void onGameTick(GameTick event)
     {
+        // Stat tracking: detect clan member logoffs
+        if (isPlatformConfigured())
+        {
+            hiscoreTracker.onGameTick(config);
+        }
+
+        // Collection log: trigger search after clog opens to enumerate all items
+        if (clogSearchPending)
+        {
+            clogSearchPending = false;
+            triggerClogSearch();
+        }
+
+        // Read PB from collection log header (deferred by 1 tick)
+        if (pbReadPending)
+        {
+            pbReadPending = false;
+            readClogPb();
+        }
+
+        // Adventure log Counters page — bulk PB parse (deferred by several ticks)
+        if (adventureLogPbTicksRemaining > 0)
+        {
+            adventureLogPbTicksRemaining--;
+        }
+        else if (adventureLogPbTicksRemaining == 0)
+        {
+            adventureLogPbTicksRemaining = -1;
+            parseAdventureLogPbs();
+        }
+
+        // Collection log auto-sync debounce
+        if (clogDebounceTicksRemaining > 0)
+        {
+            clogDebounceTicksRemaining--;
+        }
+        else if (clogDebounceTicksRemaining == 0)
+        {
+            clogDebounceTicksRemaining = -1;
+            uploadCollectionLog();
+        }
+
         if (fightTracker == null)
         {
             return;
@@ -529,42 +534,506 @@ public class ClanManagementPlugin extends Plugin
     }
 
     @Subscribe
+    public void onWidgetLoaded(WidgetLoaded event)
+    {
+        // Adventure log Counters page (group 741) — bulk PB sync
+        if (event.getGroupId() == JOURNALSCROLL_GROUP && isPlatformConfigured() && config.enablePbSync())
+        {
+            log.info("Adventure log Counters page detected (group 741), scheduling PB parse");
+            // Defer by several ticks so widget text has time to populate
+            adventureLogPbTicksRemaining = ADVENTURE_LOG_PB_DELAY_TICKS;
+        }
+
+        if (event.getGroupId() == InterfaceID.COLLECTION && isPlatformConfigured() && config.enableClogSync())
+        {
+            // Build category mapping from game cache (enum 2102 hierarchy)
+            if (clogItemCategoryMap == null)
+            {
+                buildClogCategoryMap();
+            }
+            // Collection log opened — trigger search on next tick to enumerate all items
+            clogSyncItems.clear();
+            clogSearchPending = true;
+            panel.setClogSyncStatus("Scanning collection log...");
+        }
+    }
+
+    @Subscribe
+    public void onScriptPreFired(ScriptPreFired event)
+    {
+        if (event.getScriptId() != SCRIPT_CLOG_ITEM || !isPlatformConfigured() || !config.enableClogSync())
+        {
+            return;
+        }
+
+        // Script 4100 fires per obtained item: args[1] = itemId, args[2] = quantity
+        Object[] args = event.getScriptEvent().getArguments();
+        if (args == null || args.length < 2)
+        {
+            return;
+        }
+
+        int itemId = (int) args[1];
+        String itemName = itemManager.getItemComposition(itemId).getName();
+
+        if (itemName != null && !itemName.isEmpty() && !itemName.equals("null"))
+        {
+            if (!clogSyncItems.containsKey(itemName))
+            {
+                String tab = null;
+                String category = null;
+                if (clogItemCategoryMap != null)
+                {
+                    String[] meta = clogItemCategoryMap.get(itemId);
+                    if (meta != null)
+                    {
+                        tab = meta[0];
+                        category = meta[1];
+                    }
+                }
+                clogSyncItems.put(itemName, new ClogItem(itemName, itemId, tab, category));
+                panel.updateClogSyncCount(clogSyncItems.size());
+            }
+            // Reset debounce — upload after CLOG_DEBOUNCE_TICKS with no new items
+            clogDebounceTicksRemaining = CLOG_DEBOUNCE_TICKS;
+        }
+    }
+
+    private void buildClogCategoryMap()
+    {
+        try
+        {
+            Map<Integer, String[]> map = new HashMap<>();
+            EnumComposition tabsEnum = client.getEnum(CLOG_TABS_ENUM);
+            int[] tabStructIds = tabsEnum.getIntVals();
+
+            for (int tabStructId : tabStructIds)
+            {
+                StructComposition tabStruct = client.getStructComposition(tabStructId);
+                String tabName = tabStruct.getStringValue(PARAM_TAB_NAME);
+                int categoriesEnumId = tabStruct.getIntValue(PARAM_TAB_CATEGORIES_ENUM);
+
+                EnumComposition categoriesEnum = client.getEnum(categoriesEnumId);
+                int[] categoryStructIds = categoriesEnum.getIntVals();
+
+                for (int catStructId : categoryStructIds)
+                {
+                    StructComposition catStruct = client.getStructComposition(catStructId);
+                    String categoryName = catStruct.getStringValue(PARAM_CATEGORY_NAME);
+                    int itemsEnumId = catStruct.getIntValue(PARAM_CATEGORY_ITEMS_ENUM);
+
+                    EnumComposition itemsEnum = client.getEnum(itemsEnumId);
+                    int[] itemIds = itemsEnum.getIntVals();
+
+                    for (int itemId : itemIds)
+                    {
+                        map.put(itemId, new String[]{tabName, categoryName});
+                    }
+                }
+            }
+
+            clogItemCategoryMap = map;
+            log.info("Built collection log category map: {} items across all tabs", map.size());
+
+            // Sync the full catalog to the platform so the website can show all possible items
+            executor.submit(() -> platformApiService.syncCatalog(
+                config.platformApiUrl(),
+                config.platformApiKey(),
+                config.platformClanSlug(),
+                map,
+                itemManager
+            ));
+        }
+        catch (Exception e)
+        {
+            log.warn("Failed to build collection log category map", e);
+        }
+    }
+
+    private boolean pbReadPending = false;
+
+    @Subscribe
     public void onScriptPostFired(ScriptPostFired event)
     {
-        if (!clogSyncActive || event.getScriptId() != 2730)
+        // Script 2731 = COLLECTION_DRAW_LIST — fires when a category page is loaded in the clog
+        if (event.getScriptId() != 2731 || !isPlatformConfigured() || !config.enablePbSync())
+        {
+            return;
+        }
+        // Defer reading by 1 tick so the header text has time to populate
+        pbReadPending = true;
+    }
+
+    private void readClogPb()
+    {
+        // The collection log is open and a category was just selected.
+        // Read the header text and the selected category name.
+
+        // Header text: group 621, child 20
+        Widget headerWidget = client.getWidget(621, 20);
+        if (headerWidget == null)
         {
             return;
         }
 
-        Widget itemList = client.getWidget(621, 3);
-        if (itemList == null)
+        // The header text is in dynamic children, not getText() on the parent
+        // Try reading from children first, fall back to parent text
+        StringBuilder headerBuilder = new StringBuilder();
+        Widget[] headerChildren = headerWidget.getDynamicChildren();
+        if (headerChildren != null && headerChildren.length > 0)
         {
-            return;
-        }
-
-        Widget[] children = itemList.getDynamicChildren();
-        if (children == null)
-        {
-            return;
-        }
-
-        int newItems = 0;
-        for (Widget child : children)
-        {
-            if (child.getOpacity() == 0)
+            for (Widget child : headerChildren)
             {
-                String name = Text.removeTags(child.getName()).trim();
-                if (!name.isEmpty() && clogSyncItems.add(name))
+                String t = child.getText();
+                if (t != null && !t.isEmpty())
                 {
-                    newItems++;
+                    headerBuilder.append(t).append(" ");
+                }
+            }
+        }
+        if (headerBuilder.length() == 0)
+        {
+            String t = headerWidget.getText();
+            if (t != null) headerBuilder.append(t);
+        }
+
+        String headerText = Text.removeTags(headerBuilder.toString().trim());
+        if (headerText.isEmpty())
+        {
+            return;
+        }
+
+        log.debug("Collection log header text: {}", headerText);
+
+        // Parse fastest time
+        java.util.regex.Matcher pbMatcher = CLOG_PB_PATTERN.matcher(headerText);
+        if (!pbMatcher.find())
+        {
+            return;
+        }
+
+        String timeStr = pbMatcher.group(1);
+        int timeMs = parsePbTime(timeStr);
+        if (timeMs <= 0)
+        {
+            return;
+        }
+
+        // Get the page/boss name from the MAIN widget title area (group 621, child 17 = MAIN)
+        // or from the HEADER widget itself — the first line is typically the boss name
+        // Try getting the category from the header: first line before "Kill Count:"
+        String bossName = null;
+        java.util.regex.Matcher nameMatcher = Pattern.compile("^(.+?)(?:\\s*Kill Count|\\s*Completions|\\s*Fastest)").matcher(headerText);
+        if (nameMatcher.find())
+        {
+            bossName = nameMatcher.group(1).trim();
+        }
+
+        if (bossName == null || bossName.isEmpty())
+        {
+            // Fallback: try reading from the category list
+            Widget listWidget = client.getWidget(621, 9);
+            if (listWidget != null)
+            {
+                Widget[] listChildren = listWidget.getDynamicChildren();
+                if (listChildren != null)
+                {
+                    for (Widget child : listChildren)
+                    {
+                        String text = Text.removeTags(child.getText()).trim();
+                        if (!text.isEmpty() && (child.getTextColor() == 0xff981f || child.getTextColor() == 0xffffff))
+                        {
+                            bossName = text;
+                            break;
+                        }
+                    }
                 }
             }
         }
 
-        if (newItems > 0)
+        if (bossName == null || bossName.isEmpty())
         {
-            panel.updateClogSyncCount(clogSyncItems.size());
+            return;
         }
+
+        String rsn = client.getLocalPlayer() != null
+            ? client.getLocalPlayer().getName() : null;
+        if (rsn == null)
+        {
+            return;
+        }
+
+        String bossKey = bossName.toLowerCase().replace(" ", "_").replaceAll("[^a-z0-9_]", "");
+
+        log.info("Collection log PB detected: {} — {} ({}ms)", bossKey, timeStr, timeMs);
+
+        executor.submit(() -> platformApiService.submitPersonalBest(
+            config.platformApiUrl(),
+            config.platformApiKey(),
+            config.platformClanSlug(),
+            rsn,
+            bossKey,
+            1, // solo
+            timeMs
+        ));
+    }
+
+    private static int parsePbTime(String timeStr)
+    {
+        // Formats: "1:23.40", "12:34.50", "1:23", "0:45.60"
+        try
+        {
+            String[] parts = timeStr.split(":");
+            if (parts.length != 2) return -1;
+            int minutes = Integer.parseInt(parts[0]);
+            double seconds;
+            if (parts[1].contains("."))
+            {
+                seconds = Double.parseDouble(parts[1]);
+            }
+            else
+            {
+                seconds = Integer.parseInt(parts[1]);
+            }
+            return (int) (minutes * 60000 + seconds * 1000);
+        }
+        catch (NumberFormatException e)
+        {
+            return -1;
+        }
+    }
+
+    /**
+     * Parse ALL personal bests from the adventure log Counters page (group 741).
+     * The widget contains dynamic children with sequential boss names and time entries.
+     */
+    private void parseAdventureLogPbs()
+    {
+        String rsn = client.getLocalPlayer() != null
+            ? client.getLocalPlayer().getName() : null;
+        if (rsn == null)
+        {
+            return;
+        }
+
+        // Find the container widget with dynamic children (scroll content)
+        // Try dynamic children first, then static children
+        Widget[] children = null;
+        for (int child = 0; child < 30; child++)
+        {
+            Widget w = client.getWidget(JOURNALSCROLL_GROUP, child);
+            if (w == null) continue;
+
+            Widget[] dynChildren = w.getDynamicChildren();
+            if (dynChildren != null && dynChildren.length > 10)
+            {
+                log.info("Adventure log: found {} dynamic children in widget 741.{}", dynChildren.length, child);
+                children = dynChildren;
+                break;
+            }
+
+            Widget[] statChildren = w.getStaticChildren();
+            if (statChildren != null && statChildren.length > 10)
+            {
+                log.info("Adventure log: found {} static children in widget 741.{}", statChildren.length, child);
+                children = statChildren;
+                break;
+            }
+        }
+
+        if (children == null)
+        {
+            log.warn("Adventure log Counters: no content widget found in group 741");
+            return;
+        }
+        if (children == null || children.length == 0)
+        {
+            return;
+        }
+
+        // Section headers to skip (not boss names)
+        Set<String> sectionHeaders = new HashSet<>();
+        sectionHeaders.add("Minigames");
+        sectionHeaders.add("Bosses");
+        sectionHeaders.add("Skilling Bosses");
+        sectionHeaders.add("Raids");
+
+        // Log first few entries for debugging
+        int logCount = 0;
+        for (Widget c : children)
+        {
+            String t = c.getText();
+            if (t != null && !t.isEmpty() && logCount < 15)
+            {
+                log.info("Adventure log child text: '{}'", Text.removeTags(t).trim());
+                logCount++;
+            }
+        }
+
+        List<PbEntry> parsedPbs = new ArrayList<>();
+        String currentBoss = null;
+
+        for (Widget child : children)
+        {
+            String text = child.getText();
+            if (text == null || text.isEmpty()) continue;
+            String clean = Text.removeTags(text).trim();
+            if (clean.isEmpty() || clean.length() <= 2) continue;
+
+            // Skip section headers
+            if (sectionHeaders.contains(clean)) {
+                currentBoss = null;
+                continue;
+            }
+
+            // Try to parse as a PB time entry
+            Matcher pbMatcher = ADVENTURE_PB_PATTERN.matcher(clean);
+            if (pbMatcher.find())
+            {
+                if (currentBoss == null) continue;
+
+                String teamSizeStr = pbMatcher.group(1); // null for simple "Fastest kill: X:XX"
+                String timeStr = pbMatcher.group(2);
+                int timeMs = parsePbTime(timeStr);
+                if (timeMs <= 0) continue;
+
+                int teamSize = parseTeamSize(teamSizeStr);
+                parsedPbs.add(new PbEntry(currentBoss, teamSize, timeMs));
+            }
+            else if (!clean.contains("Kill Count") && !clean.contains("Completions")
+                      && !clean.contains("Personal Best") && !clean.contains("Kills"))
+            {
+                // This line is a boss/activity name
+                currentBoss = clean;
+            }
+        }
+
+        if (parsedPbs.isEmpty())
+        {
+            log.debug("Adventure log Counters: no PBs found");
+            return;
+        }
+
+        log.info("Adventure log PBs parsed: {} entries for {}", parsedPbs.size(), rsn);
+
+        // Show chat confirmation
+        final int pbCount = parsedPbs.size();
+        client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+            "[Clan Management] Syncing " + pbCount + " personal bests...", "");
+
+        // Submit all PBs to the platform API
+        final String playerName = rsn;
+        executor.submit(() ->
+        {
+            for (PbEntry pb : parsedPbs)
+            {
+                String bossKey = pb.bossName.toLowerCase().replace(" ", "_").replaceAll("[^a-z0-9_]", "");
+                platformApiService.submitPersonalBest(
+                    config.platformApiUrl(),
+                    config.platformApiKey(),
+                    config.platformClanSlug(),
+                    playerName,
+                    bossKey,
+                    pb.teamSize,
+                    pb.timeMs
+                );
+            }
+            log.info("Submitted {} PBs to platform for {}", pbCount, playerName);
+            clientThread.invokeLater(() ->
+                client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+                    "[Clan Management] Synced " + pbCount + " personal bests to platform", "")
+            );
+        });
+    }
+
+    private static int parseTeamSize(String teamSizeStr)
+    {
+        if (teamSizeStr == null) return 1; // No team size specified = solo
+        String s = teamSizeStr.trim();
+        if (s.equalsIgnoreCase("Solo")) return 1;
+        // "2 players", "3 players", etc.
+        Matcher m = Pattern.compile("(\\d+)\\s*players?").matcher(s);
+        if (m.find()) return Integer.parseInt(m.group(1));
+        // "6+" or similar
+        if (s.startsWith("6")) return 6;
+        return 1;
+    }
+
+    private static class PbEntry
+    {
+        final String bossName;
+        final int teamSize;
+        final int timeMs;
+
+        PbEntry(String bossName, int teamSize, int timeMs)
+        {
+            this.bossName = bossName;
+            this.teamSize = teamSize;
+            this.timeMs = timeMs;
+        }
+    }
+
+    private void triggerClogSearch()
+    {
+        // Auto-trigger the search toggle in the collection log to enumerate ALL obtained items
+        // This causes script 4100 to fire for every obtained item
+        try
+        {
+            client.menuAction(-1, SEARCH_TOGGLE_PACKED, MenuAction.CC_OP, 1, -1, "Search", null);
+            client.runScript(2240);
+            log.info("Collection log auto-search triggered");
+        }
+        catch (Exception e)
+        {
+            log.warn("Failed to trigger collection log search", e);
+        }
+    }
+
+    private void uploadCollectionLog()
+    {
+        if (clogSyncItems.isEmpty())
+        {
+            return;
+        }
+
+        String rsn = client.getLocalPlayer() != null
+            ? client.getLocalPlayer().getName() : "Unknown";
+        List<ClogItem> items = new ArrayList<>(clogSyncItems.values());
+        int count = items.size();
+
+        panel.setClogSyncStatus("Uploading " + count + " items...");
+
+        executor.submit(() -> platformApiService.bulkSyncCollectionLog(
+            config.platformApiUrl(),
+            config.platformApiKey(),
+            config.platformClanSlug(),
+            rsn,
+            items,
+            new okhttp3.Callback()
+            {
+                @Override
+                public void onFailure(okhttp3.Call call, java.io.IOException e)
+                {
+                    log.error("Collection log auto-sync failed", e);
+                    panel.setClogSyncStatus("Sync failed: " + e.getMessage());
+                }
+
+                @Override
+                public void onResponse(okhttp3.Call call, okhttp3.Response response)
+                {
+                    response.close();
+                    if (response.isSuccessful())
+                    {
+                        log.info("Collection log synced: {} items for {}", count, rsn);
+                        panel.setClogSyncStatus("Synced " + count + " items");
+                    }
+                    else
+                    {
+                        panel.setClogSyncStatus("Sync failed: HTTP " + response.code());
+                    }
+                }
+            }
+        ));
     }
 
     private void handleDropLogging(String message)
@@ -1067,6 +1536,13 @@ public class ClanManagementPlugin extends Plugin
 
                 // Auto-load drops tab on first config load
                 executor.submit(this::refreshDropsTab);
+
+                // Auto-sync roster on login if admin
+                String adminApiKey = config.adminApiKey();
+                if (!adminApiKey.isEmpty())
+                {
+                    clientThread.invokeLater(() -> hiscoreTracker.onLoginIfAdmin(config, adminApiKey));
+                }
             }
             catch (Exception e)
             {
@@ -1956,6 +2432,18 @@ public class ClanManagementPlugin extends Plugin
                 adminPanel.setStatus("Error: " + e.getMessage());
             }
         }));
+
+        adminPanel.setOnSyncRoster(() -> {
+            int count = hiscoreTracker.syncRoster(config);
+            if (count > 0)
+            {
+                adminPanel.setStatus("Synced " + count + " members");
+            }
+            else
+            {
+                adminPanel.setStatus("Roster sync failed — join a clan first");
+            }
+        });
 
         // Show active event state in admin panel on load
         if (!activeEventType.isEmpty())
