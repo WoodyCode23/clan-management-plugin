@@ -14,6 +14,8 @@ import net.runelite.api.WorldType;
 import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
+import net.runelite.api.events.ScriptPostFired;
+import net.runelite.api.widgets.Widget;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
@@ -162,6 +164,10 @@ public class ClanManagementPlugin extends Plugin
     private boolean bingoActive = false;
     private String playerBingoTeam = "";
 
+    // Collection log sync state
+    private boolean clogSyncActive = false;
+    private final Set<String> clogSyncItems = Collections.synchronizedSet(new HashSet<>());
+
     @Provides
     ClanManagementConfig provideConfig(ConfigManager configManager)
     {
@@ -268,6 +274,78 @@ public class ClanManagementPlugin extends Plugin
         panel.setOnFetchPlayerDrops((rsn) -> executor.submit(() -> fetchPlayerDrops(rsn)));
         panel.setOnRefreshWhitelist(() -> executor.submit(this::refreshClanWhitelist));
         panel.setOnFetchWomData((metric, period) -> executor.submit(() -> fetchWomData(metric, period)));
+        panel.setOnClogSync(new Runnable[] {
+            // Start sync
+            () -> {
+                if (!isPlatformConfigured())
+                {
+                    panel.setClogSyncStatus("Configure Platform API first");
+                    return;
+                }
+                clogSyncActive = true;
+                clogSyncItems.clear();
+                panel.setClogSyncMode(true);
+                panel.setClogSyncStatus("Open your Collection Log and browse through categories...");
+                panel.updateClogSyncCount(0);
+            },
+            // Finish sync
+            () -> {
+                clogSyncActive = false;
+                if (clogSyncItems.isEmpty())
+                {
+                    panel.setClogSyncStatus("No items captured. Open your Collection Log first.");
+                    panel.setClogSyncMode(false);
+                    return;
+                }
+
+                String rsn = client.getLocalPlayer() != null
+                    ? client.getLocalPlayer().getName() : "Unknown";
+                List<String> items = new ArrayList<>(clogSyncItems);
+                panel.setClogSyncStatus("Uploading " + items.size() + " items...");
+
+                executor.submit(() -> platformApiService.bulkSyncCollectionLog(
+                    config.platformApiUrl(),
+                    config.platformApiKey(),
+                    config.platformClanSlug(),
+                    rsn,
+                    items,
+                    new okhttp3.Callback()
+                    {
+                        @Override
+                        public void onFailure(okhttp3.Call call, java.io.IOException e)
+                        {
+                            log.error("Collection log sync failed", e);
+                            panel.setClogSyncStatus("Upload failed: " + e.getMessage());
+                            panel.setClogSyncMode(false);
+                        }
+
+                        @Override
+                        public void onResponse(okhttp3.Call call, okhttp3.Response response)
+                        {
+                            response.close();
+                            if (response.isSuccessful())
+                            {
+                                panel.setClogSyncStatus("Synced " + items.size() + " items!");
+                                panel.setClogSyncMode(false);
+                                clogSyncItems.clear();
+                            }
+                            else
+                            {
+                                panel.setClogSyncStatus("Upload failed: HTTP " + response.code());
+                                panel.setClogSyncMode(false);
+                            }
+                        }
+                    }
+                ));
+            },
+            // Cancel sync
+            () -> {
+                clogSyncActive = false;
+                clogSyncItems.clear();
+                panel.setClogSyncMode(false);
+                panel.setClogSyncStatus("");
+            }
+        });
         // Load caches from disk (avoids re-fetching every startup)
         loadHiscoreCacheFromDisk();
         loadDropsCacheFromDisk();
@@ -331,6 +409,9 @@ public class ClanManagementPlugin extends Plugin
         }
         panel.hideBingoTab();
         bingoActive = false;
+
+        clogSyncActive = false;
+        clogSyncItems.clear();
 
         clientToolbar.removeNavigation(navButton);
         log.info("Clan Management plugin stopped");
@@ -444,6 +525,45 @@ public class ClanManagementPlugin extends Plugin
         if (config.enableClanDropLog())
         {
             handleCollectionLogEntry(cleanedMessage);
+        }
+    }
+
+    @Subscribe
+    public void onScriptPostFired(ScriptPostFired event)
+    {
+        if (!clogSyncActive || event.getScriptId() != 2730)
+        {
+            return;
+        }
+
+        Widget itemList = client.getWidget(621, 3);
+        if (itemList == null)
+        {
+            return;
+        }
+
+        Widget[] children = itemList.getDynamicChildren();
+        if (children == null)
+        {
+            return;
+        }
+
+        int newItems = 0;
+        for (Widget child : children)
+        {
+            if (child.getOpacity() == 0)
+            {
+                String name = Text.removeTags(child.getName()).trim();
+                if (!name.isEmpty() && clogSyncItems.add(name))
+                {
+                    newItems++;
+                }
+            }
+        }
+
+        if (newItems > 0)
+        {
+            panel.updateClogSyncCount(clogSyncItems.size());
         }
     }
 

@@ -85,6 +85,15 @@ public class ClanPanel extends PluginPanel
     private final JComboBox<String> womModeCombo = new JComboBox<>(new String[]{"XP Gained"});
     private java.util.function.BiConsumer<String, String> onFetchWomData;
 
+    // Collection log sync UI
+    private JButton clogSyncButton;
+    private JButton clogFinishButton;
+    private JButton clogCancelButton;
+    private JLabel clogCountLabel;
+    private JLabel clogStatusLabel;
+    private JPanel clogSyncPanel;
+    private Runnable[] clogSyncCallbacks; // [0]=start, [1]=finish, [2]=cancel
+
     // Dynamic clan name labels
     private JLabel notConnectedTitleLabel;
     private JLabel homeTitleLabel;
@@ -207,6 +216,82 @@ public class ClanPanel extends PluginPanel
 
         home.add(eventCardPanel);
         home.add(Box.createVerticalStrut(12));
+
+        // ── Collection Log Sync card ──
+        clogSyncPanel = new JPanel();
+        clogSyncPanel.setLayout(new BoxLayout(clogSyncPanel, BoxLayout.Y_AXIS));
+        clogSyncPanel.setBackground(new Color(40, 40, 40));
+        clogSyncPanel.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(new Color(60, 60, 60)),
+            new EmptyBorder(10, 10, 10, 10)));
+        clogSyncPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        clogSyncPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 200));
+
+        JLabel clogTitle = new JLabel("Collection Log Sync");
+        clogTitle.setFont(new Font("Segoe UI", Font.BOLD, 13));
+        clogTitle.setForeground(ACCENT_GOLD);
+        clogTitle.setAlignmentX(Component.LEFT_ALIGNMENT);
+        clogSyncPanel.add(clogTitle);
+        clogSyncPanel.add(Box.createVerticalStrut(6));
+
+        clogCountLabel = new JLabel("");
+        clogCountLabel.setFont(READABLE_FONT_SMALL);
+        clogCountLabel.setForeground(new Color(170, 170, 170));
+        clogCountLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        clogCountLabel.setVisible(false);
+        clogSyncPanel.add(clogCountLabel);
+        clogSyncPanel.add(Box.createVerticalStrut(4));
+
+        clogStatusLabel = new JLabel("");
+        clogStatusLabel.setFont(READABLE_FONT_SMALL);
+        clogStatusLabel.setForeground(new Color(170, 170, 170));
+        clogStatusLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        clogSyncPanel.add(clogStatusLabel);
+        clogSyncPanel.add(Box.createVerticalStrut(6));
+
+        JPanel clogButtonPanel = new JPanel();
+        clogButtonPanel.setLayout(new BoxLayout(clogButtonPanel, BoxLayout.X_AXIS));
+        clogButtonPanel.setBackground(new Color(40, 40, 40));
+        clogButtonPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        clogSyncButton = new JButton("Sync Collection Log");
+        clogSyncButton.setBackground(ACCENT_GOLD);
+        clogSyncButton.setForeground(Color.BLACK);
+        clogSyncButton.setFont(new Font("Segoe UI", Font.BOLD, 12));
+        clogSyncButton.setFocusPainted(false);
+        clogSyncButton.addActionListener(e -> {
+            if (clogSyncCallbacks != null) clogSyncCallbacks[0].run();
+        });
+        clogButtonPanel.add(clogSyncButton);
+        clogButtonPanel.add(Box.createHorizontalStrut(6));
+
+        clogFinishButton = new JButton("Finish & Upload");
+        clogFinishButton.setBackground(new Color(76, 175, 80));
+        clogFinishButton.setForeground(Color.WHITE);
+        clogFinishButton.setFont(new Font("Segoe UI", Font.BOLD, 12));
+        clogFinishButton.setFocusPainted(false);
+        clogFinishButton.setVisible(false);
+        clogFinishButton.addActionListener(e -> {
+            if (clogSyncCallbacks != null) clogSyncCallbacks[1].run();
+        });
+        clogButtonPanel.add(clogFinishButton);
+        clogButtonPanel.add(Box.createHorizontalStrut(6));
+
+        clogCancelButton = new JButton("Cancel");
+        clogCancelButton.setBackground(new Color(180, 60, 60));
+        clogCancelButton.setForeground(Color.WHITE);
+        clogCancelButton.setFont(new Font("Segoe UI", Font.BOLD, 12));
+        clogCancelButton.setFocusPainted(false);
+        clogCancelButton.setVisible(false);
+        clogCancelButton.addActionListener(e -> {
+            if (clogSyncCallbacks != null) clogSyncCallbacks[2].run();
+        });
+        clogButtonPanel.add(clogCancelButton);
+
+        clogSyncPanel.add(clogButtonPanel);
+
+        home.add(clogSyncPanel);
+        home.add(Box.createVerticalStrut(10));
 
         // ── Announcements section ──
         JLabel announcementsTitle = new JLabel("Announcements");
@@ -2125,6 +2210,31 @@ public class ClanPanel extends PluginPanel
     public void setOnRefreshWhitelist(Runnable cb)
     {
         this.onRefreshWhitelist = cb;
+    }
+
+    public void setOnClogSync(Runnable[] callbacks)
+    {
+        this.clogSyncCallbacks = callbacks;
+    }
+
+    public void setClogSyncMode(boolean active)
+    {
+        SwingUtilities.invokeLater(() -> {
+            clogSyncButton.setVisible(!active);
+            clogFinishButton.setVisible(active);
+            clogCancelButton.setVisible(active);
+            clogCountLabel.setVisible(active);
+        });
+    }
+
+    public void updateClogSyncCount(int count)
+    {
+        SwingUtilities.invokeLater(() -> clogCountLabel.setText("Items captured: " + count));
+    }
+
+    public void setClogSyncStatus(String status)
+    {
+        SwingUtilities.invokeLater(() -> clogStatusLabel.setText(status));
     }
 
     public void updateClanWhitelist(List<Map<String, String>> items)
