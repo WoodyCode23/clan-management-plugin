@@ -239,4 +239,31 @@ public interface ClanManagementConfig extends Config
         position = 2
     )
     default String platformClanSlug() { return ""; }
+
+    @ConfigItem(
+        keyName = "enableClogSync",
+        name = "Auto-Sync Collection Log",
+        description = "Automatically sync your collection log to the platform when you open it in-game",
+        section = platformSection,
+        position = 3
+    )
+    default boolean enableClogSync() { return false; }
+
+    @ConfigItem(
+        keyName = "enablePbSync",
+        name = "Auto-Sync Personal Bests",
+        description = "Automatically sync personal best times from your adventure log to the platform",
+        section = platformSection,
+        position = 4
+    )
+    default boolean enablePbSync() { return false; }
+
+    @ConfigItem(
+        keyName = "enableStatTracking",
+        name = "Auto-Track Stats",
+        description = "Automatically detect clan member logoffs and trigger stat snapshots on the platform",
+        section = platformSection,
+        position = 5
+    )
+    default boolean enableStatTracking() { return false; }
 }

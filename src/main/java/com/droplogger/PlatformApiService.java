@@ -83,17 +83,29 @@ public class PlatformApiService
      * Bulk sync collection log entries to the platform API.
      */
     public void bulkSyncCollectionLog(String baseUrl, String apiKey, String clanSlug,
-                                       String rsn, List<String> itemNames,
+                                       String rsn, java.util.List<ClogItem> itemList,
                                        Callback callback)
     {
         JsonObject payload = new JsonObject();
         payload.addProperty("rsn", rsn);
 
         JsonArray items = new JsonArray();
-        for (String name : itemNames)
+        for (ClogItem ci : itemList)
         {
             JsonObject item = new JsonObject();
-            item.addProperty("itemName", name);
+            item.addProperty("itemName", ci.name);
+            if (ci.itemId > 0)
+            {
+                item.addProperty("itemId", ci.itemId);
+            }
+            if (ci.tab != null)
+            {
+                item.addProperty("tab", ci.tab);
+            }
+            if (ci.category != null)
+            {
+                item.addProperty("category", ci.category);
+            }
             items.add(item);
         }
         payload.add("items", items);
@@ -110,6 +122,50 @@ public class PlatformApiService
     }
 
     /**
+     * Sync the full collection log catalog (all possible items) to the platform API.
+     */
+    public void syncCatalog(String baseUrl, String apiKey, String clanSlug,
+                            java.util.Map<Integer, String[]> categoryMap,
+                            net.runelite.client.game.ItemManager itemManager)
+    {
+        JsonArray items = new JsonArray();
+        for (java.util.Map.Entry<Integer, String[]> entry : categoryMap.entrySet())
+        {
+            int itemId = entry.getKey();
+            String[] meta = entry.getValue();
+            String itemName = itemManager.getItemComposition(itemId).getName();
+            if (itemName == null || itemName.equals("null")) continue;
+
+            JsonObject item = new JsonObject();
+            item.addProperty("itemId", itemId);
+            item.addProperty("itemName", itemName);
+            item.addProperty("tab", meta[0]);
+            item.addProperty("category", meta[1]);
+            items.add(item);
+        }
+
+        JsonObject payload = new JsonObject();
+        payload.add("items", items);
+
+        postAsync(baseUrl + "/clans/" + clanSlug + "/collection-log/catalog", apiKey, payload, "Catalog sync");
+    }
+
+    /**
+     * Submit a personal best time to the platform API.
+     */
+    public void submitPersonalBest(String baseUrl, String apiKey, String clanSlug,
+                                    String rsn, String bossKey, int teamSize, int timeMs)
+    {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("rsn", rsn);
+        payload.addProperty("bossKey", bossKey);
+        payload.addProperty("teamSize", teamSize);
+        payload.addProperty("timeMs", timeMs);
+
+        postAsync(baseUrl + "/clans/" + clanSlug + "/pbs", apiKey, payload, "Platform PB");
+    }
+
+    /**
      * Submit an achievement to the platform API.
      */
     public void submitAchievement(String baseUrl, String apiKey, String clanSlug,
@@ -121,6 +177,39 @@ public class PlatformApiService
         payload.addProperty("detail", detail);
 
         postAsync(baseUrl + "/clans/" + clanSlug + "/achievements", apiKey, payload, "Platform achievement");
+    }
+
+    /**
+     * Sync the full clan roster to the platform API. Admin only.
+     */
+    public void syncRoster(String baseUrl, String apiKey, String clanSlug,
+                           java.util.List<String[]> members)
+    {
+        JsonObject payload = new JsonObject();
+        JsonArray membersArr = new JsonArray();
+        for (String[] member : members)
+        {
+            JsonObject m = new JsonObject();
+            m.addProperty("rsn", member[0]);
+            if (member.length > 1 && member[1] != null)
+            {
+                m.addProperty("rank", member[1]);
+            }
+            membersArr.add(m);
+        }
+        payload.add("members", membersArr);
+
+        postAsync(baseUrl + "/clans/" + clanSlug + "/roster", apiKey, payload, "Roster sync");
+    }
+
+    /**
+     * Trigger an immediate stat snapshot for a player.
+     */
+    public void triggerSnapshot(String baseUrl, String apiKey, String clanSlug, String rsn)
+    {
+        JsonObject payload = new JsonObject();
+        postAsync(baseUrl + "/clans/" + clanSlug + "/players/" + rsn + "/snapshot-trigger",
+                  apiKey, payload, "Snapshot trigger");
     }
 
     private void postAsync(String url, String apiKey, JsonObject payload, String label)
