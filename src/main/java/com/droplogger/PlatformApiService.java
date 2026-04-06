@@ -106,6 +106,10 @@ public class PlatformApiService
             {
                 item.addProperty("category", ci.category);
             }
+            if (ci.quantity > 0)
+            {
+                item.addProperty("quantity", ci.quantity);
+            }
             items.add(item);
         }
         payload.add("items", items);

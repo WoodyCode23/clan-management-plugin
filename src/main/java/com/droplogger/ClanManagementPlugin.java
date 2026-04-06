@@ -575,6 +575,7 @@ public class ClanManagementPlugin extends Plugin
         }
 
         int itemId = (int) args[1];
+        int quantity = args.length >= 3 ? (int) args[2] : 1;
         String itemName = itemManager.getItemComposition(itemId).getName();
 
         if (itemName != null && !itemName.isEmpty() && !itemName.equals("null"))
@@ -592,7 +593,7 @@ public class ClanManagementPlugin extends Plugin
                         category = meta[1];
                     }
                 }
-                clogSyncItems.put(itemName, new ClogItem(itemName, itemId, tab, category));
+                clogSyncItems.put(itemName, new ClogItem(itemName, itemId, tab, category, quantity));
                 panel.updateClogSyncCount(clogSyncItems.size());
             }
             // Reset debounce — upload after CLOG_DEBOUNCE_TICKS with no new items
