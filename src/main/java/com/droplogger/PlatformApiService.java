@@ -212,6 +212,29 @@ public class PlatformApiService
                   apiKey, payload, "Snapshot trigger");
     }
 
+    /**
+     * Synchronous GET — returns parsed JSON or null on error.
+     */
+    public JsonObject getSync(String url, String apiKey)
+    {
+        Request request = new Request.Builder()
+            .url(url)
+            .header("Authorization", "Bearer " + apiKey)
+            .get()
+            .build();
+
+        try (Response response = httpClient.newCall(request).execute())
+        {
+            if (!response.isSuccessful() || response.body() == null) return null;
+            return gson.fromJson(response.body().string(), JsonObject.class);
+        }
+        catch (Exception e)
+        {
+            log.debug("GET {} failed: {}", url, e.getMessage());
+            return null;
+        }
+    }
+
     private void postAsync(String url, String apiKey, JsonObject payload, String label)
     {
         RequestBody body = RequestBody.create(JSON, gson.toJson(payload));

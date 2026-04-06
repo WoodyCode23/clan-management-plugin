@@ -85,14 +85,14 @@ public class ClanPanel extends PluginPanel
     private final JComboBox<String> womModeCombo = new JComboBox<>(new String[]{"XP Gained"});
     private java.util.function.BiConsumer<String, String> onFetchWomData;
 
-    // Collection log sync UI
-    private JButton clogSyncButton;
-    private JButton clogFinishButton;
-    private JButton clogCancelButton;
+    // Status indicators (bottom of home tab)
+    private JLabel statusClogLabel;
+    private JLabel statusXpLabel;
+    private JLabel statusHiscoresLabel;
+
+    // Collection log sync UI (automatic — kept for setClogSyncStatus)
     private JLabel clogCountLabel;
     private JLabel clogStatusLabel;
-    private JPanel clogSyncPanel;
-    private Runnable[] clogSyncCallbacks; // [0]=start, [1]=finish, [2]=cancel
 
     // Dynamic clan name labels
     private JLabel notConnectedTitleLabel;
@@ -217,81 +217,11 @@ public class ClanPanel extends PluginPanel
         home.add(eventCardPanel);
         home.add(Box.createVerticalStrut(12));
 
-        // ── Collection Log Sync card ──
-        clogSyncPanel = new JPanel();
-        clogSyncPanel.setLayout(new BoxLayout(clogSyncPanel, BoxLayout.Y_AXIS));
-        clogSyncPanel.setBackground(new Color(40, 40, 40));
-        clogSyncPanel.setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createLineBorder(new Color(60, 60, 60)),
-            new EmptyBorder(10, 10, 10, 10)));
-        clogSyncPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
-        clogSyncPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 200));
-
-        JLabel clogTitle = new JLabel("Collection Log Sync");
-        clogTitle.setFont(new Font("Segoe UI", Font.BOLD, 13));
-        clogTitle.setForeground(ACCENT_GOLD);
-        clogTitle.setAlignmentX(Component.LEFT_ALIGNMENT);
-        clogSyncPanel.add(clogTitle);
-        clogSyncPanel.add(Box.createVerticalStrut(6));
-
+        // Hidden labels for clog sync feedback (used by setClogSyncStatus/updateClogSyncCount)
         clogCountLabel = new JLabel("");
-        clogCountLabel.setFont(READABLE_FONT_SMALL);
-        clogCountLabel.setForeground(new Color(170, 170, 170));
-        clogCountLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
         clogCountLabel.setVisible(false);
-        clogSyncPanel.add(clogCountLabel);
-        clogSyncPanel.add(Box.createVerticalStrut(4));
-
         clogStatusLabel = new JLabel("");
-        clogStatusLabel.setFont(READABLE_FONT_SMALL);
-        clogStatusLabel.setForeground(new Color(170, 170, 170));
-        clogStatusLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
-        clogSyncPanel.add(clogStatusLabel);
-        clogSyncPanel.add(Box.createVerticalStrut(6));
-
-        JPanel clogButtonPanel = new JPanel();
-        clogButtonPanel.setLayout(new BoxLayout(clogButtonPanel, BoxLayout.X_AXIS));
-        clogButtonPanel.setBackground(new Color(40, 40, 40));
-        clogButtonPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
-
-        clogSyncButton = new JButton("Sync Collection Log");
-        clogSyncButton.setBackground(ACCENT_GOLD);
-        clogSyncButton.setForeground(Color.BLACK);
-        clogSyncButton.setFont(new Font("Segoe UI", Font.BOLD, 12));
-        clogSyncButton.setFocusPainted(false);
-        clogSyncButton.addActionListener(e -> {
-            if (clogSyncCallbacks != null) clogSyncCallbacks[0].run();
-        });
-        clogButtonPanel.add(clogSyncButton);
-        clogButtonPanel.add(Box.createHorizontalStrut(6));
-
-        clogFinishButton = new JButton("Finish & Upload");
-        clogFinishButton.setBackground(new Color(76, 175, 80));
-        clogFinishButton.setForeground(Color.WHITE);
-        clogFinishButton.setFont(new Font("Segoe UI", Font.BOLD, 12));
-        clogFinishButton.setFocusPainted(false);
-        clogFinishButton.setVisible(false);
-        clogFinishButton.addActionListener(e -> {
-            if (clogSyncCallbacks != null) clogSyncCallbacks[1].run();
-        });
-        clogButtonPanel.add(clogFinishButton);
-        clogButtonPanel.add(Box.createHorizontalStrut(6));
-
-        clogCancelButton = new JButton("Cancel");
-        clogCancelButton.setBackground(new Color(180, 60, 60));
-        clogCancelButton.setForeground(Color.WHITE);
-        clogCancelButton.setFont(new Font("Segoe UI", Font.BOLD, 12));
-        clogCancelButton.setFocusPainted(false);
-        clogCancelButton.setVisible(false);
-        clogCancelButton.addActionListener(e -> {
-            if (clogSyncCallbacks != null) clogSyncCallbacks[2].run();
-        });
-        clogButtonPanel.add(clogCancelButton);
-
-        clogSyncPanel.add(clogButtonPanel);
-
-        home.add(clogSyncPanel);
-        home.add(Box.createVerticalStrut(10));
+        clogStatusLabel.setVisible(false);
 
         // ── Announcements section ──
         JLabel announcementsTitle = new JLabel("Announcements");
@@ -312,6 +242,26 @@ public class ClanPanel extends PluginPanel
 
         home.add(announcementsPanel);
         home.add(Box.createVerticalStrut(12));
+
+        // ── Tracking Status (bottom) ──
+        home.add(Box.createVerticalGlue());
+        home.add(Box.createVerticalStrut(12));
+
+        JPanel statusRow = new JPanel(new GridLayout(1, 3, 6, 0));
+        statusRow.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        statusRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+        statusRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 42));
+
+        statusClogLabel = new JLabel("--", SwingConstants.CENTER);
+        statusXpLabel = new JLabel("--", SwingConstants.CENTER);
+        statusHiscoresLabel = new JLabel("--", SwingConstants.CENTER);
+
+        statusRow.add(buildStatusBox("C-Log", statusClogLabel));
+        statusRow.add(buildStatusBox("XP", statusXpLabel));
+        statusRow.add(buildStatusBox("Hiscores", statusHiscoresLabel));
+        home.add(statusRow);
+
+        home.add(Box.createVerticalStrut(4));
 
         // Status
         homeStatusLabel.setFont(homeStatusLabel.getFont().deriveFont(10f));
@@ -359,6 +309,29 @@ public class ClanPanel extends PluginPanel
         tab.add(activityPanel);
 
         return tab;
+    }
+
+    private JPanel buildStatusBox(String title, JLabel valueLabel)
+    {
+        JPanel box = new JPanel();
+        box.setLayout(new BoxLayout(box, BoxLayout.Y_AXIS));
+        box.setBackground(new Color(35, 35, 35));
+        box.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(new Color(55, 55, 55)),
+            new EmptyBorder(4, 4, 4, 4)));
+
+        JLabel titleLbl = new JLabel(title, SwingConstants.CENTER);
+        titleLbl.setFont(new Font("Segoe UI", Font.PLAIN, 9));
+        titleLbl.setForeground(new Color(120, 120, 120));
+        titleLbl.setAlignmentX(Component.CENTER_ALIGNMENT);
+        box.add(titleLbl);
+
+        valueLabel.setFont(new Font("Segoe UI", Font.BOLD, 11));
+        valueLabel.setForeground(new Color(200, 200, 200));
+        valueLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
+        box.add(valueLabel);
+
+        return box;
     }
 
     private JPanel createNavCard(String name, String description, Color accentColor, String tabName)
@@ -1538,6 +1511,11 @@ public class ClanPanel extends PluginPanel
      * Set the category keys and entries that have recent PB data (from hiscore cache).
      * Called by the plugin after loading hiscore data.
      */
+    public Set<String> getRecentCategoryKeys()
+    {
+        return recentCategoryKeys;
+    }
+
     public void setRecentCategories(Set<String> categoryKeys, Map<String, List<HiscoreEntry>> entries)
     {
         this.recentCategoryKeys = categoryKeys;
@@ -2212,29 +2190,80 @@ public class ClanPanel extends PluginPanel
         this.onRefreshWhitelist = cb;
     }
 
-    public void setOnClogSync(Runnable[] callbacks)
-    {
-        this.clogSyncCallbacks = callbacks;
-    }
-
-    public void setClogSyncMode(boolean active)
-    {
-        SwingUtilities.invokeLater(() -> {
-            clogSyncButton.setVisible(!active);
-            clogFinishButton.setVisible(active);
-            clogCancelButton.setVisible(active);
-            clogCountLabel.setVisible(active);
-        });
-    }
-
     public void updateClogSyncCount(int count)
     {
-        SwingUtilities.invokeLater(() -> clogCountLabel.setText("Items captured: " + count));
+        SwingUtilities.invokeLater(() -> {
+            clogCountLabel.setText("Items detected: " + count);
+            clogCountLabel.setVisible(true);
+        });
     }
 
     public void setClogSyncStatus(String status)
     {
         SwingUtilities.invokeLater(() -> clogStatusLabel.setText(status));
+    }
+
+    /** Update the Collection Log status box, e.g. "861 / 1703" */
+    public void setStatusClog(int obtained, int total)
+    {
+        SwingUtilities.invokeLater(() -> {
+            if (total > 0)
+            {
+                statusClogLabel.setText(obtained + " / " + total);
+            }
+            else if (obtained > 0)
+            {
+                statusClogLabel.setText(String.valueOf(obtained));
+            }
+            else
+            {
+                statusClogLabel.setText("--");
+            }
+        });
+    }
+
+    /** Update the Total XP status box */
+    public void setStatusXp(long totalXp)
+    {
+        SwingUtilities.invokeLater(() -> {
+            if (totalXp <= 0)
+            {
+                statusXpLabel.setText("--");
+            }
+            else if (totalXp >= 1_000_000_000)
+            {
+                statusXpLabel.setText(String.format("%.1fB", totalXp / 1_000_000_000.0));
+            }
+            else if (totalXp >= 1_000_000)
+            {
+                statusXpLabel.setText(String.format("%.1fM", totalXp / 1_000_000.0));
+            }
+            else if (totalXp >= 1_000)
+            {
+                statusXpLabel.setText(String.format("%.1fK", totalXp / 1_000.0));
+            }
+            else
+            {
+                statusXpLabel.setText(String.valueOf(totalXp));
+            }
+        });
+    }
+
+    /** Update the Hiscores status box — checkmark if any PBs exist */
+    public void setStatusHiscores(boolean hasAny)
+    {
+        SwingUtilities.invokeLater(() -> {
+            if (hasAny)
+            {
+                statusHiscoresLabel.setText("Yes");
+                statusHiscoresLabel.setForeground(new Color(76, 175, 80));
+            }
+            else
+            {
+                statusHiscoresLabel.setText("No");
+                statusHiscoresLabel.setForeground(new Color(180, 80, 80));
+            }
+        });
     }
 
     public void updateClanWhitelist(List<Map<String, String>> items)

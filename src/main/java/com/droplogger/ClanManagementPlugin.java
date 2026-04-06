@@ -36,6 +36,7 @@ import net.runelite.client.util.ImageUtil;
 import net.runelite.client.util.Text;
 
 import com.google.gson.Gson;
+import com.google.gson.JsonObject;
 import com.google.gson.reflect.TypeToken;
 
 import javax.inject.Inject;
@@ -1555,6 +1556,7 @@ public class ClanManagementPlugin extends Plugin
         refreshClanActivity();
         refreshEventLeaderboard();
         refreshBingo();
+        refreshStatusBoxes();
     }
 
     private void refreshEventLeaderboard()
@@ -2033,6 +2035,67 @@ public class ClanManagementPlugin extends Plugin
         lastWomMetric = metric;
         lastWomPeriod = period;
         doFetchWomData(metric, period);
+    }
+
+    private void refreshStatusBoxes()
+    {
+        if (!isPlatformConfigured()) return;
+
+        String baseUrl = config.platformApiUrl();
+        String apiKey = config.platformApiKey();
+        String slug = config.platformClanSlug();
+        String rsn = getLocalPlayerName();
+        if (rsn == null || rsn.isEmpty()) return;
+
+        String encodedRsn = rsn.replace(" ", "%20");
+
+        // Collection log count
+        try
+        {
+            JsonObject clogData = platformApiService.getSync(
+                baseUrl + "/clans/" + slug + "/collection-log/" + encodedRsn, apiKey);
+            if (clogData != null)
+            {
+                int obtained = clogData.has("total") ? clogData.get("total").getAsInt() : 0;
+                int catalogSize = 0;
+                if (clogData.has("catalog") && clogData.get("catalog").isJsonArray())
+                {
+                    catalogSize = clogData.getAsJsonArray("catalog").size();
+                }
+                panel.setStatusClog(obtained, catalogSize);
+            }
+        }
+        catch (Exception e)
+        {
+            log.debug("Status box clog fetch failed", e);
+        }
+
+        // Stats (total XP)
+        try
+        {
+            JsonObject statsData = platformApiService.getSync(
+                baseUrl + "/clans/" + slug + "/stats/" + encodedRsn, apiKey);
+            if (statsData != null && statsData.has("skills"))
+            {
+                long totalXp = 0;
+                for (var entry : statsData.getAsJsonObject("skills").entrySet())
+                {
+                    JsonObject skill = entry.getValue().getAsJsonObject();
+                    if (skill.has("xp"))
+                    {
+                        totalXp += skill.get("xp").getAsLong();
+                    }
+                }
+                panel.setStatusXp(totalXp);
+            }
+        }
+        catch (Exception e)
+        {
+            log.debug("Status box stats fetch failed", e);
+        }
+
+        // Hiscores (any PBs?)
+        panel.setStatusHiscores(!panel.getRecentCategoryKeys().isEmpty());
     }
 
     private void refreshWomData()
