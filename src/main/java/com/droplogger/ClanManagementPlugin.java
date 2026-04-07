@@ -161,6 +161,7 @@ public class ClanManagementPlugin extends Plugin
     // Server-side config fetched from Settings tab
     private String fetchedClanDropLogUrl;
     private String fetchedDiscordWebhookUrl;
+    private int fetchedMinDropValue = 100000;
     private String clanName = "Clan";
     private boolean serverConfigLoaded = false;
 
@@ -320,6 +321,65 @@ public class ClanManagementPlugin extends Plugin
             decodedPlatformSlug = "";
             decodedPlatformKey = "";
         }
+    }
+
+    /**
+     * Fetch shared config from the platform bootstrap endpoint.
+     * Updates cached values for Discord webhook URL, min drop value, active event, etc.
+     */
+    private void fetchBootstrapConfig()
+    {
+        if (!isPlatformConfigured())
+        {
+            return;
+        }
+
+        String url = getPlatformUrl() + "/clans/" + getPlatformSlug() + "/bootstrap";
+        JsonObject response = platformApiService.getSync(url, getPlatformKey());
+        if (response == null)
+        {
+            log.warn("Failed to fetch bootstrap config from platform");
+            return;
+        }
+
+        // Discord webhook
+        if (response.has("discordWebhooks"))
+        {
+            JsonObject webhooks = response.getAsJsonObject("discordWebhooks");
+            if (webhooks.has("drops"))
+            {
+                fetchedDiscordWebhookUrl = webhooks.get("drops").getAsString();
+            }
+        }
+
+        // Settings
+        if (response.has("settings"))
+        {
+            JsonObject settings = response.getAsJsonObject("settings");
+            if (settings.has("minDropValue"))
+            {
+                fetchedMinDropValue = settings.get("minDropValue").getAsInt();
+            }
+        }
+
+        // Active event
+        if (response.has("activeEvent") && !response.get("activeEvent").isJsonNull())
+        {
+            JsonObject event = response.getAsJsonObject("activeEvent");
+            activeEventType = event.has("type") ? event.get("type").getAsString() : "";
+            activeEventMetric = event.has("metric") ? event.get("metric").getAsString() : "";
+            activeEventDisplayName = event.has("displayName") ? event.get("displayName").getAsString() : "";
+            activeEventEndTime = event.has("endTime") ? event.get("endTime").getAsString() : "";
+        }
+        else
+        {
+            activeEventType = "";
+            activeEventMetric = "";
+            activeEventDisplayName = "";
+            activeEventEndTime = "";
+        }
+
+        log.info("Bootstrap config loaded from platform");
     }
 
     /** Get the clan name from server config, defaulting to "Clan". */
@@ -1692,6 +1752,9 @@ public class ClanManagementPlugin extends Plugin
             panel.setStatus("Enter your Clan Code in plugin settings");
             return;
         }
+
+        // Fetch bootstrap config from platform (discord webhook, min drop value, active event)
+        fetchBootstrapConfig();
 
         // Fetch server-side config on first successful connection
         if (!serverConfigLoaded)
