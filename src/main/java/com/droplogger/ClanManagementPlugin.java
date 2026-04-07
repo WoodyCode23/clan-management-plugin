@@ -36,6 +36,7 @@ import net.runelite.client.util.ImageUtil;
 import net.runelite.client.util.Text;
 
 import com.google.gson.Gson;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.reflect.TypeToken;
 
@@ -144,6 +145,11 @@ public class ClanManagementPlugin extends Plugin
     private FightTracker fightTracker;
     private boolean wasInInstance = false;
 
+    // Decoded platform values from clanCode
+    private String decodedPlatformUrl = "";
+    private String decodedPlatformSlug = "";
+    private String decodedPlatformKey = "";
+
     private static final String WHITELIST_CACHE_FILE = "clan-whitelist-cache.json";
     private static final String HISCORE_CACHE_FILE = "clan-hiscore-cache.json";
     private static final String DROPS_CACHE_FILE = "clan-drops-cache.json";
@@ -178,14 +184,18 @@ public class ClanManagementPlugin extends Plugin
     private String playerBingoTeam = "";
 
     // Collection log sync state (automatic — like WikiSync/RuneProfile)
-    private final Map<String, ClogItem> clogSyncItems = Collections.synchronizedMap(new LinkedHashMap<>());
+    private final Map<Integer, ClogItem> clogSyncItems = Collections.synchronizedMap(new LinkedHashMap<>());
+    // no extra dedup state needed — CLOG_DUPLICATE_ITEM_IDS handles it
     private Map<Integer, String[]> clogItemCategoryMap = null; // itemId -> [tab, category]
     private int clogDebounceTicksRemaining = -1;
     private boolean clogSearchPending = false;
-    private static final int CLOG_DEBOUNCE_TICKS = 10;
+    private int clogRawEventCount = 0;
+    private static final int CLOG_DEBOUNCE_TICKS = 30;
     private static final int SCRIPT_CLOG_ITEM = 4100;
     private static final int SEARCH_TOGGLE_PACKED = 40697932; // InterfaceID.Collection.SEARCH_TOGGLE
     private static final int CLOG_TABS_ENUM = 2102;
+    // Volcanic Mine Prospector IDs — duplicates of Motherlode Mine slots, game doesn't count these
+    private static final Set<Integer> CLOG_DUPLICATE_ITEM_IDS = Set.of(29472, 29474, 29476, 29478);
     private static final int PARAM_TAB_NAME = 682;
     private static final int PARAM_TAB_CATEGORIES_ENUM = 683;
     private static final int PARAM_CATEGORY_NAME = 689;
@@ -195,8 +205,13 @@ public class ClanManagementPlugin extends Plugin
     private int adventureLogPbTicksRemaining = -1;
     private static final int JOURNALSCROLL_GROUP = 741;
     private static final int ADVENTURE_LOG_PB_DELAY_TICKS = 3;
+    // Matches: "Fastest kill: 0:46.80", "Fastest run - (Team size: Solo): 13:52.80",
+    //          "Fastest Overall time - (Team size: 2 player): 25:40.80",
+    //          "Fastest Room time - (Team size: 1 player entry mode):" (time on next line)
     private static final Pattern ADVENTURE_PB_PATTERN =
-        Pattern.compile("Fastest (?:kill|time|run|completion)(?:\\s*-\\s*\\(Team size:\\s*(.+?)\\))?[:\\s]+([\\d]+:[\\d.]+)");
+        Pattern.compile("Fastest (?:Overall time|Room time|kill|time|run|completion)(?:\\s*-\\s*\\(Team size:\\s*(.+?)\\))?[:\\s]+((?:\\d+:)?\\d+:\\d+\\.\\d+)?");
+    // Standalone time on its own line (for ToB/ToA where time wraps)
+    private static final Pattern STANDALONE_TIME = Pattern.compile("^((?:\\d+:)?\\d+:\\d+\\.\\d+)$");
 
     @Provides
     ClanManagementConfig provideConfig(ConfigManager configManager)
@@ -269,12 +284,42 @@ public class ClanManagementPlugin extends Plugin
 
     private boolean isPlatformConfigured()
     {
-        String url = config.platformApiUrl();
-        String key = config.platformApiKey();
-        String slug = config.platformClanSlug();
-        return url != null && !url.isEmpty()
-            && key != null && !key.isEmpty()
-            && slug != null && !slug.isEmpty();
+        return !decodedPlatformUrl.isEmpty()
+            && !decodedPlatformKey.isEmpty()
+            && !decodedPlatformSlug.isEmpty();
+    }
+
+    private String getPlatformUrl()
+    {
+        return decodedPlatformUrl;
+    }
+
+    private String getPlatformKey()
+    {
+        return decodedPlatformKey;
+    }
+
+    private String getPlatformSlug()
+    {
+        return decodedPlatformSlug;
+    }
+
+    private void decodePlatformClanCode()
+    {
+        String code = config.clanCode();
+        String[] parts = ClanCodeUtil.decode(code);
+        if (parts != null)
+        {
+            decodedPlatformUrl = parts[0];
+            decodedPlatformSlug = parts[1];
+            decodedPlatformKey = parts[2];
+        }
+        else
+        {
+            decodedPlatformUrl = "";
+            decodedPlatformSlug = "";
+            decodedPlatformKey = "";
+        }
     }
 
     /** Get the clan name from server config, defaulting to "Clan". */
@@ -286,6 +331,9 @@ public class ClanManagementPlugin extends Plugin
     @Override
     protected void startUp()
     {
+        // Decode platform clan code
+        decodePlatformClanCode();
+
         // Set up side panel
         panel = new ClanPanel();
         // Show tabs only if board code is configured
@@ -304,7 +352,7 @@ public class ClanManagementPlugin extends Plugin
         panel.setOnFetchPlayerDrops((rsn) -> executor.submit(() -> fetchPlayerDrops(rsn)));
         panel.setOnRefreshWhitelist(() -> executor.submit(this::refreshClanWhitelist));
         panel.setOnFetchWomData((metric, period) -> executor.submit(() -> fetchWomData(metric, period)));
-        // Collection log sync is automatic — no callbacks needed
+        panel.setOnRefreshStatus(() -> executor.submit(this::refreshStatusBoxes));
         // Load caches from disk (avoids re-fetching every startup)
         loadHiscoreCacheFromDisk();
         loadDropsCacheFromDisk();
@@ -372,6 +420,7 @@ public class ClanManagementPlugin extends Plugin
         bingoActive = false;
 
         clogSyncItems.clear();
+        // clog dedup handled by CLOG_DUPLICATE_ITEM_IDS
         clogDebounceTicksRemaining = -1;
         clogSearchPending = false;
         pbReadPending = false;
@@ -391,9 +440,17 @@ public class ClanManagementPlugin extends Plugin
 
         if ("boardCode".equals(event.getKey()))
         {
-            log.info("Clan code changed, reconnecting...");
+            log.info("Board code changed, reconnecting...");
             serverConfigLoaded = false;
             panel.setConnected(decodeClanCode() != null);
+            executor.submit(this::refreshData);
+        }
+
+        if ("clanCode".equals(event.getKey()))
+        {
+            log.info("Clan code changed, decoding platform config...");
+            decodePlatformClanCode();
+            serverConfigLoaded = false;
             executor.submit(this::refreshData);
         }
     }
@@ -404,7 +461,7 @@ public class ClanManagementPlugin extends Plugin
         // Stat tracking: detect clan member logoffs
         if (isPlatformConfigured())
         {
-            hiscoreTracker.onGameTick(config);
+            hiscoreTracker.onGameTick(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), config.enableStatTracking());
         }
 
         // Collection log: trigger search after clog opens to enumerate all items
@@ -440,6 +497,7 @@ public class ClanManagementPlugin extends Plugin
         else if (clogDebounceTicksRemaining == 0)
         {
             clogDebounceTicksRemaining = -1;
+            log.info("Clog debounce fired: {} raw events, {} unique items collected", clogRawEventCount, clogSyncItems.size());
             uploadCollectionLog();
         }
 
@@ -547,13 +605,12 @@ public class ClanManagementPlugin extends Plugin
 
         if (event.getGroupId() == InterfaceID.COLLECTION && isPlatformConfigured() && config.enableClogSync())
         {
-            // Build category mapping from game cache (enum 2102 hierarchy)
-            if (clogItemCategoryMap == null)
-            {
-                buildClogCategoryMap();
-            }
+            // Build category mapping and sync catalog every time clog opens
+            buildClogCategoryMap();
             // Collection log opened — trigger search on next tick to enumerate all items
             clogSyncItems.clear();
+            // clog dedup handled by CLOG_DUPLICATE_ITEM_IDS
+            clogRawEventCount = 0;
             clogSearchPending = true;
             panel.setClogSyncStatus("Scanning collection log...");
         }
@@ -576,29 +633,35 @@ public class ClanManagementPlugin extends Plugin
 
         int itemId = (int) args[1];
         int quantity = args.length >= 3 ? (int) args[2] : 1;
+        clogRawEventCount++;
         String itemName = itemManager.getItemComposition(itemId).getName();
 
-        if (itemName != null && !itemName.isEmpty() && !itemName.equals("null"))
+        if (itemName == null || itemName.isEmpty() || itemName.equals("null"))
         {
-            if (!clogSyncItems.containsKey(itemName))
-            {
-                String tab = null;
-                String category = null;
-                if (clogItemCategoryMap != null)
-                {
-                    String[] meta = clogItemCategoryMap.get(itemId);
-                    if (meta != null)
-                    {
-                        tab = meta[0];
-                        category = meta[1];
-                    }
-                }
-                clogSyncItems.put(itemName, new ClogItem(itemName, itemId, tab, category, quantity));
-                panel.updateClogSyncCount(clogSyncItems.size());
-            }
-            // Reset debounce — upload after CLOG_DEBOUNCE_TICKS with no new items
-            clogDebounceTicksRemaining = CLOG_DEBOUNCE_TICKS;
+            return;
         }
+        if (CLOG_DUPLICATE_ITEM_IDS.contains(itemId))
+        {
+            return;
+        }
+        if (!clogSyncItems.containsKey(itemId))
+        {
+            String tab = null;
+            String category = null;
+            if (clogItemCategoryMap != null)
+            {
+                String[] meta = clogItemCategoryMap.get(itemId);
+                if (meta != null)
+                {
+                    tab = meta[0];
+                    category = meta[1];
+                }
+            }
+            clogSyncItems.put(itemId, new ClogItem(itemName, itemId, tab, category, quantity));
+            panel.updateClogSyncCount(clogSyncItems.size());
+        }
+        // Reset debounce — upload after CLOG_DEBOUNCE_TICKS with no new items
+        clogDebounceTicksRemaining = CLOG_DEBOUNCE_TICKS;
     }
 
     private void buildClogCategoryMap()
@@ -606,6 +669,12 @@ public class ClanManagementPlugin extends Plugin
         try
         {
             Map<Integer, String[]> map = new HashMap<>();
+            // Catalog entries: each (itemId, category) pair is a separate entry
+            // so items like Dragon pickaxe appear under every boss that drops them
+            JsonArray catalogItems = new JsonArray();
+            Set<String> catalogSeen = new HashSet<>(); // "itemId::category" dedup
+            int sortOrder = 0;
+
             EnumComposition tabsEnum = client.getEnum(CLOG_TABS_ENUM);
             int[] tabStructIds = tabsEnum.getIntVals();
 
@@ -630,20 +699,34 @@ public class ClanManagementPlugin extends Plugin
                     for (int itemId : itemIds)
                     {
                         map.put(itemId, new String[]{tabName, categoryName});
+
+                        if (CLOG_DUPLICATE_ITEM_IDS.contains(itemId)) continue;
+                        String catItemName = itemManager.getItemComposition(itemId).getName();
+                        if (catItemName == null || catItemName.equals("null")) continue;
+
+                        String dedupKey = itemId + "::" + categoryName;
+                        if (!catalogSeen.add(dedupKey)) continue;
+
+                        JsonObject item = new JsonObject();
+                        item.addProperty("itemId", itemId);
+                        item.addProperty("itemName", catItemName);
+                        item.addProperty("tab", tabName);
+                        item.addProperty("category", categoryName);
+                        item.addProperty("sortOrder", sortOrder++);
+                        catalogItems.add(item);
                     }
                 }
             }
 
             clogItemCategoryMap = map;
-            log.info("Built collection log category map: {} items across all tabs", map.size());
+            log.info("Built collection log category map: {} unique item IDs, {} catalog entries",
+                map.size(), catalogItems.size());
 
-            // Sync the full catalog to the platform so the website can show all possible items
-            executor.submit(() -> platformApiService.syncCatalog(
-                config.platformApiUrl(),
-                config.platformApiKey(),
-                config.platformClanSlug(),
-                map,
-                itemManager
+            String catBaseUrl = getPlatformUrl();
+            String catApiKey = getPlatformKey();
+            String catSlug = getPlatformSlug();
+            executor.submit(() -> platformApiService.syncCatalogResolved(
+                catBaseUrl, catApiKey, catSlug, catalogItems
             ));
         }
         catch (Exception e)
@@ -765,39 +848,56 @@ public class ClanManagementPlugin extends Plugin
             return;
         }
 
-        String bossKey = bossName.toLowerCase().replace(" ", "_").replaceAll("[^a-z0-9_]", "");
+        String rawKey = bossName.toLowerCase().replace(" ", "_")
+            .replace("'", "").replaceAll("[^a-z0-9_]", "");
+        String group = BossCategory.mapAdventureLogName(rawKey);
+        BossCategory cat = BossCategory.find(group, 1);
+        String bossKey = cat != null ? cat.getKey() : group;
 
-        log.info("Collection log PB detected: {} — {} ({}ms)", bossKey, timeStr, timeMs);
+        log.info("Collection log PB detected: {} — {} ({}ms, key={})", bossName, timeStr, timeMs, bossKey);
 
-        executor.submit(() -> platformApiService.submitPersonalBest(
-            config.platformApiUrl(),
-            config.platformApiKey(),
-            config.platformClanSlug(),
+        executor.submit(() -> platformApiService.submitPb(
+            getPlatformUrl(),
+            getPlatformKey(),
+            getPlatformSlug(),
             rsn,
             bossKey,
             1, // solo
-            timeMs
+            timeMs,
+            "adventure_log"
         ));
     }
 
     private static int parsePbTime(String timeStr)
     {
-        // Formats: "1:23.40", "12:34.50", "1:23", "0:45.60"
+        // Formats: "1:23.40", "12:34.50", "1:23", "0:45.60", "1:23:45.60" (h:mm:ss.cc)
         try
         {
             String[] parts = timeStr.split(":");
-            if (parts.length != 2) return -1;
-            int minutes = Integer.parseInt(parts[0]);
-            double seconds;
-            if (parts[1].contains("."))
+            if (parts.length == 3)
             {
-                seconds = Double.parseDouble(parts[1]);
+                // H:MM:SS.cc
+                int hours = Integer.parseInt(parts[0]);
+                int minutes = Integer.parseInt(parts[1]);
+                double seconds = Double.parseDouble(parts[2]);
+                return (int) (hours * 3600000 + minutes * 60000 + seconds * 1000);
             }
-            else
+            else if (parts.length == 2)
             {
-                seconds = Integer.parseInt(parts[1]);
+                // MM:SS.cc or MM:SS
+                int minutes = Integer.parseInt(parts[0]);
+                double seconds;
+                if (parts[1].contains("."))
+                {
+                    seconds = Double.parseDouble(parts[1]);
+                }
+                else
+                {
+                    seconds = Integer.parseInt(parts[1]);
+                }
+                return (int) (minutes * 60000 + seconds * 1000);
             }
-            return (int) (minutes * 60000 + seconds * 1000);
+            return -1;
         }
         catch (NumberFormatException e)
         {
@@ -860,20 +960,25 @@ public class ClanManagementPlugin extends Plugin
         sectionHeaders.add("Skilling Bosses");
         sectionHeaders.add("Raids");
 
-        // Log first few entries for debugging
-        int logCount = 0;
-        for (Widget c : children)
+        // Log ALL widget children for debugging
+        StringBuilder allText = new StringBuilder("Adventure log ALL children:\n");
+        for (int i = 0; i < children.length; i++)
         {
-            String t = c.getText();
-            if (t != null && !t.isEmpty() && logCount < 15)
+            String t = children[i].getText();
+            if (t != null && !t.isEmpty())
             {
-                log.info("Adventure log child text: '{}'", Text.removeTags(t).trim());
-                logCount++;
+                allText.append("[").append(i).append("] '").append(Text.removeTags(t).trim()).append("'\n");
             }
         }
+        log.info(allText.toString());
 
         List<PbEntry> parsedPbs = new ArrayList<>();
         String currentBoss = null;
+        // For ToB/ToA: pending team size from a "Fastest Room time" line where time is on the next line
+        String pendingTeamSize = null;
+        boolean pendingIsRoom = false;
+        // Track which boss+teamSize combos we've added as "Room time" so we skip "Overall time" dupes
+        Set<String> roomTimeKeys = new HashSet<>();
 
         for (Widget child : children)
         {
@@ -885,6 +990,27 @@ public class ClanManagementPlugin extends Plugin
             // Skip section headers
             if (sectionHeaders.contains(clean)) {
                 currentBoss = null;
+                pendingTeamSize = null;
+                continue;
+            }
+
+            // Check if this is a standalone time on its own line (continuation from previous)
+            Matcher standaloneMatcher = STANDALONE_TIME.matcher(clean);
+            if (standaloneMatcher.find() && pendingTeamSize != null && currentBoss != null)
+            {
+                if (pendingIsRoom)
+                {
+                    String timeStr = standaloneMatcher.group(1);
+                    int timeMs = parsePbTime(timeStr);
+                    if (timeMs > 0)
+                    {
+                        int teamSize = parseTeamSize(pendingTeamSize);
+                        parsedPbs.add(new PbEntry(currentBoss, teamSize, timeMs));
+                        roomTimeKeys.add(currentBoss + "::" + teamSize);
+                    }
+                }
+                pendingTeamSize = null;
+                pendingIsRoom = false;
                 continue;
             }
 
@@ -894,19 +1020,60 @@ public class ClanManagementPlugin extends Plugin
             {
                 if (currentBoss == null) continue;
 
-                String teamSizeStr = pbMatcher.group(1); // null for simple "Fastest kill: X:XX"
-                String timeStr = pbMatcher.group(2);
+                boolean isOverall = clean.contains("Overall time");
+                boolean isRoom = clean.contains("Room time");
+
+                String teamSizeStr = pbMatcher.group(1);
+                String timeStr = pbMatcher.group(2); // may be null if time is on next line
+
+                if (timeStr == null)
+                {
+                    // Time is on the next widget child line — save context and continue
+                    pendingTeamSize = teamSizeStr;
+                    pendingIsRoom = isRoom;
+                    continue;
+                }
+
+                // For ToB/ToA: use "Room time" (challenge time), skip "Overall time"
+                if (isOverall)
+                {
+                    continue;
+                }
+
+                // Skip legacy "former" entries
+                if (clean.contains("(former)"))
+                {
+                    continue;
+                }
+
                 int timeMs = parsePbTime(timeStr);
                 if (timeMs <= 0) continue;
 
                 int teamSize = parseTeamSize(teamSizeStr);
-                parsedPbs.add(new PbEntry(currentBoss, teamSize, timeMs));
+
+                // Don't duplicate if we already have a Room time for this combo
+                String comboKey = currentBoss + "::" + teamSize;
+                if (isRoom)
+                {
+                    roomTimeKeys.add(comboKey);
+                }
+                // Always add room times; skip non-room if we already have room time
+                if (isRoom || !roomTimeKeys.contains(comboKey))
+                {
+                    parsedPbs.add(new PbEntry(currentBoss, teamSize, timeMs));
+                }
+
+                pendingTeamSize = null;
+                pendingIsRoom = false;
             }
             else if (!clean.contains("Kill Count") && !clean.contains("Completions")
-                      && !clean.contains("Personal Best") && !clean.contains("Kills"))
+                      && !clean.contains("Personal Best") && !clean.contains("Kills")
+                      && !clean.contains("(former)"))
             {
                 // This line is a boss/activity name
                 currentBoss = clean;
+                pendingTeamSize = null;
+                pendingIsRoom = false;
             }
         }
 
@@ -927,23 +1094,37 @@ public class ClanManagementPlugin extends Plugin
         final String playerName = rsn;
         executor.submit(() ->
         {
+            int submitted = 0;
             for (PbEntry pb : parsedPbs)
             {
-                String bossKey = pb.bossName.toLowerCase().replace(" ", "_").replaceAll("[^a-z0-9_]", "");
-                platformApiService.submitPersonalBest(
-                    config.platformApiUrl(),
-                    config.platformApiKey(),
-                    config.platformClanSlug(),
+                String rawKey = pb.bossName.toLowerCase().replace(" ", "_")
+                    .replace("'", "").replaceAll("[^a-z0-9_]", "");
+                String group = BossCategory.mapAdventureLogName(rawKey);
+
+                // Try to resolve to a proper BossCategory key
+                BossCategory cat = BossCategory.find(group, pb.teamSize);
+                String bossKey = cat != null ? cat.getKey() : group;
+
+                log.info("Adventure log PB: '{}' → raw='{}' → group='{}' → key='{}' (size={}, time={}ms)",
+                    pb.bossName, rawKey, group, bossKey, pb.teamSize, pb.timeMs);
+
+                platformApiService.submitPb(
+                    getPlatformUrl(),
+                    getPlatformKey(),
+                    getPlatformSlug(),
                     playerName,
                     bossKey,
                     pb.teamSize,
-                    pb.timeMs
+                    pb.timeMs,
+                    "adventure_log"
                 );
+                submitted++;
             }
-            log.info("Submitted {} PBs to platform for {}", pbCount, playerName);
+            log.info("Submitted {} PBs to platform for {}", submitted, playerName);
+            final int finalSubmitted = submitted;
             clientThread.invokeLater(() ->
                 client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
-                    "[Clan Management] Synced " + pbCount + " personal bests to platform", "")
+                    "[Clan Management] Synced " + finalSubmitted + " personal bests to platform", "")
             );
         });
     }
@@ -952,12 +1133,21 @@ public class ClanManagementPlugin extends Plugin
     {
         if (teamSizeStr == null) return 1; // No team size specified = solo
         String s = teamSizeStr.trim();
+        // Strip leading "(" from ToA's malformed "(2 player)" format
+        if (s.startsWith("(")) s = s.substring(1).trim();
         if (s.equalsIgnoreCase("Solo")) return 1;
-        // "2 players", "3 players", etc.
-        Matcher m = Pattern.compile("(\\d+)\\s*players?").matcher(s);
+        // "2 players", "3 players", "1 player entry mode", "5 player hard mode", etc.
+        Matcher m = Pattern.compile("(\\d+)\\s*(?:\\+\\s*)?players?").matcher(s);
         if (m.find()) return Integer.parseInt(m.group(1));
-        // "6+" or similar
-        if (s.startsWith("6")) return 6;
+        // "11-15 players" range — use max
+        Matcher rangeMatcher = Pattern.compile("(\\d+)-(\\d+)\\s*players?").matcher(s);
+        if (rangeMatcher.find()) return Integer.parseInt(rangeMatcher.group(2));
+        // "24+" or "6+" etc.
+        Matcher plusMatcher = Pattern.compile("(\\d+)\\+").matcher(s);
+        if (plusMatcher.find()) return Integer.parseInt(plusMatcher.group(1));
+        // Just a number
+        Matcher numMatcher = Pattern.compile("(\\d+)").matcher(s);
+        if (numMatcher.find()) return Integer.parseInt(numMatcher.group(1));
         return 1;
     }
 
@@ -1006,9 +1196,9 @@ public class ClanManagementPlugin extends Plugin
         panel.setClogSyncStatus("Uploading " + count + " items...");
 
         executor.submit(() -> platformApiService.bulkSyncCollectionLog(
-            config.platformApiUrl(),
-            config.platformApiKey(),
-            config.platformClanSlug(),
+            getPlatformUrl(),
+            getPlatformKey(),
+            getPlatformSlug(),
             rsn,
             items,
             new okhttp3.Callback()
@@ -1137,9 +1327,9 @@ public class ClanManagementPlugin extends Plugin
             if (isPlatformConfigured())
             {
                 platformApiService.submitDrop(
-                    config.platformApiUrl(),
-                    config.platformApiKey(),
-                    config.platformClanSlug(),
+                    getPlatformUrl(),
+                    getPlatformKey(),
+                    getPlatformSlug(),
                     drop
                 );
             }
@@ -1191,9 +1381,9 @@ public class ClanManagementPlugin extends Plugin
             final String pRsn = playerName;
             final String pItem = itemName;
             executor.submit(() -> platformApiService.submitCollectionLogEntry(
-                config.platformApiUrl(),
-                config.platformApiKey(),
-                config.platformClanSlug(),
+                getPlatformUrl(),
+                getPlatformKey(),
+                getPlatformSlug(),
                 pRsn,
                 pItem
             ));
@@ -1245,19 +1435,16 @@ public class ClanManagementPlugin extends Plugin
         String categoryName = bossCategory.getDisplayName();
 
         // Validate clan membership for group content
-        if (isGroupContent)
+        boolean allClanMembers = !isGroupContent || validateClanMembership(partyMembers);
+        if (!allClanMembers)
         {
-            if (!validateClanMembership(partyMembers))
+            log.info("Not all party members in clan chat — PB will be submitted as unverified");
+            if (config.pbChatConfirmation())
             {
-                log.info("Time not submitted: not all party members in clan chat");
-                if (config.pbChatConfirmation())
-                {
-                    clientThread.invokeLater(() ->
-                        client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
-                            "[" + getClanName() + "] Time not submitted — not all party members are in clan chat", "")
-                    );
-                }
-                return;
+                clientThread.invokeLater(() ->
+                    client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+                        "[" + getClanName() + "] Time recorded (unverified — not all party members in clan chat)", "")
+                );
             }
         }
 
@@ -1313,6 +1500,7 @@ public class ClanManagementPlugin extends Plugin
         String apiKey = getApiKey();
         final int finalPartySize = partySize;
         final String finalCategoryName = categoryName;
+        final boolean finalAllClan = allClanMembers;
 
         executor.submit(() ->
         {
@@ -1321,7 +1509,8 @@ public class ClanManagementPlugin extends Plugin
 
             int placed = 0;
 
-            if (!v2ApiUrl.isEmpty())
+            // Google Sheet hiscore + Discord — only for clan-verified times
+            if (finalAllClan && !v2ApiUrl.isEmpty())
             {
                 placed = hiscoreService.checkAndSubmitPbV2(
                     v2ApiUrl, categoryKey, formattedTime, timeSeconds,
@@ -1346,7 +1535,7 @@ public class ClanManagementPlugin extends Plugin
                 saveHiscoreCacheV2ToDisk();
             }
 
-            // Post to Discord if placed top 3
+            // Post to Discord if placed top 3 (clan-verified only)
             if (placed > 0 && config.postPbs()
                 && fetchedDiscordWebhookUrl != null && !fetchedDiscordWebhookUrl.isEmpty())
             {
@@ -1354,19 +1543,26 @@ public class ClanManagementPlugin extends Plugin
                     finalCategoryName, rsns, screenshotHolder[0]);
             }
 
-            // Platform API (dual mode)
+            // Platform API — submit one PB per party member
+            // "live" = all party members in clan chat (clan-verified)
+            // "unverified" = not all members in clan chat
             if (isPlatformConfigured())
             {
                 int timeMs = (int) (timeSeconds * 1000);
-                platformApiService.submitPb(
-                    config.platformApiUrl(),
-                    config.platformApiKey(),
-                    config.platformClanSlug(),
-                    rsns,
-                    categoryKey,
-                    finalPartySize,
-                    timeMs
-                );
+                String source = finalAllClan ? "live" : "unverified";
+                for (String member : sortedMembers)
+                {
+                    platformApiService.submitPb(
+                        getPlatformUrl(),
+                        getPlatformKey(),
+                        getPlatformSlug(),
+                        member.trim(),
+                        categoryKey,
+                        finalPartySize,
+                        timeMs,
+                        source
+                    );
+                }
             }
         });
     }
@@ -1543,7 +1739,7 @@ public class ClanManagementPlugin extends Plugin
                 String adminApiKey = config.adminApiKey();
                 if (!adminApiKey.isEmpty())
                 {
-                    clientThread.invokeLater(() -> hiscoreTracker.onLoginIfAdmin(config, adminApiKey));
+                    clientThread.invokeLater(() -> hiscoreTracker.onLoginIfAdmin(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), adminApiKey));
                 }
             }
             catch (Exception e)
@@ -2042,9 +2238,9 @@ public class ClanManagementPlugin extends Plugin
     {
         if (!isPlatformConfigured()) return;
 
-        String baseUrl = config.platformApiUrl();
-        String apiKey = config.platformApiKey();
-        String slug = config.platformClanSlug();
+        String baseUrl = getPlatformUrl();
+        String apiKey = getPlatformKey();
+        String slug = getPlatformSlug();
         String rsn = getLocalPlayerName();
         if (rsn == null || rsn.isEmpty()) return;
 
@@ -2061,7 +2257,14 @@ public class ClanManagementPlugin extends Plugin
                 int catalogSize = 0;
                 if (clogData.has("catalog") && clogData.get("catalog").isJsonArray())
                 {
-                    catalogSize = clogData.getAsJsonArray("catalog").size();
+                    // Count distinct itemIds (items can appear in multiple categories)
+                    Set<Integer> catalogIds = new HashSet<>();
+                    for (var el : clogData.getAsJsonArray("catalog"))
+                    {
+                        JsonObject ci = el.getAsJsonObject();
+                        if (ci.has("itemId")) catalogIds.add(ci.get("itemId").getAsInt());
+                    }
+                    catalogSize = catalogIds.size();
                 }
                 panel.setStatusClog(obtained, catalogSize);
             }
@@ -2498,7 +2701,7 @@ public class ClanManagementPlugin extends Plugin
         }));
 
         adminPanel.setOnSyncRoster(() -> {
-            int count = hiscoreTracker.syncRoster(config);
+            int count = hiscoreTracker.syncRoster(getPlatformUrl(), getPlatformKey(), getPlatformSlug());
             if (count > 0)
             {
                 adminPanel.setStatus("Synced " + count + " members");

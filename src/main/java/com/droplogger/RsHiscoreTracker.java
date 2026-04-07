@@ -6,6 +6,7 @@ import net.runelite.api.clan.ClanChannel;
 import net.runelite.api.clan.ClanChannelMember;
 import net.runelite.api.clan.ClanSettings;
 import net.runelite.api.clan.ClanMember;
+import net.runelite.api.clan.ClanTitle;
 import net.runelite.client.util.Text;
 
 import javax.inject.Inject;
@@ -37,16 +38,13 @@ public class RsHiscoreTracker
     /**
      * Called every game tick. Tracks online clan members and detects logoffs.
      */
-    public void onGameTick(ClanManagementConfig config)
+    public void onGameTick(String baseUrl, String apiKey, String slug, boolean enableStatTracking)
     {
-        if (!config.enableStatTracking())
+        if (!enableStatTracking)
         {
             return;
         }
 
-        String baseUrl = config.platformApiUrl();
-        String apiKey = config.platformApiKey();
-        String slug = config.platformClanSlug();
         if (baseUrl.isEmpty() || apiKey.isEmpty() || slug.isEmpty())
         {
             return;
@@ -92,11 +90,8 @@ public class RsHiscoreTracker
      * Sync the full clan roster from ClanSettings. Admin only.
      * Returns the number of members synced, or -1 if ClanSettings unavailable.
      */
-    public int syncRoster(ClanManagementConfig config)
+    public int syncRoster(String baseUrl, String apiKey, String slug)
     {
-        String baseUrl = config.platformApiUrl();
-        String apiKey = config.platformApiKey();
-        String slug = config.platformClanSlug();
         if (baseUrl.isEmpty() || apiKey.isEmpty() || slug.isEmpty())
         {
             return -1;
@@ -119,7 +114,12 @@ public class RsHiscoreTracker
         for (ClanMember member : members)
         {
             String name = Text.toJagexName(member.getName());
-            String rank = member.getRank() != null ? member.getRank().toString() : null;
+            String rank = null;
+            if (member.getRank() != null)
+            {
+                ClanTitle title = clanSettings.titleForRank(member.getRank());
+                rank = title != null ? title.getName() : null;
+            }
             memberList.add(new String[]{name, rank});
         }
 
@@ -131,7 +131,7 @@ public class RsHiscoreTracker
     /**
      * Auto-sync roster on login if admin key is configured. Called once per session.
      */
-    public void onLoginIfAdmin(ClanManagementConfig config, String adminKey)
+    public void onLoginIfAdmin(String baseUrl, String apiKey, String slug, String adminKey)
     {
         if (rosterSyncedThisSession || adminKey == null || adminKey.isEmpty())
         {
@@ -139,7 +139,7 @@ public class RsHiscoreTracker
         }
 
         rosterSyncedThisSession = true;
-        int count = syncRoster(config);
+        int count = syncRoster(baseUrl, apiKey, slug);
         if (count > 0)
         {
             log.info("Auto-synced roster on login: {} members", count);

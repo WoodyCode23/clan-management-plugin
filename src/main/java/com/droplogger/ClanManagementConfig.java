@@ -18,14 +18,51 @@ public interface ClanManagementConfig extends Config
     String generalSection = "general";
 
     @ConfigItem(
-        keyName = "boardCode",
+        keyName = "clanCode",
         name = "Clan Code",
-        description = "Paste the code from your clan admin (connects you to the board)",
+        description = "Paste the code from your clan admin to connect to the platform",
         section = generalSection,
         position = 0,
         secret = true
     )
+    default String clanCode() { return ""; }
+
+    @ConfigItem(
+        keyName = "boardCode",
+        name = "Legacy Board Code",
+        description = "Legacy Google Sheets code (not needed if Clan Code is set)",
+        section = generalSection,
+        position = 1,
+        secret = true
+    )
     default String boardCode() { return ""; }
+
+    @ConfigItem(
+        keyName = "enableClogSync",
+        name = "Auto-Sync Collection Log",
+        description = "Automatically sync your collection log to the platform when you open it in-game",
+        section = generalSection,
+        position = 10
+    )
+    default boolean enableClogSync() { return false; }
+
+    @ConfigItem(
+        keyName = "enablePbSync",
+        name = "Auto-Sync Personal Bests",
+        description = "Automatically sync personal best times from your adventure log to the platform",
+        section = generalSection,
+        position = 11
+    )
+    default boolean enablePbSync() { return false; }
+
+    @ConfigItem(
+        keyName = "enableStatTracking",
+        name = "Auto-Track Stats",
+        description = "Automatically detect clan member logoffs and trigger stat snapshots on the platform",
+        section = generalSection,
+        position = 12
+    )
+    default boolean enableStatTracking() { return false; }
 
     // ── Clan Drop Log ──
 
@@ -203,67 +240,4 @@ public interface ClanManagementConfig extends Config
     )
     default String bingoHostKey() { return ""; }
 
-    // ── Platform ──
-
-    @ConfigSection(
-        name = "Platform",
-        description = "Connect to the clan platform API for advanced features (optional)",
-        position = 8
-    )
-    String platformSection = "platform";
-
-    @ConfigItem(
-        keyName = "platformApiUrl",
-        name = "Platform API URL",
-        description = "Base URL of your clan platform API (e.g. https://api.yourclan.gg). Leave blank to use Google Sheets only.",
-        section = platformSection,
-        position = 0
-    )
-    default String platformApiUrl() { return ""; }
-
-    @ConfigItem(
-        keyName = "platformApiKey",
-        name = "Platform API Key",
-        description = "API key for your clan on the platform",
-        section = platformSection,
-        position = 1,
-        secret = true
-    )
-    default String platformApiKey() { return ""; }
-
-    @ConfigItem(
-        keyName = "platformClanSlug",
-        name = "Clan Slug",
-        description = "Your clan's URL slug on the platform (e.g. 'solus')",
-        section = platformSection,
-        position = 2
-    )
-    default String platformClanSlug() { return ""; }
-
-    @ConfigItem(
-        keyName = "enableClogSync",
-        name = "Auto-Sync Collection Log",
-        description = "Automatically sync your collection log to the platform when you open it in-game",
-        section = platformSection,
-        position = 3
-    )
-    default boolean enableClogSync() { return false; }
-
-    @ConfigItem(
-        keyName = "enablePbSync",
-        name = "Auto-Sync Personal Bests",
-        description = "Automatically sync personal best times from your adventure log to the platform",
-        section = platformSection,
-        position = 4
-    )
-    default boolean enablePbSync() { return false; }
-
-    @ConfigItem(
-        keyName = "enableStatTracking",
-        name = "Auto-Track Stats",
-        description = "Automatically detect clan member logoffs and trigger stat snapshots on the platform",
-        section = platformSection,
-        position = 5
-    )
-    default boolean enableStatTracking() { return false; }
 }
