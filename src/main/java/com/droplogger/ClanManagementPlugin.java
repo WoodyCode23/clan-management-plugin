@@ -176,6 +176,7 @@ public class ClanManagementPlugin extends Plugin
     private String activeEventMetric = "";
     private String activeEventDisplayName = "";
     private String activeEventEndTime = "";
+    private String activeEventId = "";
 
     // Bingo state
     private BingoPanel bingoPanel;
@@ -370,6 +371,7 @@ public class ClanManagementPlugin extends Plugin
             activeEventMetric = event.has("metric") ? event.get("metric").getAsString() : "";
             activeEventDisplayName = event.has("displayName") ? event.get("displayName").getAsString() : "";
             activeEventEndTime = event.has("endTime") ? event.get("endTime").getAsString() : "";
+            activeEventId = event.has("id") ? event.get("id").getAsString() : "";
         }
         else
         {
@@ -377,6 +379,7 @@ public class ClanManagementPlugin extends Plugin
             activeEventMetric = "";
             activeEventDisplayName = "";
             activeEventEndTime = "";
+            activeEventId = "";
         }
 
         log.info("Bootstrap config loaded from platform");
@@ -2694,7 +2697,14 @@ public class ClanManagementPlugin extends Plugin
                 String metric = args[1];
                 String displayName = args[2];
                 adminPanel.setStatus("Starting event...");
-                adminService.startEvent(clanApiUrl, apiKey, adminKey, type, metric, displayName);
+                if (isPlatformConfigured())
+                {
+                    adminService.startEventPlatform(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), type, metric, displayName);
+                }
+                else
+                {
+                    adminService.startEvent(clanApiUrl, apiKey, adminKey, type, metric, displayName);
+                }
                 adminPanel.setStatus("Event started: " + displayName);
 
                 // Update local state
@@ -2745,7 +2755,14 @@ public class ClanManagementPlugin extends Plugin
                         activeEventDisplayName, finalLeaderboard);
                 }
 
-                adminService.endEvent(clanApiUrl, apiKey, adminKey);
+                if (isPlatformConfigured())
+                {
+                    adminService.endEventPlatform(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), activeEventId);
+                }
+                else
+                {
+                    adminService.endEvent(clanApiUrl, apiKey, adminKey);
+                }
                 adminPanel.setStatus("Event ended");
 
                 // Clear local state
@@ -2753,6 +2770,7 @@ public class ClanManagementPlugin extends Plugin
                 activeEventMetric = "";
                 activeEventDisplayName = "";
                 activeEventEndTime = "";
+                activeEventId = "";
                 serverConfigLoaded = false;
 
                 refreshEventLeaderboard();
