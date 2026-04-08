@@ -89,6 +89,7 @@ public class ClanPanel extends PluginPanel
     private JLabel statusClogLabel;
     private JLabel statusXpLabel;
     private JLabel statusHiscoresLabel;
+    private Runnable onRefreshStatus;
 
     // Collection log sync UI (automatic — kept for setClogSyncStatus)
     private JLabel clogCountLabel;
@@ -111,11 +112,11 @@ public class ClanPanel extends PluginPanel
         msgBox.setLayout(new BoxLayout(msgBox, BoxLayout.Y_AXIS));
         msgBox.setBackground(ColorScheme.DARK_GRAY_COLOR);
         msgBox.setBorder(new EmptyBorder(40, 20, 20, 20));
-        notConnectedTitleLabel = new JLabel("Clan Management");
+        notConnectedTitleLabel = new JLabel("Solus");
         notConnectedTitleLabel.setFont(new Font("Segoe UI", Font.BOLD, 16));
         notConnectedTitleLabel.setForeground(Color.WHITE);
         notConnectedTitleLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
-        JLabel instrLabel = new JLabel("<html><center>Enter your Board Code in<br>plugin settings to connect.</center></html>");
+        JLabel instrLabel = new JLabel("<html><center>Enter your Clan Code in<br>plugin settings to connect.</center></html>");
         instrLabel.setFont(READABLE_FONT);
         instrLabel.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
         instrLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
@@ -130,8 +131,8 @@ public class ClanPanel extends PluginPanel
         // Home tab (always present, default)
         tabbedPane.addTab("Home", buildHomeTab());
 
-        // Hiscores tab
-        tabbedPane.addTab("Hiscores", buildHiscoresTab());
+        // Speed Times tab
+        tabbedPane.addTab("Speed Times", buildHiscoresTab());
 
         // Drops tab (leaderboard + recent)
         tabbedPane.addTab("Drops", buildDropsTab());
@@ -160,7 +161,7 @@ public class ClanPanel extends PluginPanel
         home.setBorder(new EmptyBorder(10, 10, 10, 10));
 
         // Title
-        homeTitleLabel = new JLabel("Clan");
+        homeTitleLabel = new JLabel("Solus");
         homeTitleLabel.setFont(homeTitleLabel.getFont().deriveFont(Font.BOLD, 22f));
         homeTitleLabel.setForeground(ACCENT_GOLD);
         homeTitleLabel.setHorizontalAlignment(SwingConstants.CENTER);
@@ -179,7 +180,7 @@ public class ClanPanel extends PluginPanel
         home.add(Box.createVerticalStrut(20));
 
         // Navigation cards — click to switch tabs by name
-        home.add(createNavCard("Hiscores", "PB times & clan speed leaderboards", new Color(100, 149, 237), "Hiscores"));
+        home.add(createNavCard("Speed Times", "PB times & clan speed leaderboards", new Color(100, 149, 237), "Speed Times"));
         home.add(Box.createVerticalStrut(8));
         home.add(createNavCard("XP", "Clan XP leaderboards from Wise Old Man", new Color(76, 175, 80), "XP"));
         home.add(Box.createVerticalStrut(8));
@@ -250,7 +251,7 @@ public class ClanPanel extends PluginPanel
         JPanel statusRow = new JPanel(new GridLayout(1, 3, 6, 0));
         statusRow.setBackground(ColorScheme.DARK_GRAY_COLOR);
         statusRow.setAlignmentX(Component.LEFT_ALIGNMENT);
-        statusRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 42));
+        statusRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 48));
 
         statusClogLabel = new JLabel("--", SwingConstants.CENTER);
         statusXpLabel = new JLabel("--", SwingConstants.CENTER);
@@ -258,7 +259,23 @@ public class ClanPanel extends PluginPanel
 
         statusRow.add(buildStatusBox("C-Log", statusClogLabel));
         statusRow.add(buildStatusBox("XP", statusXpLabel));
-        statusRow.add(buildStatusBox("Hiscores", statusHiscoresLabel));
+        statusRow.add(buildStatusBox("Speed Times", statusHiscoresLabel));
+        statusRow.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        statusRow.setToolTipText("Click to refresh");
+        statusRow.addMouseListener(new java.awt.event.MouseAdapter()
+        {
+            @Override
+            public void mouseClicked(java.awt.event.MouseEvent e)
+            {
+                if (onRefreshStatus != null)
+                {
+                    statusClogLabel.setText("...");
+                    statusXpLabel.setText("...");
+                    statusHiscoresLabel.setText("...");
+                    onRefreshStatus.run();
+                }
+            }
+        });
         home.add(statusRow);
 
         home.add(Box.createVerticalStrut(4));
@@ -326,7 +343,7 @@ public class ClanPanel extends PluginPanel
         titleLbl.setAlignmentX(Component.CENTER_ALIGNMENT);
         box.add(titleLbl);
 
-        valueLabel.setFont(new Font("Segoe UI", Font.BOLD, 11));
+        valueLabel.setFont(new Font("Segoe UI", Font.BOLD, 9));
         valueLabel.setForeground(new Color(200, 200, 200));
         valueLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
         box.add(valueLabel);
@@ -1154,7 +1171,7 @@ public class ClanPanel extends PluginPanel
         titleRow.setAlignmentX(Component.LEFT_ALIGNMENT);
         titleRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 20));
 
-        JLabel hiscoreTitle = new JLabel("Clan Hiscores");
+        JLabel hiscoreTitle = new JLabel("Clan Speed Times");
         hiscoreTitle.setFont(hiscoreTitle.getFont().deriveFont(Font.BOLD, 13f));
         hiscoreTitle.setForeground(new Color(100, 149, 237));
         titleRow.add(hiscoreTitle, BorderLayout.WEST);
@@ -2203,13 +2220,13 @@ public class ClanPanel extends PluginPanel
         SwingUtilities.invokeLater(() -> clogStatusLabel.setText(status));
     }
 
-    /** Update the Collection Log status box, e.g. "861 / 1703" */
+    /** Update the Collection Log status box, e.g. "875/1699" */
     public void setStatusClog(int obtained, int total)
     {
         SwingUtilities.invokeLater(() -> {
             if (total > 0)
             {
-                statusClogLabel.setText(obtained + " / " + total);
+                statusClogLabel.setText(obtained + "/" + total);
             }
             else if (obtained > 0)
             {
@@ -2510,18 +2527,20 @@ public class ClanPanel extends PluginPanel
         });
     }
 
+    /** @deprecated Clan name is hardcoded to Solus. */
     public void setClanName(String name)
     {
-        SwingUtilities.invokeLater(() ->
-        {
-            if (homeTitleLabel != null) homeTitleLabel.setText(name);
-            if (notConnectedTitleLabel != null) notConnectedTitleLabel.setText(name);
-        });
+        // no-op — hardcoded to Solus
     }
 
     public void setOnRefresh(Runnable onRefresh)
     {
         this.onRefresh = onRefresh;
+    }
+
+    public void setOnRefreshStatus(Runnable cb)
+    {
+        this.onRefreshStatus = cb;
     }
 
     // ══════════════════════════════════════════

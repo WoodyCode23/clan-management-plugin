@@ -8,236 +8,95 @@ import net.runelite.client.config.ConfigSection;
 @ConfigGroup("droplogger")
 public interface ClanManagementConfig extends Config
 {
-    // ── General ──
+    // ── Connection ──
 
     @ConfigSection(
-        name = "General",
-        description = "Paste the board code from your clan admin to connect",
-        position = -1
+        name = "Connection",
+        description = "Paste the code from your clan admin to connect",
+        position = 0
     )
-    String generalSection = "general";
+    String connectionSection = "connection";
 
     @ConfigItem(
         keyName = "clanCode",
         name = "Clan Code",
         description = "Paste the code from your clan admin to connect to the platform",
-        section = generalSection,
+        section = connectionSection,
         position = 0,
         secret = true
     )
     default String clanCode() { return ""; }
 
-    @ConfigItem(
-        keyName = "boardCode",
-        name = "Legacy Board Code",
-        description = "Legacy Google Sheets code (not needed if Clan Code is set)",
-        section = generalSection,
-        position = 1,
-        secret = true
+    // ── Data Sharing ──
+
+    @ConfigSection(
+        name = "Data Sharing",
+        description = "Choose what data to share with your clan",
+        position = 1
     )
-    default String boardCode() { return ""; }
+    String dataSection = "data";
+
+    @ConfigItem(
+        keyName = "enableDrops",
+        name = "Track Drops",
+        description = "Send valuable drops to your clan automatically",
+        section = dataSection,
+        position = 0
+    )
+    default boolean enableDrops() { return false; }
+
+    @ConfigItem(
+        keyName = "enableSpeedTimes",
+        name = "Track Speed Times",
+        description = "Send personal best boss times to your clan automatically",
+        section = dataSection,
+        position = 1
+    )
+    default boolean enableSpeedTimes() { return false; }
 
     @ConfigItem(
         keyName = "enableClogSync",
-        name = "Auto-Sync Collection Log",
-        description = "Automatically sync your collection log to the platform when you open it in-game",
-        section = generalSection,
-        position = 10
+        name = "Sync Collection Log",
+        description = "Sync your collection log when you open it in-game",
+        section = dataSection,
+        position = 2
     )
     default boolean enableClogSync() { return false; }
 
     @ConfigItem(
-        keyName = "enablePbSync",
-        name = "Auto-Sync Personal Bests",
-        description = "Automatically sync personal best times from your adventure log to the platform",
-        section = generalSection,
-        position = 11
-    )
-    default boolean enablePbSync() { return false; }
-
-    @ConfigItem(
         keyName = "enableStatTracking",
-        name = "Auto-Track Stats",
-        description = "Automatically detect clan member logoffs and trigger stat snapshots on the platform",
-        section = generalSection,
-        position = 12
+        name = "Track Stats",
+        description = "Track XP and stats for clan leaderboards",
+        section = dataSection,
+        position = 3
     )
     default boolean enableStatTracking() { return false; }
 
-    // ── Clan Drop Log ──
-
-    @ConfigSection(
-        name = "Clan Drop Log",
-        description = "Track all rare drops for the clan permanently",
-        position = 1
-    )
-    String clanDropLogSection = "clanDropLog";
-
-    @ConfigItem(
-        keyName = "enableClanDropLog",
-        name = "Enable Clan Drop Log",
-        description = "Sends valuable drops to your clan's Google Sheet for permanent tracking",
-        section = clanDropLogSection,
-        position = 0
-    )
-    default boolean enableClanDropLog() { return false; }
-
-    @ConfigItem(
-        keyName = "clanDropMinValue",
-        name = "Minimum Value",
-        description = "Minimum GP value to track (default 100k)",
-        section = clanDropLogSection,
-        position = 1
-    )
-    default int clanDropMinValue() { return 100000; }
-
     @ConfigItem(
         keyName = "chatConfirmation",
-        name = "Chat Confirmation",
-        description = "Show logged drop confirmation in chat",
-        section = clanDropLogSection,
-        position = 2
-    )
-    default boolean chatConfirmation() { return true; }
-
-    // ── Panel ──
-
-    @ConfigSection(
-        name = "Panel",
-        description = "Settings for the side panel",
-        position = 2
-    )
-    String panelSection = "panel";
-
-    @ConfigItem(
-        keyName = "refreshInterval",
-        name = "Refresh Interval (sec)",
-        description = "Seconds between data polls (minimum 30)",
-        section = panelSection,
-        position = 0
-    )
-    default int refreshInterval() { return 60; }
-
-    // ── Hiscores ──
-
-    @ConfigSection(
-        name = "Hiscores",
-        description = "Auto-submit personal best times to the clan hiscores",
+        name = "Chat Confirmations",
+        description = "Show confirmation messages in chat when data is sent",
+        section = dataSection,
         position = 4
     )
-    String hiscoresSection = "hiscores";
-
-    @ConfigItem(
-        keyName = "enablePbSubmission",
-        name = "Enable PB Submission",
-        description = "Sends personal best times to your clan's Google Sheet when a new PB is detected",
-        section = hiscoresSection,
-        position = 0
-    )
-    default boolean enablePbSubmission() { return false; }
-
-    @ConfigItem(
-        keyName = "pbChatConfirmation",
-        name = "PB Chat Confirmation",
-        description = "Show chat message when a PB is submitted or rejected",
-        section = hiscoresSection,
-        position = 1
-    )
-    default boolean pbChatConfirmation() { return true; }
-
-    // ── Discord ──
-
-    @ConfigSection(
-        name = "Discord",
-        description = "Discord notification toggles (webhook URL is configured by admins)",
-        position = 5
-    )
-    String discordSection = "discord";
-
-    @ConfigItem(
-        keyName = "postDrops",
-        name = "Post Drops",
-        description = "Sends valuable drops to Discord via your clan's webhook",
-        section = discordSection,
-        position = 0
-    )
-    default boolean postDrops() { return false; }
-
-    @ConfigItem(
-        keyName = "postPbs",
-        name = "Post PBs",
-        description = "Sends top 3 PB placements to Discord via your clan's webhook with a screenshot",
-        section = discordSection,
-        position = 2
-    )
-    default boolean postPbs() { return false; }
+    default boolean chatConfirmation() { return true; }
 
     // ── Admin ──
 
     @ConfigSection(
         name = "Admin",
-        description = "Admin tools (requires admin API key)",
-        position = 6
+        description = "Admin tools (requires admin API key from your clan dashboard)",
+        position = 2
     )
     String adminSection = "admin";
 
     @ConfigItem(
         keyName = "adminApiKey",
         name = "Admin API Key",
-        description = "Admin secret key — leave blank if you are not an admin",
+        description = "Admin key from the clan dashboard — leave blank if you are not an admin",
         section = adminSection,
         position = 0,
         secret = true
     )
     default String adminApiKey() { return ""; }
-
-    // ── Bingo ──
-
-    @ConfigSection(
-        name = "Bingo",
-        description = "Bingo event settings (requires separate bingo sheet)",
-        position = 7
-    )
-    String bingoSection = "bingo";
-
-    @ConfigItem(
-        keyName = "bingoApiUrl",
-        name = "Bingo API URL",
-        description = "Google Apps Script deployment URL for your bingo sheet (leave blank if no event)",
-        section = bingoSection,
-        position = 0,
-        secret = true
-    )
-    default String bingoApiUrl() { return ""; }
-
-    @ConfigItem(
-        keyName = "bingoApiKey",
-        name = "Bingo API Key",
-        description = "API key for the bingo sheet",
-        section = bingoSection,
-        position = 1,
-        secret = true
-    )
-    default String bingoApiKey() { return ""; }
-
-    @ConfigItem(
-        keyName = "bingoAdminKey",
-        name = "Bingo Admin Key",
-        description = "Admin key for bingo roster/progress management (leave blank if not an admin)",
-        section = bingoSection,
-        position = 2,
-        secret = true
-    )
-    default String bingoAdminKey() { return ""; }
-
-    @ConfigItem(
-        keyName = "bingoHostKey",
-        name = "Bingo Host Key",
-        description = "Host key for full bingo board management (leave blank if not the host)",
-        section = bingoSection,
-        position = 3,
-        secret = true
-    )
-    default String bingoHostKey() { return ""; }
-
 }

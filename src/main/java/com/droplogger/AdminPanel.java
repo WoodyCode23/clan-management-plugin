@@ -16,11 +16,7 @@ public class AdminPanel extends JPanel
 
     private final JLabel statusLabel = new JLabel("Admin ready");
 
-    // ── Shared Settings ──
-    private final JTextField clanNameField = new JTextField();
-    private final JTextField webhookField = new JTextField();
-    private final JTextField womGroupIdField = new JTextField();
-    private final JTextArea announcementArea = new JTextArea(3, 20);
+    // ── Shared Settings (managed via web dashboard) ──
 
     // ── Weekly Events ──
     private final JComboBox<String> eventTypeBox = new JComboBox<>(new String[]{"Boss of the Week", "Skill of the Week", "Gamer of the Week", "Clue Hunter of the Week"});
@@ -65,76 +61,7 @@ public class AdminPanel extends JPanel
         add(header);
         add(Box.createVerticalStrut(8));
 
-        // ══════════════════════════════════
-        // Shared Settings
-        // ══════════════════════════════════
-        add(createSectionTitle("Shared Settings"));
-        add(Box.createVerticalStrut(4));
-
-        add(createFieldLabel("Clan Name"));
-        clanNameField.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
-        clanNameField.setFont(SMALL_FONT);
-        clanNameField.setAlignmentX(Component.LEFT_ALIGNMENT);
-        clanNameField.setToolTipText("Displayed in the plugin UI, chat messages, and Discord posts");
-        add(clanNameField);
-        add(Box.createVerticalStrut(4));
-
-        add(createFieldLabel("Discord Webhook URL"));
-        webhookField.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
-        webhookField.setFont(SMALL_FONT);
-        webhookField.setAlignmentX(Component.LEFT_ALIGNMENT);
-        add(webhookField);
-        add(Box.createVerticalStrut(4));
-
-        add(createFieldLabel("WOM Group ID"));
-        womGroupIdField.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
-        womGroupIdField.setFont(SMALL_FONT);
-        womGroupIdField.setAlignmentX(Component.LEFT_ALIGNMENT);
-        womGroupIdField.setToolTipText("Wise Old Man group ID for XP tracking (found in your WOM group URL)");
-        add(womGroupIdField);
-        add(Box.createVerticalStrut(4));
-
-        add(createFieldLabel("Announcement (visible to all members)"));
-        announcementArea.setFont(SMALL_FONT);
-        announcementArea.setLineWrap(true);
-        announcementArea.setWrapStyleWord(true);
-        announcementArea.setAlignmentX(Component.LEFT_ALIGNMENT);
-        JScrollPane announcementScroll = new JScrollPane(announcementArea);
-        announcementScroll.setAlignmentX(Component.LEFT_ALIGNMENT);
-        announcementScroll.setMaximumSize(new Dimension(Integer.MAX_VALUE, 60));
-        announcementScroll.setBorder(BorderFactory.createLineBorder(new Color(60, 60, 60)));
-        add(announcementScroll);
-        add(Box.createVerticalStrut(6));
-
-        JPanel settingsButtons = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
-        settingsButtons.setBackground(ColorScheme.DARK_GRAY_COLOR);
-        settingsButtons.setAlignmentX(Component.LEFT_ALIGNMENT);
-        settingsButtons.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
-
-        JButton loadSettingsBtn = createButton("Load");
-        loadSettingsBtn.addActionListener(e -> {
-            if (onLoadSettings != null) onLoadSettings.run();
-        });
-
-        JButton saveSettingsBtn = createButton("Save");
-        saveSettingsBtn.addActionListener(e -> {
-            String clanNameVal = clanNameField.getText().trim();
-            String webhook = webhookField.getText().trim();
-            String womId = womGroupIdField.getText().trim();
-            String announcement = announcementArea.getText().trim();
-            if (onSaveSettings != null)
-            {
-                onSaveSettings.accept(new String[]{clanNameVal, webhook, womId, announcement});
-            }
-        });
-
-        settingsButtons.add(loadSettingsBtn);
-        settingsButtons.add(saveSettingsBtn);
-        add(settingsButtons);
-
-        add(Box.createVerticalStrut(8));
-        add(createSeparator());
-        add(Box.createVerticalStrut(6));
+        // Shared settings are managed via the web dashboard
 
         // ══════════════════════════════════
         // Weekly Events
@@ -270,9 +197,9 @@ public class AdminPanel extends JPanel
         add(Box.createVerticalStrut(6));
 
         // ══════════════════════════════════
-        // Hiscore Moderation
+        // Speed Times Moderation
         // ══════════════════════════════════
-        add(createSectionTitle("Hiscore Moderation"));
+        add(createSectionTitle("Speed Times Moderation"));
         add(Box.createVerticalStrut(4));
 
         // Cascading dropdowns: Group → Boss → Size
@@ -615,25 +542,8 @@ public class AdminPanel extends JPanel
         SwingUtilities.invokeLater(() -> statusLabel.setText(text));
     }
 
-    public void setClanName(String name)
-    {
-        SwingUtilities.invokeLater(() -> clanNameField.setText(name != null ? name : ""));
-    }
-
-    public void setWebhookUrl(String url)
-    {
-        SwingUtilities.invokeLater(() -> webhookField.setText(url != null ? url : ""));
-    }
-
-    public void setWomGroupId(String id)
-    {
-        SwingUtilities.invokeLater(() -> womGroupIdField.setText(id != null ? id : ""));
-    }
-
-    public void setAnnouncement(String text)
-    {
-        SwingUtilities.invokeLater(() -> announcementArea.setText(text != null ? text : ""));
-    }
+    /** @deprecated Clan name is hardcoded to Solus. */
+    public void setClanName(String name) { /* no-op */ }
 
     // ── Callback setters ──
 

@@ -10,6 +10,7 @@ import javax.inject.Inject;
 import javax.inject.Singleton;
 import java.io.IOException;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 @Slf4j
@@ -52,16 +53,26 @@ public class PlatformApiService
     }
 
     /**
-     * Submit a personal best to the platform API.
+     * Submit a personal best to the platform API (defaults to "live" source).
      */
     public void submitPb(String baseUrl, String apiKey, String clanSlug,
                          String rsn, String bossKey, int teamSize, int timeMs)
+    {
+        submitPb(baseUrl, apiKey, clanSlug, rsn, bossKey, teamSize, timeMs, "live");
+    }
+
+    /**
+     * Submit a personal best to the platform API with a specific source.
+     */
+    public void submitPb(String baseUrl, String apiKey, String clanSlug,
+                         String rsn, String bossKey, int teamSize, int timeMs, String source)
     {
         JsonObject payload = new JsonObject();
         payload.addProperty("rsn", rsn);
         payload.addProperty("bossKey", bossKey);
         payload.addProperty("teamSize", teamSize);
         payload.addProperty("timeMs", timeMs);
+        payload.addProperty("source", source);
 
         postAsync(baseUrl + "/clans/" + clanSlug + "/pbs", apiKey, payload, "Platform PB");
     }
@@ -126,47 +137,16 @@ public class PlatformApiService
     }
 
     /**
-     * Sync the full collection log catalog (all possible items) to the platform API.
+     * Sync pre-resolved collection log catalog (all possible items) to the platform API.
+     * Item names must be resolved on the client thread before calling this.
      */
-    public void syncCatalog(String baseUrl, String apiKey, String clanSlug,
-                            java.util.Map<Integer, String[]> categoryMap,
-                            net.runelite.client.game.ItemManager itemManager)
+    public void syncCatalogResolved(String baseUrl, String apiKey, String clanSlug,
+                                     JsonArray catalogItems)
     {
-        JsonArray items = new JsonArray();
-        for (java.util.Map.Entry<Integer, String[]> entry : categoryMap.entrySet())
-        {
-            int itemId = entry.getKey();
-            String[] meta = entry.getValue();
-            String itemName = itemManager.getItemComposition(itemId).getName();
-            if (itemName == null || itemName.equals("null")) continue;
-
-            JsonObject item = new JsonObject();
-            item.addProperty("itemId", itemId);
-            item.addProperty("itemName", itemName);
-            item.addProperty("tab", meta[0]);
-            item.addProperty("category", meta[1]);
-            items.add(item);
-        }
-
         JsonObject payload = new JsonObject();
-        payload.add("items", items);
+        payload.add("items", catalogItems);
 
         postAsync(baseUrl + "/clans/" + clanSlug + "/collection-log/catalog", apiKey, payload, "Catalog sync");
-    }
-
-    /**
-     * Submit a personal best time to the platform API.
-     */
-    public void submitPersonalBest(String baseUrl, String apiKey, String clanSlug,
-                                    String rsn, String bossKey, int teamSize, int timeMs)
-    {
-        JsonObject payload = new JsonObject();
-        payload.addProperty("rsn", rsn);
-        payload.addProperty("bossKey", bossKey);
-        payload.addProperty("teamSize", teamSize);
-        payload.addProperty("timeMs", timeMs);
-
-        postAsync(baseUrl + "/clans/" + clanSlug + "/pbs", apiKey, payload, "Platform PB");
     }
 
     /**
@@ -199,6 +179,10 @@ public class PlatformApiService
             {
                 m.addProperty("rank", member[1]);
             }
+            if (member.length > 2 && member[2] != null)
+            {
+                m.addProperty("joinDate", member[2]);
+            }
             membersArr.add(m);
         }
         payload.add("members", membersArr);
@@ -214,6 +198,47 @@ public class PlatformApiService
         JsonObject payload = new JsonObject();
         postAsync(baseUrl + "/clans/" + clanSlug + "/players/" + rsn + "/snapshot-trigger",
                   apiKey, payload, "Snapshot trigger");
+    }
+
+    /**
+     * Fetch all personal bests from the platform API and group by bossKey.
+     * Returns a map of bossKey → list of HiscoreEntry, or null on error.
+     */
+    public Map<String, List<HiscoreEntry>> fetchAllPbs(String baseUrl, String apiKey, String clanSlug)
+    {
+        String url = baseUrl + "/clans/" + clanSlug + "/pbs";
+        JsonObject response = getSync(url, apiKey);
+        if (response == null || !response.has("leaderboard")) return null;
+
+        Map<String, List<HiscoreEntry>> result = new java.util.LinkedHashMap<>();
+        com.google.gson.JsonArray leaderboard = response.getAsJsonArray("leaderboard");
+
+        for (com.google.gson.JsonElement elem : leaderboard)
+        {
+            JsonObject pb = elem.getAsJsonObject();
+            String bossKey = pb.has("bossKey") ? pb.get("bossKey").getAsString() : "";
+            int teamSize = pb.has("teamSize") ? pb.get("teamSize").getAsInt() : 1;
+            String rsn = pb.has("rsn") ? pb.get("rsn").getAsString() : "";
+            int timeMs = pb.has("timeMs") ? pb.get("timeMs").getAsInt() : 0;
+
+            double timeSeconds = timeMs / 1000.0;
+            int totalSec = (int) timeSeconds;
+            int min = totalSec / 60;
+            double sec = timeSeconds - (min * 60);
+            String formattedTime = String.format("%d:%05.2f", min, sec);
+
+            // Use bossKey directly as the category key (matches BossCategory.getKey())
+            result.computeIfAbsent(bossKey, k -> new java.util.ArrayList<>())
+                .add(new HiscoreEntry(0, timeSeconds, formattedTime, rsn, "", bossKey, teamSize));
+        }
+
+        // Sort each category by time and assign ranks
+        for (List<HiscoreEntry> entries : result.values())
+        {
+            entries.sort(java.util.Comparator.comparingDouble(HiscoreEntry::getTimeSeconds));
+        }
+
+        return result;
     }
 
     /**

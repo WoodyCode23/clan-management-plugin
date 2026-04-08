@@ -64,9 +64,9 @@ import java.util.regex.Pattern;
 
 @Slf4j
 @PluginDescriptor(
-    name = "Clan Management",
-    description = "Clan management plugin — drops, hiscores, and more",
-    tags = {"clan", "management", "drop", "logger", "discord", "hiscores"}
+    name = "Solus",
+    description = "Solus clan plugin — drops, speed times, and more",
+    tags = {"solus", "clan", "drop", "logger", "discord", "speed", "times"}
 )
 public class ClanManagementPlugin extends Plugin
 {
@@ -162,7 +162,7 @@ public class ClanManagementPlugin extends Plugin
     private String fetchedClanDropLogUrl;
     private String fetchedDiscordWebhookUrl;
     private int fetchedMinDropValue = 100000;
-    private String clanName = "Clan";
+    private String clanName = "Solus";
     private boolean serverConfigLoaded = false;
 
     // Cached drops tab data
@@ -225,49 +225,22 @@ public class ClanManagementPlugin extends Plugin
      * Decode the clan code (base64 of "url|key") into a 2-element array [url, key].
      * Returns null if the code is blank or malformed.
      */
+    /** @deprecated Legacy Google Sheet code — always returns null now. */
     private String[] decodeClanCode()
     {
-        String code = config.boardCode();
-        if (code == null || code.trim().isEmpty())
-        {
-            return null;
-        }
-        try
-        {
-            String cleaned = code.trim().replaceAll("^['\"]|['\"]$", "");
-            String decoded = new String(java.util.Base64.getDecoder().decode(cleaned));
-            int sep = decoded.indexOf('|');
-            if (sep < 0)
-            {
-                return null;
-            }
-            String url = decoded.substring(0, sep);
-            String key = decoded.substring(sep + 1);
-            if (url.isEmpty() || key.isEmpty())
-            {
-                return null;
-            }
-            return new String[]{url, key};
-        }
-        catch (Exception e)
-        {
-            log.warn("Invalid clan code", e);
-            return null;
-        }
+        return null;
     }
 
-    /** Get the Clan Management API URL from the clan code. */
+    /** @deprecated Legacy — returns empty string. Use getPlatformUrl() instead. */
     private String getClanApiUrl()
     {
-        String[] parts = decodeClanCode();
-        return parts != null ? parts[0] : "";
+        return "";
     }
 
-    /** Get the API key from the clan code. */
+    /** @deprecated Legacy — returns empty string. Use getPlatformKey() instead. */
     private String getApiKey()
     {
-        String[] parts = decodeClanCode();
-        return parts != null ? parts[1] : "";
+        return "";
     }
 
     /**
@@ -385,10 +358,10 @@ public class ClanManagementPlugin extends Plugin
         log.info("Bootstrap config loaded from platform");
     }
 
-    /** Get the clan name from server config, defaulting to "Clan". */
+    /** Get the clan name — hardcoded to Solus. */
     String getClanName()
     {
-        return clanName != null && !clanName.isEmpty() ? clanName : "Clan";
+        return "Solus";
     }
 
     @Override
@@ -400,7 +373,7 @@ public class ClanManagementPlugin extends Plugin
         // Set up side panel
         panel = new ClanPanel();
         // Show tabs only if board code is configured
-        panel.setConnected(decodeClanCode() != null);
+        panel.setConnected(isPlatformConfigured());
         panel.setOnRefresh(() -> executor.submit(this::refreshData));
         panel.setOnFetchTimes((cat, timesPanel) -> executor.submit(() -> fetchAndDisplayTimesV2(cat, timesPanel)));
         panel.setOnClearHiscoreCache(() ->
@@ -442,7 +415,7 @@ public class ClanManagementPlugin extends Plugin
         icon = ImageUtil.resizeImage(icon, 16, 16);
 
         navButton = NavigationButton.builder()
-            .tooltip("Clan Management")
+            .tooltip("Solus")
             .icon(icon)
             .priority(5)
             .panel(panel)
@@ -490,7 +463,7 @@ public class ClanManagementPlugin extends Plugin
         adventureLogPbTicksRemaining = -1;
 
         clientToolbar.removeNavigation(navButton);
-        log.info("Clan Management plugin stopped");
+        log.info("Solus plugin stopped");
     }
 
     @Subscribe
@@ -505,7 +478,7 @@ public class ClanManagementPlugin extends Plugin
         {
             log.info("Board code changed, reconnecting...");
             serverConfigLoaded = false;
-            panel.setConnected(decodeClanCode() != null);
+            panel.setConnected(isPlatformConfigured());
             executor.submit(this::refreshData);
         }
 
@@ -628,7 +601,7 @@ public class ClanManagementPlugin extends Plugin
         // ── Hiscore submission (always update context, even if submission is disabled) ──
         pbDetector.processMessage(cleanedMessage);
 
-        if (config.enablePbSubmission())
+        if (config.enableSpeedTimes())
         {
             handleCompletionTime(cleanedMessage);
         }
@@ -643,13 +616,13 @@ public class ClanManagementPlugin extends Plugin
         }
 
         // ── Drop Logging (clan drop log) ──
-        if (config.enableClanDropLog())
+        if (config.enableDrops())
         {
             handleDropLogging(rawMessage);
         }
 
         // ── Collection Log Detection (for clan drop log) ──
-        if (config.enableClanDropLog())
+        if (config.enableDrops())
         {
             handleCollectionLogEntry(cleanedMessage);
         }
@@ -659,7 +632,7 @@ public class ClanManagementPlugin extends Plugin
     public void onWidgetLoaded(WidgetLoaded event)
     {
         // Adventure log Counters page (group 741) — bulk PB sync
-        if (event.getGroupId() == JOURNALSCROLL_GROUP && isPlatformConfigured() && config.enablePbSync())
+        if (event.getGroupId() == JOURNALSCROLL_GROUP && isPlatformConfigured() && config.enableSpeedTimes())
         {
             log.info("Adventure log Counters page detected (group 741), scheduling PB parse");
             // Defer by several ticks so widget text has time to populate
@@ -804,7 +777,7 @@ public class ClanManagementPlugin extends Plugin
     public void onScriptPostFired(ScriptPostFired event)
     {
         // Script 2731 = COLLECTION_DRAW_LIST — fires when a category page is loaded in the clog
-        if (event.getScriptId() != 2731 || !isPlatformConfigured() || !config.enablePbSync())
+        if (event.getScriptId() != 2731 || !isPlatformConfigured() || !config.enableSpeedTimes())
         {
             return;
         }
@@ -1302,7 +1275,7 @@ public class ClanManagementPlugin extends Plugin
         String itemName = matcher.group(1);
         int value = Integer.parseInt(matcher.group(2).replace(",", ""));
 
-        if (value < config.clanDropMinValue())
+        if (value < fetchedMinDropValue)
         {
             return;
         }
@@ -1327,8 +1300,7 @@ public class ClanManagementPlugin extends Plugin
             }
         }
 
-        String clanLogUrl = getClanApiUrl();
-        if (clanLogUrl.isEmpty())
+        if (!isPlatformConfigured())
         {
             return;
         }
@@ -1353,7 +1325,7 @@ public class ClanManagementPlugin extends Plugin
 
         // Capture screenshot for Discord
         final BufferedImage[] screenshotHolder = {null};
-        if (config.postDrops() && fetchedDiscordWebhookUrl != null && !fetchedDiscordWebhookUrl.isEmpty())
+        if (fetchedDiscordWebhookUrl != null && !fetchedDiscordWebhookUrl.isEmpty())
         {
             try
             {
@@ -1377,24 +1349,18 @@ public class ClanManagementPlugin extends Plugin
             // Small delay to ensure screenshot capture completes
             try { Thread.sleep(500); } catch (InterruptedException ignored) {}
 
-            sheetsService.logClanDrop(clanLogUrl, drop, getApiKey());
-            log.debug("Clan drop logged: {} ({} gp)", itemName, value);
+            platformApiService.submitDrop(
+                getPlatformUrl(),
+                getPlatformKey(),
+                getPlatformSlug(),
+                drop
+            );
+            log.debug("Drop logged: {} ({} gp)", itemName, value);
 
             // Post to Discord with screenshot
-            if (config.postDrops() && fetchedDiscordWebhookUrl != null && !fetchedDiscordWebhookUrl.isEmpty())
+            if (fetchedDiscordWebhookUrl != null && !fetchedDiscordWebhookUrl.isEmpty())
             {
                 discordService.postDrop(fetchedDiscordWebhookUrl, drop, screenshotHolder[0]);
-            }
-
-            // Platform API (dual mode)
-            if (isPlatformConfigured())
-            {
-                platformApiService.submitDrop(
-                    getPlatformUrl(),
-                    getPlatformKey(),
-                    getPlatformSlug(),
-                    drop
-                );
             }
         });
 
@@ -1431,14 +1397,6 @@ public class ClanManagementPlugin extends Plugin
             wp.getX(), wp.getY(), wp.getPlane(), playerName
         );
 
-        if (fetchedClanDropLogUrl != null && !fetchedClanDropLogUrl.isEmpty())
-        {
-            String clanLogUrl = fetchedClanDropLogUrl;
-            executor.submit(() -> sheetsService.logClanDrop(clanLogUrl, drop, getApiKey(), "collection_log"));
-            log.debug("Collection log entry submitted: {} for {}", itemName, playerName);
-        }
-
-        // Platform API (dual mode)
         if (isPlatformConfigured())
         {
             final String pRsn = playerName;
@@ -1502,7 +1460,7 @@ public class ClanManagementPlugin extends Plugin
         if (!allClanMembers)
         {
             log.info("Not all party members in clan chat — PB will be submitted as unverified");
-            if (config.pbChatConfirmation())
+            if (config.chatConfirmation())
             {
                 clientThread.invokeLater(() ->
                     client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
@@ -1540,7 +1498,7 @@ public class ClanManagementPlugin extends Plugin
 
         // Capture screenshot immediately (must be done on render thread)
         final BufferedImage[] screenshotHolder = {null};
-        if (config.postPbs() && fetchedDiscordWebhookUrl != null && !fetchedDiscordWebhookUrl.isEmpty())
+        if (config.enableSpeedTimes() && fetchedDiscordWebhookUrl != null && !fetchedDiscordWebhookUrl.isEmpty())
         {
             try
             {
@@ -1559,8 +1517,6 @@ public class ClanManagementPlugin extends Plugin
             }
         }
 
-        String v2ApiUrl = fetchedClanDropLogUrl != null ? fetchedClanDropLogUrl : "";
-        String apiKey = getApiKey();
         final int finalPartySize = partySize;
         final String finalCategoryName = categoryName;
         final boolean finalAllClan = allClanMembers;
@@ -1570,43 +1526,7 @@ public class ClanManagementPlugin extends Plugin
             // Small delay to ensure screenshot capture completes
             try { Thread.sleep(500); } catch (InterruptedException ignored) {}
 
-            int placed = 0;
-
-            // Google Sheet hiscore + Discord — only for clan-verified times
-            if (finalAllClan && !v2ApiUrl.isEmpty())
-            {
-                placed = hiscoreService.checkAndSubmitPbV2(
-                    v2ApiUrl, categoryKey, formattedTime, timeSeconds,
-                    rsns, date, finalPartySize, apiKey);
-                log.debug("Hiscore submit result for {}: {}", categoryKey, placed);
-            }
-
-            // Only notify in chat if the time placed in the clan top 3
-            if (placed > 0 && config.pbChatConfirmation())
-            {
-                String msg = String.format("[%s] %s placed #%d in %s!",
-                    getClanName(), formattedTime, placed, finalCategoryName);
-                clientThread.invokeLater(() ->
-                    client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", msg, "")
-                );
-            }
-
-            // Invalidate cache for this category so next UI view fetches fresh data
-            if (placed > 0)
-            {
-                hiscoreCacheV2.remove(categoryKey);
-                saveHiscoreCacheV2ToDisk();
-            }
-
-            // Post to Discord if placed top 3 (clan-verified only)
-            if (placed > 0 && config.postPbs()
-                && fetchedDiscordWebhookUrl != null && !fetchedDiscordWebhookUrl.isEmpty())
-            {
-                discordService.postPb(fetchedDiscordWebhookUrl, formattedTime, placed,
-                    finalCategoryName, rsns, screenshotHolder[0]);
-            }
-
-            // Platform API — submit one PB per party member
+            // Submit PB to platform API — one entry per party member
             // "live" = all party members in clan chat (clan-verified)
             // "unverified" = not all members in clan chat
             if (isPlatformConfigured())
@@ -1625,6 +1545,28 @@ public class ClanManagementPlugin extends Plugin
                         timeMs,
                         source
                     );
+                }
+                log.debug("Speed time submitted for {}: {}", categoryKey, formattedTime);
+
+                // Invalidate cache so next UI view fetches fresh data
+                hiscoreCacheV2.remove(categoryKey);
+                saveHiscoreCacheV2ToDisk();
+
+                // Chat notification
+                if (config.chatConfirmation())
+                {
+                    String msg = String.format("[%s] Speed time recorded: %s in %s",
+                        getClanName(), formattedTime, finalCategoryName);
+                    clientThread.invokeLater(() ->
+                        client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", msg, "")
+                    );
+                }
+
+                // Post to Discord (clan-verified only)
+                if (finalAllClan && fetchedDiscordWebhookUrl != null && !fetchedDiscordWebhookUrl.isEmpty())
+                {
+                    discordService.postPb(fetchedDiscordWebhookUrl, formattedTime, 0,
+                        finalCategoryName, rsns, screenshotHolder[0]);
                 }
             }
         });
@@ -1741,15 +1683,14 @@ public class ClanManagementPlugin extends Plugin
             refreshTask.cancel(false);
         }
 
-        int interval = Math.max(30, config.refreshInterval());
+        int interval = 60;
         refreshTask = executor.scheduleAtFixedRate(
             this::refreshData, 10, interval, TimeUnit.SECONDS);
     }
 
     private void refreshData()
     {
-        String apiUrl = getClanApiUrl();
-        if (apiUrl == null || apiUrl.isEmpty())
+        if (!isPlatformConfigured())
         {
             panel.setConnected(false);
             panel.setStatus("Enter your Clan Code in plugin settings");
@@ -1759,44 +1700,14 @@ public class ClanManagementPlugin extends Plugin
         // Fetch bootstrap config from platform (discord webhook, min drop value, active event)
         fetchBootstrapConfig();
 
-        // Fetch server-side config on first successful connection
+        // Load platform config on first successful connection
         if (!serverConfigLoaded)
         {
             try
             {
-                Map<String, String> serverConfig = boardDataService.fetchConfig(apiUrl, getApiKey());
-                fetchedClanDropLogUrl = apiUrl; // Same URL as the clan code
-                fetchedDiscordWebhookUrl = serverConfig.getOrDefault("discordWebhookUrl", "");
-                String configClanName = serverConfig.getOrDefault("clanName", "");
-                if (!configClanName.isEmpty()) clanName = configClanName;
                 serverConfigLoaded = true;
                 panel.setConnected(true);
-                panel.setClanName(getClanName());
-                discordService.setClanName(getClanName());
-
-                // Set WOM group ID from server config
-                String womId = serverConfig.getOrDefault("womGroupId", "");
-                if (!womId.isEmpty())
-                {
-                    try { womService.setGroupId(Integer.parseInt(womId)); }
-                    catch (NumberFormatException ignored) {}
-                }
-
-                // Show announcement on home tab
-                String announcement = serverConfig.getOrDefault("announcement", "");
-                if (!announcement.isEmpty())
-                {
-                    panel.setAnnouncements(java.util.Collections.singletonList(announcement));
-                }
-
-                // Load active event from config
-                activeEventType = serverConfig.getOrDefault("eventType", "");
-                activeEventMetric = serverConfig.getOrDefault("eventMetric", "");
-                activeEventDisplayName = serverConfig.getOrDefault("eventDisplayName", "");
-                activeEventEndTime = serverConfig.getOrDefault("eventEndTime", "");
-
-                log.info("Server config loaded — clanName={}, clanLog={}, discord={}",
-                    getClanName(), !fetchedClanDropLogUrl.isEmpty(), !fetchedDiscordWebhookUrl.isEmpty());
+                log.info("Platform connected — clan={}", getClanName());
 
                 // Auto-load drops tab on first config load
                 executor.submit(this::refreshDropsTab);
@@ -1810,7 +1721,8 @@ public class ClanManagementPlugin extends Plugin
             }
             catch (Exception e)
             {
-                log.warn("Failed to fetch server config — will retry next refresh", e);
+                log.warn("Failed to initialize platform connection — will retry next refresh", e);
+                serverConfigLoaded = false;
             }
         }
 
@@ -1854,22 +1766,14 @@ public class ClanManagementPlugin extends Plugin
 
     private void refreshBingo()
     {
-        String bingoUrl = config.bingoApiUrl();
-        String bingoKey = config.bingoApiKey();
-        if (bingoUrl == null || bingoUrl.isEmpty()) {
+        // Bingo is archived — always return early
+        if (true) {
             if (bingoActive) {
                 panel.hideBingoTab();
                 bingoActive = false;
                 if (bountyScheduler != null) bountyScheduler.cancel();
             }
             return;
-        }
-
-        // Configure service if not already
-        if (!bingoService.isConfigured()) {
-            bingoService.configure(bingoUrl, bingoKey,
-                config.bingoAdminKey() != null ? config.bingoAdminKey() : "",
-                config.bingoHostKey() != null ? config.bingoHostKey() : "");
         }
 
         try
@@ -2082,17 +1986,41 @@ public class ClanManagementPlugin extends Plugin
     }
 
     /**
-     * Batch-fetch all hiscore times from the v2 API (one call), populate entire cache.
-     * Called once per session on first hiscore tab interaction, or on manual refresh.
+     * Batch-fetch all speed times, populate entire cache.
+     * Prefers platform API; falls back to Google Sheet v2 API.
      */
     private void batchFetchAllHiscores()
     {
+        // Try platform API first
+        if (isPlatformConfigured())
+        {
+            try
+            {
+                Map<String, List<HiscoreEntry>> allTimes = platformApiService.fetchAllPbs(
+                    getPlatformUrl(), getPlatformKey(), getPlatformSlug());
+                if (allTimes != null)
+                {
+                    hiscoreCacheV2.putAll(allTimes);
+                    hiscoreV2BatchFetched = true;
+                    saveHiscoreCacheV2ToDisk();
+                    panel.setRecentCategories(new java.util.LinkedHashSet<>(hiscoreCacheV2.keySet()), new java.util.LinkedHashMap<>(hiscoreCacheV2));
+                    log.info("Batch-fetched speed times from platform API: {} categories", allTimes.size());
+                    return;
+                }
+            }
+            catch (Exception e)
+            {
+                log.warn("Failed to batch-fetch speed times from platform API", e);
+            }
+        }
+
+        // Fallback to Google Sheet v2 API
         String v2Url = fetchedClanDropLogUrl;
         String apiKey = getApiKey();
 
         if (v2Url == null || v2Url.isEmpty())
         {
-            log.debug("Clan drop log URL not configured — skipping batch hiscore fetch");
+            log.debug("No speed times API configured — skipping batch fetch");
             return;
         }
 
@@ -2103,11 +2031,11 @@ public class ClanManagementPlugin extends Plugin
             hiscoreV2BatchFetched = true;
             saveHiscoreCacheV2ToDisk();
             panel.setRecentCategories(new java.util.LinkedHashSet<>(hiscoreCacheV2.keySet()), new java.util.LinkedHashMap<>(hiscoreCacheV2));
-            log.info("Batch-fetched hiscores: {} categories", allTimes.size());
+            log.info("Batch-fetched speed times: {} categories", allTimes.size());
         }
         catch (Exception e)
         {
-            log.warn("Failed to batch-fetch hiscores", e);
+            log.warn("Failed to batch-fetch speed times", e);
         }
     }
 
@@ -2162,7 +2090,7 @@ public class ClanManagementPlugin extends Plugin
         {
             timesPanel.removeAll();
             String msg = (v2Url == null || v2Url.isEmpty())
-                ? "Hiscore API not configured"
+                ? "Speed Times API not configured"
                 : "Failed to load times";
             javax.swing.JLabel err = new javax.swing.JLabel(msg);
             err.setFont(err.getFont().deriveFont(java.awt.Font.ITALIC, 10f));
@@ -2606,20 +2534,13 @@ public class ClanManagementPlugin extends Plugin
         this.adminPanel = new AdminPanel();
         panel.showAdminTab(adminPanel);
 
-        String clanApiUrl = getClanApiUrl();
-        String apiKey = getApiKey();
-
-        // Load shared settings from sheet
+        // Load shared settings — uses platform bootstrap data
         adminPanel.setOnLoadSettings(() -> executor.submit(() -> {
             try
             {
                 adminPanel.setStatus("Loading settings...");
-                var settings = adminService.getSharedSettings(clanApiUrl, apiKey, adminKey);
-                adminPanel.setClanName(settings.getOrDefault("clanName", ""));
-                adminPanel.setWebhookUrl(settings.getOrDefault("discordWebhookUrl", ""));
-                adminPanel.setWomGroupId(settings.getOrDefault("womGroupId", ""));
-                adminPanel.setAnnouncement(settings.getOrDefault("announcement", ""));
-                adminPanel.setStatus("Settings loaded");
+                adminPanel.setClanName(getClanName());
+                adminPanel.setStatus("Settings loaded from platform");
             }
             catch (Exception e)
             {
@@ -2627,14 +2548,11 @@ public class ClanManagementPlugin extends Plugin
             }
         }));
 
-        // Save shared settings to sheet
+        // Save shared settings — placeholder for future platform admin API
         adminPanel.setOnSaveSettings(args -> executor.submit(() -> {
             try
             {
-                adminPanel.setStatus("Saving...");
-                adminService.saveSharedSettings(clanApiUrl, apiKey, adminKey,
-                    args[0], args[1], args.length > 2 ? args[2] : "",
-                    args.length > 3 ? args[3] : "");
+                adminPanel.setStatus("Settings are managed from the web dashboard");
                 adminPanel.setStatus("Settings saved");
                 // Refresh local cached config
                 serverConfigLoaded = false;
@@ -2645,48 +2563,15 @@ public class ClanManagementPlugin extends Plugin
             }
         }));
 
-        // Hiscore moderation
+        // Speed times moderation — managed via web dashboard
         adminPanel.setOnRemoveHiscore(args -> executor.submit(() -> {
-            try
-            {
-                String categoryKey = args[0];
-                int rank = Integer.parseInt(args[1]);
-                String v2Url = fetchedClanDropLogUrl != null ? fetchedClanDropLogUrl : "";
-                if (!v2Url.isEmpty())
-                {
-                    adminService.removeHiscoreEntryV2(v2Url, apiKey, adminKey, categoryKey, rank);
-                    adminPanel.setStatus("Removed rank #" + rank + " from " + categoryKey);
-                }
-                else
-                {
-                    adminPanel.setStatus("No hiscore API configured");
-                }
-                // Clear cache for this category
-                hiscoreCacheV2.remove(categoryKey);
-            }
-            catch (Exception e)
-            {
-                adminPanel.setStatus("Error: " + e.getMessage());
-            }
+            adminPanel.setStatus("Speed times are managed from the web dashboard");
+            hiscoreCacheV2.remove(args[0]);
         }));
 
-        // Rotate API key
+        // Rotate API key — managed via web dashboard
         adminPanel.setOnRotateApiKey(newKey -> executor.submit(() -> {
-            try
-            {
-                adminPanel.setStatus("Rotating API key...");
-                adminService.rotateApiKey(clanApiUrl, apiKey, adminKey, newKey);
-
-                // Generate new clan code with the new key
-                String newClanCode = java.util.Base64.getEncoder().encodeToString(
-                    (clanApiUrl + "|" + newKey).getBytes());
-                adminPanel.setNewBoardCode(newClanCode);
-                adminPanel.setStatus("API key rotated — distribute new clan code to members");
-            }
-            catch (Exception e)
-            {
-                adminPanel.setStatus("Error: " + e.getMessage());
-            }
+            adminPanel.setStatus("API keys are managed from the web dashboard");
         }));
 
         // Start weekly event
@@ -2697,14 +2582,7 @@ public class ClanManagementPlugin extends Plugin
                 String metric = args[1];
                 String displayName = args[2];
                 adminPanel.setStatus("Starting event...");
-                if (isPlatformConfigured())
-                {
-                    adminService.startEventPlatform(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), type, metric, displayName);
-                }
-                else
-                {
-                    adminService.startEvent(clanApiUrl, apiKey, adminKey, type, metric, displayName);
-                }
+                adminService.startEventPlatform(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), type, metric, displayName);
                 adminPanel.setStatus("Event started: " + displayName);
 
                 // Update local state
@@ -2755,14 +2633,7 @@ public class ClanManagementPlugin extends Plugin
                         activeEventDisplayName, finalLeaderboard);
                 }
 
-                if (isPlatformConfigured())
-                {
-                    adminService.endEventPlatform(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), activeEventId);
-                }
-                else
-                {
-                    adminService.endEvent(clanApiUrl, apiKey, adminKey);
-                }
+                adminService.endEventPlatform(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), activeEventId);
                 adminPanel.setStatus("Event ended");
 
                 // Clear local state
@@ -2798,94 +2669,6 @@ public class ClanManagementPlugin extends Plugin
         {
             adminPanel.setActiveEvent(activeEventType, activeEventDisplayName, activeEventEndTime);
         }
-
-        // Show bingo sections if keys are configured
-        String bingoAdminKey = config.bingoAdminKey();
-        String bingoHostKey = config.bingoHostKey();
-
-        if (bingoAdminKey != null && !bingoAdminKey.isEmpty())
-        {
-            adminPanel.showBingoAdminSection(true);
-        }
-        if (bingoHostKey != null && !bingoHostKey.isEmpty())
-        {
-            adminPanel.showBingoHostSection(true);
-        }
-
-        // Bingo admin callbacks
-        adminPanel.setOnBingoAssignRoster(args -> executor.submit(() -> {
-            try
-            {
-                adminPanel.setStatus("Assigning " + args[0] + " to " + args[1] + "...");
-                bingoService.adminUpdateRoster(args[0], args[1]);
-                adminPanel.setStatus("Assigned " + args[0] + " to team " + args[1]);
-                bingoService.invalidateConfigCache();
-            }
-            catch (Exception e)
-            {
-                adminPanel.setStatus("Error: " + e.getMessage());
-            }
-        }));
-
-        adminPanel.setOnBingoRemoveRoster(rsn -> executor.submit(() -> {
-            try
-            {
-                adminPanel.setStatus("Removing " + rsn + "...");
-                bingoService.adminRemoveRoster(rsn);
-                adminPanel.setStatus("Removed " + rsn + " from roster");
-                bingoService.invalidateConfigCache();
-            }
-            catch (Exception e)
-            {
-                adminPanel.setStatus("Error: " + e.getMessage());
-            }
-        }));
-
-        adminPanel.setOnBingoAdjustProgress(args -> executor.submit(() -> {
-            try
-            {
-                adminPanel.setStatus("Adjusting progress...");
-                double points = Double.parseDouble(args[2]);
-                bingoService.adminManualProgress(args[0], args[1], points);
-                adminPanel.setStatus("Added " + args[2] + " points to " + args[0] + "/" + args[1]);
-            }
-            catch (Exception e)
-            {
-                adminPanel.setStatus("Error: " + e.getMessage());
-            }
-        }));
-
-        // Bingo host callbacks
-        adminPanel.setOnBingoAddBounty(args -> executor.submit(() -> {
-            try
-            {
-                adminPanel.setStatus("Adding bounty...");
-                int number = Integer.parseInt(args[0]);
-                double points = Double.parseDouble(args[3]);
-                bingoService.hostAddBounty(number, args[1], args[2], points);
-                adminPanel.setStatus("Bounty #" + args[0] + " added");
-                bingoService.invalidateConfigCache();
-            }
-            catch (Exception e)
-            {
-                adminPanel.setStatus("Error: " + e.getMessage());
-            }
-        }));
-
-        adminPanel.setOnBingoSetWinner(args -> executor.submit(() -> {
-            try
-            {
-                adminPanel.setStatus("Setting winner...");
-                int number = Integer.parseInt(args[0]);
-                bingoService.hostUpdateBounty(number, args[1]);
-                adminPanel.setStatus("Bounty #" + args[0] + " winner set to " + args[1]);
-                bingoService.invalidateConfigCache();
-            }
-            catch (Exception e)
-            {
-                adminPanel.setStatus("Error: " + e.getMessage());
-            }
-        }));
 
         log.info("Admin panel enabled");
     }

@@ -92,8 +92,14 @@ public class RsHiscoreTracker
      */
     public int syncRoster(String baseUrl, String apiKey, String slug)
     {
+        log.info("syncRoster called — url={}, key={}, slug={}",
+            baseUrl.isEmpty() ? "(empty)" : baseUrl,
+            apiKey.isEmpty() ? "(empty)" : "(set)",
+            slug.isEmpty() ? "(empty)" : slug);
+
         if (baseUrl.isEmpty() || apiKey.isEmpty() || slug.isEmpty())
         {
+            log.warn("syncRoster aborted — missing config");
             return -1;
         }
 
@@ -120,7 +126,12 @@ public class RsHiscoreTracker
                 ClanTitle title = clanSettings.titleForRank(member.getRank());
                 rank = title != null ? title.getName() : null;
             }
-            memberList.add(new String[]{name, rank});
+            String joinDate = null;
+            if (member.getJoinDate() != null)
+            {
+                joinDate = member.getJoinDate().toString(); // ISO format: YYYY-MM-DD
+            }
+            memberList.add(new String[]{name, rank, joinDate});
         }
 
         log.info("Syncing roster: {} members", memberList.size());

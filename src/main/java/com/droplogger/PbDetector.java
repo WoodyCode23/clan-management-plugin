@@ -113,18 +113,27 @@ public class PbDetector
         boolean isPb = cleanedMessage.contains("(new personal best)");
         Matcher matcher;
 
-        // Check ToB first (specific pattern)
+        // Check ToB first (specific pattern) — distinguish entry/normal/hard
         matcher = TOB_TIME.matcher(cleanedMessage);
         if (matcher.find())
         {
-            return new CompletionResult("tob", matcher.group(1), null, isPb);
+            String lower = cleanedMessage.toLowerCase();
+            String tobGroup;
+            if (lower.contains("entry")) tobGroup = "tob_entry";
+            else if (lower.contains("hard")) tobGroup = "tob_hm";
+            else tobGroup = "tob";
+            return new CompletionResult(tobGroup, matcher.group(1), null, isPb);
         }
 
-        // Check ToA — "Expert Mode" in the message means 300+ invocations
+        // Check ToA — entry/normal/expert
         matcher = TOA_TIME.matcher(cleanedMessage);
         if (matcher.find())
         {
-            String toaGroup = cleanedMessage.toLowerCase().contains("expert") ? "toa_expert" : "toa";
+            String lower = cleanedMessage.toLowerCase();
+            String toaGroup;
+            if (lower.contains("entry")) toaGroup = "toa_entry";
+            else if (lower.contains("expert")) toaGroup = "toa_expert";
+            else toaGroup = "toa";
             return new CompletionResult(toaGroup, matcher.group(1), null, isPb);
         }
 

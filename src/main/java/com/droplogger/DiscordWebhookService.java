@@ -24,12 +24,7 @@ public class DiscordWebhookService
 
     private final OkHttpClient httpClient;
     private final Gson gson;
-    private String clanName = "Clan";
-
-    public void setClanName(String name)
-    {
-        this.clanName = (name != null && !name.isEmpty()) ? name : "Clan";
-    }
+    private final String clanName = "Solus";
 
     @Inject
     public DiscordWebhookService(OkHttpClient httpClient, Gson gson)
@@ -101,7 +96,7 @@ public class DiscordWebhookService
         }
 
         JsonObject footer = new JsonObject();
-        footer.addProperty("text", clanName + " Hiscores");
+        footer.addProperty("text", clanName + " Speed Times");
         embed.add("footer", footer);
 
         if (screenshot != null)
