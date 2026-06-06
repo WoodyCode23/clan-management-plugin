@@ -574,11 +574,11 @@ public class DropLoggerPlugin extends Plugin
         final int finalPartySize = partySize;
         final String finalCategoryName = categoryName;
 
-        executor.submit(() ->
+        // Delay slightly so the requested screenshot frame has time to land
+        // before we submit/post. Uses the scheduler's delay instead of
+        // Thread.sleep (which is disallowed in Plugin Hub plugins).
+        executor.schedule(() ->
         {
-            // Small delay to ensure screenshot capture completes
-            try { Thread.sleep(500); } catch (InterruptedException ignored) {}
-
             int placed = 0;
 
             if (!v2ApiUrl.isEmpty())
@@ -613,7 +613,7 @@ public class DropLoggerPlugin extends Plugin
                 discordService.postPb(fetchedDiscordWebhookUrl, formattedTime, placed,
                     finalCategoryName, rsns, screenshotHolder[0]);
             }
-        });
+        }, 500, TimeUnit.MILLISECONDS);
     }
 
     /**
