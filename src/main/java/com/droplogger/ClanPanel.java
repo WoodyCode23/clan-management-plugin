@@ -972,6 +972,15 @@ public class ClanPanel extends PluginPanel
      * Populate a times panel with fetched HiscoreEntry data.
      * Called by the plugin after fetching times for a category.
      */
+    // Boss group-key -> small icon, supplied by the plugin (which has ItemManager).
+    private java.util.Map<String, ImageIcon> bossIcons = java.util.Collections.emptyMap();
+
+    public void setBossIcons(java.util.Map<String, ImageIcon> icons)
+    {
+        this.bossIcons = icons != null ? icons : java.util.Collections.emptyMap();
+        SwingUtilities.invokeLater(this::showRecentPbsOverview);
+    }
+
     public void populateTimesPanel(JPanel timesPanel, List<HiscoreEntry> entries, Color accentColor)
     {
         SwingUtilities.invokeLater(() ->
@@ -1571,13 +1580,23 @@ public class ClanPanel extends PluginPanel
                 String sizeLabel = cat != null && cat.getMaxPlayers() > 1 ? " (" + cat.getSizeLabel() + ")" : "";
                 HiscoreEntry best = times.get(0);
 
-                JPanel row = new JPanel(new BorderLayout(4, 0));
+                JPanel row = new JPanel(new BorderLayout(6, 0));
                 row.setBackground(count % 2 == 0 ? new Color(18, 18, 18) : new Color(28, 28, 28));
                 row.setAlignmentX(Component.LEFT_ALIGNMENT);
                 row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 32));
                 row.setBorder(new EmptyBorder(4, 8, 4, 8));
 
-                // Left: boss name
+                // Boss icon (left of the name), if we have one for this group
+                ImageIcon bossIcon = cat != null ? bossIcons.get(cat.getGroup()) : null;
+                if (bossIcon != null)
+                {
+                    JLabel iconLabel = new JLabel(bossIcon);
+                    iconLabel.setVerticalAlignment(SwingConstants.CENTER);
+                    iconLabel.setBorder(new EmptyBorder(0, 0, 0, 2));
+                    row.add(iconLabel, BorderLayout.WEST);
+                }
+
+                // Center: boss name
                 JPanel leftPanel = new JPanel();
                 leftPanel.setLayout(new BoxLayout(leftPanel, BoxLayout.Y_AXIS));
                 leftPanel.setBackground(row.getBackground());

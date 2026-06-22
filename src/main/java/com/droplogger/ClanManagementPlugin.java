@@ -202,6 +202,31 @@ public class ClanManagementPlugin extends Plugin
     private static final int PARAM_TAB_CATEGORIES_ENUM = 683;
     private static final int PARAM_CATEGORY_NAME = 689;
     private static final int PARAM_CATEGORY_ITEMS_ENUM = 690;
+
+    // Boss group-key -> representative item id, for the small icon beside each boss name.
+    private static final Map<String, Integer> BOSS_GROUP_ICONS = new HashMap<>();
+    static
+    {
+        BOSS_GROUP_ICONS.put("cox", 20851);      BOSS_GROUP_ICONS.put("cox_cm", 22386);
+        BOSS_GROUP_ICONS.put("tob", 22473);      BOSS_GROUP_ICONS.put("tob_hm", 22473);
+        BOSS_GROUP_ICONS.put("toa", 27352);      BOSS_GROUP_ICONS.put("toa_expert", 27352);
+        BOSS_GROUP_ICONS.put("bandos", 12650);   BOSS_GROUP_ICONS.put("sara", 12651);
+        BOSS_GROUP_ICONS.put("zammy", 12652);    BOSS_GROUP_ICONS.put("arma", 12649);
+        BOSS_GROUP_ICONS.put("duke", 28250);     BOSS_GROUP_ICONS.put("leviathan", 28252);
+        BOSS_GROUP_ICONS.put("whisperer", 28246); BOSS_GROUP_ICONS.put("vardorvis", 28248);
+        BOSS_GROUP_ICONS.put("nightmare", 24491); BOSS_GROUP_ICONS.put("phosani", 24491);
+        BOSS_GROUP_ICONS.put("zulrah", 12921);   BOSS_GROUP_ICONS.put("vorkath", 21992);
+        BOSS_GROUP_ICONS.put("jad", 13225);      BOSS_GROUP_ICONS.put("zuk", 21291);
+        BOSS_GROUP_ICONS.put("colo", 28960);     BOSS_GROUP_ICONS.put("gaunt", 23757);
+        BOSS_GROUP_ICONS.put("gaunt_corrupted", 23759); BOSS_GROUP_ICONS.put("nex", 26348);
+        BOSS_GROUP_ICONS.put("hydra", 22746);    BOSS_GROUP_ICONS.put("cerberus", 13247);
+        BOSS_GROUP_ICONS.put("araxxor", 29836);  BOSS_GROUP_ICONS.put("corp", 12816);
+        BOSS_GROUP_ICONS.put("kq", 12647);       BOSS_GROUP_ICONS.put("kraken", 12655);
+        BOSS_GROUP_ICONS.put("muspah", 27590);   BOSS_GROUP_ICONS.put("phantom_muspah", 27590);
+        BOSS_GROUP_ICONS.put("hueycoatl", 30152); BOSS_GROUP_ICONS.put("amoxliatl", 30154);
+        BOSS_GROUP_ICONS.put("yama", 29622);     BOSS_GROUP_ICONS.put("sire", 13262);
+        BOSS_GROUP_ICONS.put("grotesque", 21748); BOSS_GROUP_ICONS.put("thermy", 12648);
+    }
     // Built from enum 3721 on clog open: maps a slot's "bad" item id to its canonical id.
     // Replaces the old hand-maintained skip list (which dropped real slots → undercount).
     private Map<Integer, Integer> clogDupeRemap = Collections.emptyMap();
@@ -427,6 +452,9 @@ public class ClanManagementPlugin extends Plugin
             .panel(panel)
             .build();
         clientToolbar.addNavigation(navButton);
+
+        // Build boss icons for the Speed Times list once item images are cached (client thread).
+        executor.schedule(() -> clientThread.invokeLater(this::buildAndSetBossIcons), 6, TimeUnit.SECONDS);
 
         // Set up admin panel if admin key is configured
         setupAdminPanel();
@@ -740,6 +768,26 @@ public class ClanManagementPlugin extends Plugin
     private int remapClogId(int itemId)
     {
         return clogDupeRemap.getOrDefault(itemId, itemId);
+    }
+
+    /** Build small boss icons via ItemManager and hand them to the panel (run on the client thread). */
+    private void buildAndSetBossIcons()
+    {
+        if (panel == null) return;
+        java.util.Map<String, javax.swing.ImageIcon> icons = new HashMap<>();
+        for (Map.Entry<String, Integer> e : BOSS_GROUP_ICONS.entrySet())
+        {
+            try
+            {
+                java.awt.image.BufferedImage img = itemManager.getImage(e.getValue());
+                if (img != null)
+                {
+                    icons.put(e.getKey(), new javax.swing.ImageIcon(img));
+                }
+            }
+            catch (Exception ignored) { /* skip icons that fail to load */ }
+        }
+        panel.setBossIcons(icons);
     }
 
     private void buildClogCategoryMap()
