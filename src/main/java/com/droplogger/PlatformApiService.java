@@ -95,10 +95,14 @@ public class PlatformApiService
      */
     public void bulkSyncCollectionLog(String baseUrl, String apiKey, String clanSlug,
                                        String rsn, java.util.List<ClogItem> itemList,
+                                       int uniqueObtained, int uniqueTotal,
                                        Callback callback)
     {
         JsonObject payload = new JsonObject();
         payload.addProperty("rsn", rsn);
+        // Authoritative game counts (varp 2943/2944) — the X/Y headline the backend stores/serves.
+        if (uniqueObtained > 0) payload.addProperty("uniqueObtained", uniqueObtained);
+        if (uniqueTotal > 0) payload.addProperty("uniqueTotal", uniqueTotal);
 
         JsonArray items = new JsonArray();
         for (ClogItem ci : itemList)

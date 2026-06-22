@@ -205,6 +205,9 @@ public class ClanManagementPlugin extends Plugin
     // Built from enum 3721 on clog open: maps a slot's "bad" item id to its canonical id.
     // Replaces the old hand-maintained skip list (which dropped real slots → undercount).
     private Map<Integer, Integer> clogDupeRemap = Collections.emptyMap();
+    // Authoritative game counts captured on clog open (varp 2943/2944), reused at upload time.
+    private int clogObtainedCount = 0;
+    private int clogTotalCount = 0;
 
     // Adventure log PB sync state
     private int adventureLogPbTicksRemaining = -1;
@@ -646,11 +649,11 @@ public class ClanManagementPlugin extends Plugin
         {
             // Show the game's authoritative unique counts immediately (varp 2943/2944) so the
             // panel matches the in-game "X/Y" exactly, independent of what's been synced.
-            int obtained = client.getVarpValue(VARP_CLOG_OBTAINED);
-            int total = client.getVarpValue(VARP_CLOG_TOTAL);
-            if (total > 0)
+            clogObtainedCount = client.getVarpValue(VARP_CLOG_OBTAINED);
+            clogTotalCount = client.getVarpValue(VARP_CLOG_TOTAL);
+            if (clogTotalCount > 0)
             {
-                panel.setStatusClog(obtained, total);
+                panel.setStatusClog(clogObtainedCount, clogTotalCount);
             }
             // Build category mapping and sync catalog every time clog opens
             buildClogCategoryMap();
@@ -1277,6 +1280,8 @@ public class ClanManagementPlugin extends Plugin
             getPlatformSlug(),
             rsn,
             items,
+            clogObtainedCount,
+            clogTotalCount,
             new okhttp3.Callback()
             {
                 @Override
@@ -2285,20 +2290,26 @@ public class ClanManagementPlugin extends Plugin
                 baseUrl + "/clans/" + slug + "/collection-log/" + encodedRsn, apiKey);
             if (clogData != null)
             {
-                int obtained = clogData.has("total") ? clogData.get("total").getAsInt() : 0;
-                int catalogSize = 0;
-                if (clogData.has("catalog") && clogData.get("catalog").isJsonArray())
+                // Prefer the authoritative game counts (varp 2943/2944) the plugin synced;
+                // fall back to reconstructed counts only if the backend hasn't got them yet.
+                int obtained = clogData.has("obtained") ? clogData.get("obtained").getAsInt()
+                    : (clogData.has("total") ? clogData.get("total").getAsInt() : 0);
+                int totalSlots = 0;
+                if (clogData.has("totalSlots") && !clogData.get("totalSlots").isJsonNull())
                 {
-                    // Count distinct itemIds (items can appear in multiple categories)
+                    totalSlots = clogData.get("totalSlots").getAsInt();
+                }
+                else if (clogData.has("catalog") && clogData.get("catalog").isJsonArray())
+                {
                     Set<Integer> catalogIds = new HashSet<>();
                     for (var el : clogData.getAsJsonArray("catalog"))
                     {
                         JsonObject ci = el.getAsJsonObject();
                         if (ci.has("itemId")) catalogIds.add(ci.get("itemId").getAsInt());
                     }
-                    catalogSize = catalogIds.size();
+                    totalSlots = catalogIds.size();
                 }
-                panel.setStatusClog(obtained, catalogSize);
+                panel.setStatusClog(obtained, totalSlots);
             }
         }
         catch (Exception e)
