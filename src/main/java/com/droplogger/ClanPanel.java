@@ -1023,58 +1023,54 @@ public class ClanPanel extends PluginPanel
 
         if (isSolo)
         {
-            // ── Solo layout: rank + time on top, RSN + date below, no dropdown ──
-            JPanel card = new JPanel();
-            card.setLayout(new BoxLayout(card, BoxLayout.Y_AXIS));
-            card.setBackground(new Color(18, 18, 18));
-            card.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(30, 30, 30)),
-                new EmptyBorder(4, 20, 4, 6)
+            // ── Solo layout: clean single row — rank · time · rsn · date ──
+            JPanel rowSolo = new JPanel(new BorderLayout(6, 0));
+            rowSolo.setBackground(new Color(18, 18, 18));
+            // Thin bottom divider only (no boxed border), light left padding
+            rowSolo.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(26, 26, 26)),
+                new EmptyBorder(5, 10, 5, 8)
             ));
-            card.setAlignmentX(Component.LEFT_ALIGNMENT);
+            rowSolo.setAlignmentX(Component.LEFT_ALIGNMENT);
+            rowSolo.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
 
-            // Top line: rank + time
-            JPanel topLine = new JPanel(new BorderLayout());
-            topLine.setBackground(new Color(18, 18, 18));
-            topLine.setAlignmentX(Component.LEFT_ALIGNMENT);
-            topLine.setMaximumSize(new Dimension(Integer.MAX_VALUE, 18));
-
+            // Left: rank + time together
+            JPanel left = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 6, 0));
+            left.setBackground(rowSolo.getBackground());
             JLabel rankLabel = new JLabel(rankText);
             rankLabel.setFont(rankLabel.getFont().deriveFont(Font.BOLD, 10f));
             rankLabel.setForeground(rankColor);
-            rankLabel.setPreferredSize(new Dimension(20, 16));
-            topLine.add(rankLabel, BorderLayout.WEST);
-
+            left.add(rankLabel);
             JLabel timeLabel = new JLabel(entry.getFormattedTime());
             timeLabel.setFont(timeLabel.getFont().deriveFont(Font.BOLD, 11f));
             timeLabel.setForeground(Color.WHITE);
-            timeLabel.setBorder(new EmptyBorder(0, 4, 0, 0));
-            topLine.add(timeLabel, BorderLayout.CENTER);
+            left.add(timeLabel);
+            rowSolo.add(left, BorderLayout.WEST);
 
-            card.add(topLine);
-
-            // Bottom line: RSN + date
-            JPanel bottomLine = new JPanel(new BorderLayout());
-            bottomLine.setBackground(new Color(18, 18, 18));
-            bottomLine.setAlignmentX(Component.LEFT_ALIGNMENT);
-            bottomLine.setMaximumSize(new Dimension(Integer.MAX_VALUE, 16));
-            bottomLine.setBorder(new EmptyBorder(1, 24, 0, 0));
-
+            // Center: rsn (muted)
             JLabel rsnLabel = new JLabel(rsns);
             rsnLabel.setFont(READABLE_FONT);
-            rsnLabel.setForeground(new Color(200, 200, 200));
-            bottomLine.add(rsnLabel, BorderLayout.WEST);
+            rsnLabel.setForeground(new Color(170, 170, 170));
+            rsnLabel.setBorder(new EmptyBorder(0, 6, 0, 0));
+            rowSolo.add(rsnLabel, BorderLayout.CENTER);
 
+            // Right: date (subtle)
             if (!date.isEmpty())
             {
                 JLabel dateLabel = new JLabel(date);
-                dateLabel.setFont(READABLE_FONT_ITALIC);
+                dateLabel.setFont(READABLE_FONT_SMALL);
                 dateLabel.setForeground(new Color(110, 110, 110));
-                bottomLine.add(dateLabel, BorderLayout.EAST);
+                rowSolo.add(dateLabel, BorderLayout.EAST);
             }
 
-            card.add(bottomLine);
-            container.add(card);
+            // Hover highlight
+            rowSolo.addMouseListener(new MouseAdapter()
+            {
+                @Override public void mouseEntered(MouseEvent e) { rowSolo.setBackground(new Color(26, 26, 26)); left.setBackground(new Color(26, 26, 26)); }
+                @Override public void mouseExited(MouseEvent e) { rowSolo.setBackground(new Color(18, 18, 18)); left.setBackground(new Color(18, 18, 18)); }
+            });
+
+            container.add(rowSolo);
         }
         else
         {
