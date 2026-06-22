@@ -35,6 +35,16 @@ public class ClanCodeUtil
                 return null;
             }
 
+            // Require https so the API key + game data are never sent in cleartext.
+            // Allow http only for loopback (local development).
+            String lower = apiUrl.toLowerCase();
+            boolean https = lower.startsWith("https://");
+            boolean loopback = lower.startsWith("http://localhost") || lower.startsWith("http://127.0.0.1");
+            if (!https && !loopback)
+            {
+                return null;
+            }
+
             return new String[]{apiUrl, slug, apiKey};
         }
         catch (IllegalArgumentException e)
