@@ -1344,11 +1344,10 @@ public class ClanManagementPlugin extends Plugin
             }
         }
 
-        executor.submit(() ->
+        // Delay slightly so the requested screenshot frame lands before we submit/post.
+        // Uses the scheduler's delay instead of Thread.sleep (disallowed in Plugin Hub plugins).
+        executor.schedule(() ->
         {
-            // Small delay to ensure screenshot capture completes
-            try { Thread.sleep(500); } catch (InterruptedException ignored) {}
-
             platformApiService.submitDrop(
                 getPlatformUrl(),
                 getPlatformKey(),
@@ -1362,7 +1361,7 @@ public class ClanManagementPlugin extends Plugin
             {
                 discordService.postDrop(fetchedDiscordWebhookUrl, drop, screenshotHolder[0]);
             }
-        });
+        }, 500, TimeUnit.MILLISECONDS);
 
         // Chat confirmation
         if (config.chatConfirmation())
@@ -1521,11 +1520,10 @@ public class ClanManagementPlugin extends Plugin
         final String finalCategoryName = categoryName;
         final boolean finalAllClan = allClanMembers;
 
-        executor.submit(() ->
+        // Delay slightly so the requested screenshot frame lands before we submit/post.
+        // Uses the scheduler's delay instead of Thread.sleep (disallowed in Plugin Hub plugins).
+        executor.schedule(() ->
         {
-            // Small delay to ensure screenshot capture completes
-            try { Thread.sleep(500); } catch (InterruptedException ignored) {}
-
             // Submit PB to platform API — one entry per party member
             // "live" = all party members in clan chat (clan-verified)
             // "unverified" = not all members in clan chat
@@ -1569,7 +1567,7 @@ public class ClanManagementPlugin extends Plugin
                         finalCategoryName, rsns, screenshotHolder[0]);
                 }
             }
-        });
+        }, 500, TimeUnit.MILLISECONDS);
     }
 
     /**
