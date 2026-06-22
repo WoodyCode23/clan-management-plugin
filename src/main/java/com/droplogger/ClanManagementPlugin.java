@@ -187,7 +187,6 @@ public class ClanManagementPlugin extends Plugin
 
     // Collection log sync state (automatic — like WikiSync/RuneProfile)
     private final Map<Integer, ClogItem> clogSyncItems = Collections.synchronizedMap(new LinkedHashMap<>());
-    // no extra dedup state needed — CLOG_DUPLICATE_ITEM_IDS handles it
     private Map<Integer, String[]> clogItemCategoryMap = null; // itemId -> [tab, category]
     private int clogDebounceTicksRemaining = -1;
     private boolean clogSearchPending = false;
@@ -196,12 +195,16 @@ public class ClanManagementPlugin extends Plugin
     private static final int SCRIPT_CLOG_ITEM = 4100;
     private static final int SEARCH_TOGGLE_PACKED = 40697932; // InterfaceID.Collection.SEARCH_TOGGLE
     private static final int CLOG_TABS_ENUM = 2102;
-    // Volcanic Mine Prospector IDs — duplicates of Motherlode Mine slots, game doesn't count these
-    private static final Set<Integer> CLOG_DUPLICATE_ITEM_IDS = Set.of(29472, 29474, 29476, 29478);
+    private static final int CLOG_DUPE_REMAP_ENUM = 3721; // game enum: bad itemId -> canonical itemId
+    private static final int VARP_CLOG_OBTAINED = 2943;   // VarPlayer.CLOG_LOGGED — authoritative unique obtained
+    private static final int VARP_CLOG_TOTAL = 2944;      // VarPlayer.CLOG_TOTAL — authoritative unique total
     private static final int PARAM_TAB_NAME = 682;
     private static final int PARAM_TAB_CATEGORIES_ENUM = 683;
     private static final int PARAM_CATEGORY_NAME = 689;
     private static final int PARAM_CATEGORY_ITEMS_ENUM = 690;
+    // Built from enum 3721 on clog open: maps a slot's "bad" item id to its canonical id.
+    // Replaces the old hand-maintained skip list (which dropped real slots → undercount).
+    private Map<Integer, Integer> clogDupeRemap = Collections.emptyMap();
 
     // Adventure log PB sync state
     private int adventureLogPbTicksRemaining = -1;
@@ -456,7 +459,7 @@ public class ClanManagementPlugin extends Plugin
         bingoActive = false;
 
         clogSyncItems.clear();
-        // clog dedup handled by CLOG_DUPLICATE_ITEM_IDS
+        // clog dedup handled by Set keys + enum-3721 canonical remap
         clogDebounceTicksRemaining = -1;
         clogSearchPending = false;
         pbReadPending = false;
@@ -641,11 +644,19 @@ public class ClanManagementPlugin extends Plugin
 
         if (event.getGroupId() == InterfaceID.COLLECTION && isPlatformConfigured() && config.enableClogSync())
         {
+            // Show the game's authoritative unique counts immediately (varp 2943/2944) so the
+            // panel matches the in-game "X/Y" exactly, independent of what's been synced.
+            int obtained = client.getVarpValue(VARP_CLOG_OBTAINED);
+            int total = client.getVarpValue(VARP_CLOG_TOTAL);
+            if (total > 0)
+            {
+                panel.setStatusClog(obtained, total);
+            }
             // Build category mapping and sync catalog every time clog opens
             buildClogCategoryMap();
             // Collection log opened — trigger search on next tick to enumerate all items
             clogSyncItems.clear();
-            // clog dedup handled by CLOG_DUPLICATE_ITEM_IDS
+            // clog dedup handled by Set keys + enum-3721 canonical remap
             clogRawEventCount = 0;
             clogSearchPending = true;
             panel.setClogSyncStatus("Scanning collection log...");
@@ -667,16 +678,12 @@ public class ClanManagementPlugin extends Plugin
             return;
         }
 
-        int itemId = (int) args[1];
+        int itemId = remapClogId((int) args[1]);
         int quantity = args.length >= 3 ? (int) args[2] : 1;
         clogRawEventCount++;
         String itemName = itemManager.getItemComposition(itemId).getName();
 
         if (itemName == null || itemName.isEmpty() || itemName.equals("null"))
-        {
-            return;
-        }
-        if (CLOG_DUPLICATE_ITEM_IDS.contains(itemId))
         {
             return;
         }
@@ -700,10 +707,43 @@ public class ClanManagementPlugin extends Plugin
         clogDebounceTicksRemaining = CLOG_DEBOUNCE_TICKS;
     }
 
+    /**
+     * Build the bad->canonical item-id remap from game enum 3721. Some collection-log slots
+     * have two item ids (an old one carrying save data + a newer "good" one introduced to fix
+     * item-dupe bugs). The game ships this enum so clients can normalise; using it (instead of a
+     * hand-maintained skip list) makes our unique counts match the game's varp 2943/2944 exactly.
+     */
+    private void buildClogDupeRemap()
+    {
+        try
+        {
+            EnumComposition remap = client.getEnum(CLOG_DUPE_REMAP_ENUM);
+            int[] badIds = remap.getKeys();
+            int[] goodIds = remap.getIntVals();
+            Map<Integer, Integer> m = new HashMap<>();
+            for (int i = 0; i < badIds.length && i < goodIds.length; i++)
+            {
+                m.put(badIds[i], goodIds[i]);
+            }
+            clogDupeRemap = m;
+        }
+        catch (Exception e)
+        {
+            log.warn("Failed to build clog dupe remap (enum {})", CLOG_DUPE_REMAP_ENUM, e);
+        }
+    }
+
+    /** Normalise a collection-log item id to its canonical id via the game's dupe-remap enum. */
+    private int remapClogId(int itemId)
+    {
+        return clogDupeRemap.getOrDefault(itemId, itemId);
+    }
+
     private void buildClogCategoryMap()
     {
         try
         {
+            buildClogDupeRemap();
             Map<Integer, String[]> map = new HashMap<>();
             // Catalog entries: each (itemId, category) pair is a separate entry
             // so items like Dragon pickaxe appear under every boss that drops them
@@ -732,11 +772,11 @@ public class ClanManagementPlugin extends Plugin
                     EnumComposition itemsEnum = client.getEnum(itemsEnumId);
                     int[] itemIds = itemsEnum.getIntVals();
 
-                    for (int itemId : itemIds)
+                    for (int rawItemId : itemIds)
                     {
+                        int itemId = remapClogId(rawItemId);
                         map.put(itemId, new String[]{tabName, categoryName});
 
-                        if (CLOG_DUPLICATE_ITEM_IDS.contains(itemId)) continue;
                         String catItemName = itemManager.getItemComposition(itemId).getName();
                         if (catItemName == null || catItemName.equals("null")) continue;
 
