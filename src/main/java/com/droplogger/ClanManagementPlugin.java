@@ -98,9 +98,6 @@ public class ClanManagementPlugin extends Plugin
     private ScheduledExecutorService executor;
 
     @Inject
-    private GoogleSheetsService sheetsService;
-
-    @Inject
     private BoardDataService boardDataService;
 
     @Inject
@@ -252,23 +249,7 @@ public class ClanManagementPlugin extends Plugin
         return configManager.getConfig(ClanManagementConfig.class);
     }
 
-    /**
-     * Decode the clan code (base64 of "url|key") into a 2-element array [url, key].
-     * Returns null if the code is blank or malformed.
-     */
-    /** @deprecated Legacy Google Sheet code — always returns null now. */
-    private String[] decodeClanCode()
-    {
-        return null;
-    }
-
-    /** @deprecated Legacy — returns empty string. Use getPlatformUrl() instead. */
-    private String getClanApiUrl()
-    {
-        return "";
-    }
-
-    /** @deprecated Legacy — returns empty string. Use getPlatformKey() instead. */
+    /** @deprecated Legacy — returns empty string; still referenced by the dead GAS fallbacks. */
     private String getApiKey()
     {
         return "";
@@ -506,14 +487,6 @@ public class ClanManagementPlugin extends Plugin
         if (!"droplogger".equals(event.getGroup()))
         {
             return;
-        }
-
-        if ("boardCode".equals(event.getKey()))
-        {
-            log.info("Board code changed, reconnecting...");
-            serverConfigLoaded = false;
-            panel.setConnected(isPlatformConfigured());
-            executor.submit(this::refreshData);
         }
 
         if ("clanCode".equals(event.getKey()))
