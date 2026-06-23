@@ -13,6 +13,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
+/**
+ * Reads clan board data from the clan-platform REST API.
+ * Endpoints: {base}/clans/{slug}/{leaderboard,drops,whitelist}, Bearer-authed.
+ * Return shapes are kept identical to the legacy version so ClanPanel consumes them unchanged.
+ */
 @Slf4j
 @Singleton
 public class BoardDataService
@@ -23,251 +28,157 @@ public class BoardDataService
     @Inject
     public BoardDataService(OkHttpClient httpClient, Gson gson)
     {
-        // Build a client with longer timeouts for Google Apps Script cold starts
         this.httpClient = httpClient.newBuilder()
             .callTimeout(60, TimeUnit.SECONDS)
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
-            .followRedirects(true)
-            .followSslRedirects(true)
             .build();
         this.gson = gson;
     }
 
-    /**
-     * Fetch plugin configuration from the Settings tab.
-     * Returns a map with keys: clanDropLogUrl, discordWebhookUrl, clanName, announcement
-     */
-    public Map<String, String> fetchConfig(String apiUrl, String apiKey) throws IOException
+    /** GET {base}/clans/{slug}/{path}?query with Bearer auth. Returns parsed object, or null on failure. */
+    private JsonObject get(String base, String slug, String key, String path, Map<String, String> query) throws IOException
     {
-        if (apiUrl == null || apiUrl.isEmpty())
+        if (base == null || base.isEmpty() || slug == null || slug.isEmpty())
         {
-            throw new IOException("Board API URL is not configured");
+            return null;
         }
-
-        HttpUrl url = HttpUrl.parse(apiUrl).newBuilder()
-            .addQueryParameter("action", "getConfig")
-            .addQueryParameter("key", apiKey != null ? apiKey : "")
-            .build();
-
-        Request request = new Request.Builder().url(url).get().build();
-
+        HttpUrl parsed = HttpUrl.parse(base);
+        if (parsed == null)
+        {
+            return null;
+        }
+        HttpUrl.Builder b = parsed.newBuilder().addPathSegment("clans").addPathSegment(slug);
+        for (String seg : path.split("/"))
+        {
+            if (!seg.isEmpty()) b.addPathSegment(seg);
+        }
+        if (query != null)
+        {
+            for (Map.Entry<String, String> e : query.entrySet()) b.addQueryParameter(e.getKey(), e.getValue());
+        }
+        Request request = new Request.Builder().url(b.build())
+            .header("Authorization", "Bearer " + (key != null ? key : ""))
+            .get().build();
         try (Response response = httpClient.newCall(request).execute())
         {
-            if (!response.isSuccessful())
+            if (!response.isSuccessful() || response.body() == null)
             {
-                throw new IOException("getConfig API returned status: " + response.code());
+                throw new IOException(path + " returned status " + response.code());
             }
-
-            String body = response.body().string();
-            JsonObject root = new JsonParser().parse(body).getAsJsonObject();
-
-            Map<String, String> config = new LinkedHashMap<>();
-            for (Map.Entry<String, JsonElement> entry : root.entrySet())
-            {
-                if (entry.getValue().isJsonPrimitive())
-                {
-                    config.put(entry.getKey(), entry.getValue().getAsString());
-                }
-            }
-            return config;
+            JsonElement el = new JsonParser().parse(response.body().string());
+            return el.isJsonObject() ? el.getAsJsonObject() : null;
         }
     }
 
-    /**
-     * Fetch clan drop log leaderboard from ClanDropLog.gs.
-     * @param period "monthly", "yearly", or "all"
-     */
-    public List<Map<String, Object>> fetchLeaderboard(String clanDropLogUrl, String apiKey, String period) throws IOException
+    private static String str(JsonObject o, String k)
     {
-        if (clanDropLogUrl == null || clanDropLogUrl.isEmpty())
-        {
-            throw new IOException("Clan Drop Log URL is not configured");
-        }
-
-        HttpUrl url = HttpUrl.parse(clanDropLogUrl).newBuilder()
-            .addQueryParameter("action", "leaderboard")
-            .addQueryParameter("period", period)
-            .addQueryParameter("key", apiKey != null ? apiKey : "")
-            .build();
-
-        Request request = new Request.Builder().url(url).get().build();
-
-        try (Response response = httpClient.newCall(request).execute())
-        {
-            if (!response.isSuccessful())
-            {
-                throw new IOException("Leaderboard API returned status: " + response.code());
-            }
-
-            String body = response.body().string();
-            JsonObject root = new JsonParser().parse(body).getAsJsonObject();
-
-            List<Map<String, Object>> players = new ArrayList<>();
-            if (root.has("players"))
-            {
-                JsonArray arr = root.getAsJsonArray("players");
-                for (JsonElement elem : arr)
-                {
-                    JsonObject p = elem.getAsJsonObject();
-                    Map<String, Object> player = new LinkedHashMap<>();
-                    player.put("rank", p.has("rank") ? p.get("rank").getAsInt() : 0);
-                    player.put("rsn", p.has("rsn") ? p.get("rsn").getAsString() : "");
-                    player.put("points", p.has("points") ? p.get("points").getAsInt() : 0);
-                    player.put("drops", p.has("drops") ? p.get("drops").getAsInt() : 0);
-                    player.put("value", p.has("value") ? p.get("value").getAsLong() : 0L);
-                    players.add(player);
-                }
-            }
-            return players;
-        }
+        return o.has(k) && !o.get(k).isJsonNull() ? o.get(k).getAsString() : "";
     }
 
     /**
-     * Fetch recent drops from ClanDropLog.gs.
+     * Drops leaderboard ranked by points; merges value + drop count per member.
+     * period: "monthly" | "yearly" | "all". Keys per row: rank, rsn, points, value, drops.
      */
-    public List<Map<String, Object>> fetchRecentDrops(String clanDropLogUrl, String apiKey, int limit) throws IOException
+    public List<Map<String, Object>> fetchLeaderboard(String base, String slug, String key, String period) throws IOException
     {
-        if (clanDropLogUrl == null || clanDropLogUrl.isEmpty())
+        String p = "monthly".equals(period) ? "month" : "yearly".equals(period) ? "year" : "all";
+
+        Map<String, long[]> byRsn = new LinkedHashMap<>(); // rsn -> [points, value, drops]
+        mergeBoard(base, slug, key, "points", p, byRsn, 0);
+        mergeBoard(base, slug, key, "value", p, byRsn, 1);
+        mergeBoard(base, slug, key, "count", p, byRsn, 2);
+
+        List<Map<String, Object>> players = new ArrayList<>();
+        for (Map.Entry<String, long[]> e : byRsn.entrySet())
         {
-            throw new IOException("Clan Drop Log URL is not configured");
+            Map<String, Object> player = new LinkedHashMap<>();
+            player.put("rsn", e.getKey());
+            player.put("points", (int) e.getValue()[0]);
+            player.put("value", e.getValue()[1]);
+            player.put("drops", (int) e.getValue()[2]);
+            players.add(player);
         }
+        players.sort((a, b) -> Integer.compare((int) b.get("points"), (int) a.get("points")));
+        int rank = 1;
+        for (Map<String, Object> player : players) player.put("rank", rank++);
+        return players;
+    }
 
-        HttpUrl url = HttpUrl.parse(clanDropLogUrl).newBuilder()
-            .addQueryParameter("action", "recent")
-            .addQueryParameter("limit", String.valueOf(limit))
-            .addQueryParameter("key", apiKey != null ? apiKey : "")
-            .build();
-
-        Request request = new Request.Builder().url(url).get().build();
-
-        try (Response response = httpClient.newCall(request).execute())
+    private void mergeBoard(String base, String slug, String key, String board, String period,
+                            Map<String, long[]> byRsn, int idx) throws IOException
+    {
+        Map<String, String> q = new LinkedHashMap<>();
+        q.put("board", board);
+        q.put("period", period);
+        q.put("limit", "100");
+        JsonObject root = get(base, slug, key, "/leaderboard", q);
+        if (root == null || !root.has("entries")) return;
+        for (JsonElement el : root.getAsJsonArray("entries"))
         {
-            if (!response.isSuccessful())
-            {
-                throw new IOException("Recent drops API returned status: " + response.code());
-            }
-
-            String body = response.body().string();
-            JsonObject root = new JsonParser().parse(body).getAsJsonObject();
-
-            List<Map<String, Object>> drops = new ArrayList<>();
-            if (root.has("drops"))
-            {
-                JsonArray arr = root.getAsJsonArray("drops");
-                for (JsonElement elem : arr)
-                {
-                    JsonObject d = elem.getAsJsonObject();
-                    Map<String, Object> drop = new LinkedHashMap<>();
-                    drop.put("player", d.has("player") ? d.get("player").getAsString() : "");
-                    drop.put("item", d.has("item") ? d.get("item").getAsString() : "");
-                    drop.put("value", d.has("value") ? d.get("value").getAsLong() : 0L);
-                    drop.put("monster", d.has("monster") ? d.get("monster").getAsString() : "");
-                    drop.put("points", d.has("points") ? d.get("points").getAsInt() : 0);
-                    drop.put("timestamp", d.has("timestamp") ? d.get("timestamp").getAsString() : "");
-                    drops.add(drop);
-                }
-            }
-            return drops;
+            JsonObject e = el.getAsJsonObject();
+            String rsn = str(e, "rsn");
+            long v = e.has("value") ? e.get("value").getAsLong() : 0L;
+            byRsn.computeIfAbsent(rsn, k -> new long[3])[idx] = v;
         }
     }
 
-    /**
-     * Fetch all drops for a specific player from ClanDropLog.gs.
-     */
-    public List<Map<String, Object>> fetchPlayerDrops(String clanDropLogUrl, String apiKey, String rsn) throws IOException
+    /** GET /drops?limit=N → recent drops. Keys: player, item, value, monster, points, timestamp. */
+    public List<Map<String, Object>> fetchRecentDrops(String base, String slug, String key, int limit) throws IOException
     {
-        if (clanDropLogUrl == null || clanDropLogUrl.isEmpty())
-        {
-            throw new IOException("Clan Drop Log URL is not configured");
-        }
-
-        HttpUrl url = HttpUrl.parse(clanDropLogUrl).newBuilder()
-            .addQueryParameter("action", "playerDrops")
-            .addQueryParameter("rsn", rsn)
-            .addQueryParameter("key", apiKey != null ? apiKey : "")
-            .build();
-
-        Request request = new Request.Builder().url(url).get().build();
-
-        try (Response response = httpClient.newCall(request).execute())
-        {
-            if (!response.isSuccessful())
-            {
-                throw new IOException("Player drops API returned status: " + response.code());
-            }
-
-            String body = response.body().string();
-            JsonObject root = new JsonParser().parse(body).getAsJsonObject();
-
-            List<Map<String, Object>> drops = new ArrayList<>();
-            if (root.has("drops"))
-            {
-                JsonArray arr = root.getAsJsonArray("drops");
-                for (JsonElement elem : arr)
-                {
-                    JsonObject d = elem.getAsJsonObject();
-                    Map<String, Object> drop = new LinkedHashMap<>();
-                    drop.put("item", d.has("item") ? d.get("item").getAsString() : "");
-                    drop.put("value", d.has("value") ? d.get("value").getAsLong() : 0L);
-                    drop.put("monster", d.has("monster") ? d.get("monster").getAsString() : "");
-                    drop.put("kc", d.has("kc") ? d.get("kc").getAsInt() : 0);
-                    drop.put("points", d.has("points") ? d.get("points").getAsInt() : 0);
-                    drop.put("timestamp", d.has("timestamp") ? d.get("timestamp").getAsString() : "");
-                    drops.add(drop);
-                }
-            }
-            return drops;
-        }
+        Map<String, String> q = new LinkedHashMap<>();
+        q.put("limit", String.valueOf(limit));
+        return mapDrops(get(base, slug, key, "/drops", q), true);
     }
 
-    /**
-     * Fetch the full clan drop whitelist with points, drop rates, KPH, and categories.
-     */
-    public List<Map<String, String>> fetchClanWhitelist(String clanDropLogUrl, String apiKey) throws IOException
+    /** GET /drops?player=RSN → a player's drops. Keys: item, value, monster, kc, points, timestamp. */
+    public List<Map<String, Object>> fetchPlayerDrops(String base, String slug, String key, String rsn) throws IOException
     {
-        if (clanDropLogUrl == null || clanDropLogUrl.isEmpty())
-        {
-            throw new IOException("Clan Drop Log URL is not configured");
-        }
-
-        HttpUrl url = HttpUrl.parse(clanDropLogUrl).newBuilder()
-            .addQueryParameter("action", "clanWhitelist")
-            .addQueryParameter("key", apiKey != null ? apiKey : "")
-            .build();
-
-        Request request = new Request.Builder().url(url).get().build();
-
-        try (Response response = httpClient.newCall(request).execute())
-        {
-            if (!response.isSuccessful())
-            {
-                throw new IOException("clanWhitelist API returned status: " + response.code());
-            }
-
-            String body = response.body().string();
-            JsonObject root = new JsonParser().parse(body).getAsJsonObject();
-
-            List<Map<String, String>> items = new ArrayList<>();
-            if (root.has("items"))
-            {
-                JsonArray arr = root.getAsJsonArray("items");
-                for (JsonElement elem : arr)
-                {
-                    JsonObject d = elem.getAsJsonObject();
-                    Map<String, String> item = new LinkedHashMap<>();
-                    item.put("item", d.has("item") ? d.get("item").getAsString() : "");
-                    item.put("source", d.has("source") ? d.get("source").getAsString() : "");
-                    item.put("points", d.has("points") ? String.valueOf(d.get("points").getAsInt()) : "0");
-                    item.put("dropRate", d.has("dropRate") ? d.get("dropRate").getAsString() : "");
-                    item.put("kph", d.has("kph") ? d.get("kph").getAsString() : "");
-                    item.put("category", d.has("category") ? d.get("category").getAsString() : "");
-                    items.add(item);
-                }
-            }
-            return items;
-        }
+        Map<String, String> q = new LinkedHashMap<>();
+        q.put("player", rsn);
+        q.put("limit", "100");
+        return mapDrops(get(base, slug, key, "/drops", q), false);
     }
 
+    private List<Map<String, Object>> mapDrops(JsonObject root, boolean includePlayer)
+    {
+        List<Map<String, Object>> drops = new ArrayList<>();
+        if (root == null || !root.has("drops")) return drops;
+        for (JsonElement el : root.getAsJsonArray("drops"))
+        {
+            JsonObject d = el.getAsJsonObject();
+            Map<String, Object> drop = new LinkedHashMap<>();
+            if (includePlayer) drop.put("player", str(d, "rsn"));
+            drop.put("item", str(d, "itemName"));
+            drop.put("value", d.has("value") ? d.get("value").getAsLong() : 0L);
+            drop.put("monster", str(d, "monsterName"));
+            drop.put("kc", d.has("killCount") && !d.get("killCount").isJsonNull() ? d.get("killCount").getAsInt() : 0);
+            drop.put("points", d.has("points") ? d.get("points").getAsInt() : 0);
+            drop.put("timestamp", str(d, "createdAt"));
+            drops.add(drop);
+        }
+        return drops;
+    }
+
+    /** GET /whitelist → items. Keys: item, source, points, dropRate, kph, category. */
+    public List<Map<String, String>> fetchClanWhitelist(String base, String slug, String key) throws IOException
+    {
+        List<Map<String, String>> items = new ArrayList<>();
+        JsonObject root = get(base, slug, key, "/whitelist", null);
+        if (root == null || !root.has("whitelist")) return items;
+        for (JsonElement el : root.getAsJsonArray("whitelist"))
+        {
+            JsonObject d = el.getAsJsonObject();
+            Map<String, String> item = new LinkedHashMap<>();
+            item.put("item", str(d, "itemName"));
+            item.put("source", "");
+            item.put("points", d.has("points") ? String.valueOf(d.get("points").getAsInt()) : "0");
+            item.put("dropRate", "");
+            item.put("kph", "");
+            item.put("category", "");
+            items.add(item);
+        }
+        return items;
+    }
 }

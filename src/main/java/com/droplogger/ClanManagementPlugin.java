@@ -2195,10 +2195,9 @@ public class ClanManagementPlugin extends Plugin
 
     private void refreshDropsTab()
     {
-        String clanLogUrl = fetchedClanDropLogUrl;
-        if (clanLogUrl == null || clanLogUrl.isEmpty())
+        if (!isPlatformConfigured())
         {
-            log.debug("Clan drop log URL not configured — skipping drops tab refresh");
+            log.debug("Platform not configured — skipping drops tab refresh");
             // Try to show cached data if available
             if (cachedLeaderboard != null)
             {
@@ -2220,7 +2219,7 @@ public class ClanManagementPlugin extends Plugin
         try
         {
             List<Map<String, Object>> leaderboard = boardDataService.fetchLeaderboard(
-                clanLogUrl, getApiKey(), "monthly");
+                getPlatformUrl(), getPlatformSlug(), getPlatformKey(), "monthly");
             cachedLeaderboard = leaderboard;
             panel.updateDropsLeaderboard(leaderboard, playerName);
         }
@@ -2237,7 +2236,7 @@ public class ClanManagementPlugin extends Plugin
         try
         {
             List<Map<String, Object>> recent = boardDataService.fetchRecentDrops(
-                clanLogUrl, getApiKey(), 20);
+                getPlatformUrl(), getPlatformSlug(), getPlatformKey(), 20);
             cachedRecentDrops = recent;
             panel.updateRecentDrops(recent);
             saveDropsCacheToDisk();
@@ -2259,8 +2258,7 @@ public class ClanManagementPlugin extends Plugin
 
     private void fetchPlayerDrops(String rsn)
     {
-        String clanLogUrl = fetchedClanDropLogUrl;
-        if (clanLogUrl == null || clanLogUrl.isEmpty())
+        if (!isPlatformConfigured())
         {
             return;
         }
@@ -2268,7 +2266,7 @@ public class ClanManagementPlugin extends Plugin
         try
         {
             List<Map<String, Object>> drops = boardDataService.fetchPlayerDrops(
-                clanLogUrl, getApiKey(), rsn);
+                getPlatformUrl(), getPlatformSlug(), getPlatformKey(), rsn);
             panel.showPlayerDrops(rsn, drops);
         }
         catch (Exception e)
@@ -2279,8 +2277,7 @@ public class ClanManagementPlugin extends Plugin
 
     private void refreshClanWhitelist()
     {
-        String clanLogUrl = fetchedClanDropLogUrl;
-        if (clanLogUrl == null || clanLogUrl.isEmpty())
+        if (!isPlatformConfigured())
         {
             // Show cached if available
             if (cachedClanWhitelist != null && !cachedClanWhitelist.isEmpty())
@@ -2293,7 +2290,7 @@ public class ClanManagementPlugin extends Plugin
         try
         {
             List<Map<String, String>> whitelist = boardDataService.fetchClanWhitelist(
-                clanLogUrl, getApiKey());
+                getPlatformUrl(), getPlatformSlug(), getPlatformKey());
             cachedClanWhitelist = whitelist;
             panel.updateClanWhitelist(whitelist);
             saveWhitelistCacheToDisk();
