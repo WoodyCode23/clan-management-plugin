@@ -978,7 +978,28 @@ public class ClanPanel extends PluginPanel
     public void setBossIcons(java.util.Map<String, ImageIcon> icons)
     {
         this.bossIcons = icons != null ? icons : java.util.Collections.emptyMap();
-        SwingUtilities.invokeLater(this::showRecentPbsOverview);
+        SwingUtilities.invokeLater(() -> {
+            // Show the boss icon beside each name in the boss selector / search dropdown too.
+            hiscoreBossCombo.setRenderer(new javax.swing.DefaultListCellRenderer()
+            {
+                @Override
+                public java.awt.Component getListCellRendererComponent(javax.swing.JList<?> list, Object value,
+                    int index, boolean isSelected, boolean cellHasFocus)
+                {
+                    JLabel lbl = (JLabel) super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
+                    ImageIcon ic = null;
+                    if (value instanceof String)
+                    {
+                        List<BossCategory> cats = BossCategory.getCategoriesForBossAnyGroup((String) value);
+                        if (!cats.isEmpty()) ic = bossIcons.get(cats.get(0).getGroup());
+                    }
+                    lbl.setIcon(ic);
+                    lbl.setIconTextGap(5);
+                    return lbl;
+                }
+            });
+            showRecentPbsOverview();
+        });
     }
 
     public void populateTimesPanel(JPanel timesPanel, List<HiscoreEntry> entries, Color accentColor)

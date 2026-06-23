@@ -204,25 +204,46 @@ public class ClanManagementPlugin extends Plugin
     private static final Map<String, Integer> BOSS_GROUP_ICONS = new HashMap<>();
     static
     {
+        // Raids
         BOSS_GROUP_ICONS.put("cox", 20851);      BOSS_GROUP_ICONS.put("cox_cm", 22386);
-        BOSS_GROUP_ICONS.put("tob", 22473);      BOSS_GROUP_ICONS.put("tob_hm", 22473);
-        BOSS_GROUP_ICONS.put("toa", 27352);      BOSS_GROUP_ICONS.put("toa_expert", 27352);
+        BOSS_GROUP_ICONS.put("tob", 22473);      BOSS_GROUP_ICONS.put("tob_entry", 22473);
+        BOSS_GROUP_ICONS.put("tob_hm", 22473);
+        BOSS_GROUP_ICONS.put("toa", 27352);      BOSS_GROUP_ICONS.put("toa_entry", 27352);
+        BOSS_GROUP_ICONS.put("toa_expert", 27352);
+        // GWD
         BOSS_GROUP_ICONS.put("bandos", 12650);   BOSS_GROUP_ICONS.put("sara", 12651);
         BOSS_GROUP_ICONS.put("zammy", 12652);    BOSS_GROUP_ICONS.put("arma", 12649);
+        // DT2
         BOSS_GROUP_ICONS.put("duke", 28250);     BOSS_GROUP_ICONS.put("leviathan", 28252);
         BOSS_GROUP_ICONS.put("whisperer", 28246); BOSS_GROUP_ICONS.put("vardorvis", 28248);
-        BOSS_GROUP_ICONS.put("nightmare", 24491); BOSS_GROUP_ICONS.put("phosani", 24491);
-        BOSS_GROUP_ICONS.put("zulrah", 12921);   BOSS_GROUP_ICONS.put("vorkath", 21992);
+        // Wave / capes
         BOSS_GROUP_ICONS.put("jad", 13225);      BOSS_GROUP_ICONS.put("zuk", 21291);
-        BOSS_GROUP_ICONS.put("colo", 28960);     BOSS_GROUP_ICONS.put("gaunt", 23757);
-        BOSS_GROUP_ICONS.put("gaunt_corrupted", 23759); BOSS_GROUP_ICONS.put("nex", 26348);
-        BOSS_GROUP_ICONS.put("hydra", 22746);    BOSS_GROUP_ICONS.put("cerberus", 13247);
-        BOSS_GROUP_ICONS.put("araxxor", 29836);  BOSS_GROUP_ICONS.put("corp", 12816);
-        BOSS_GROUP_ICONS.put("kq", 12647);       BOSS_GROUP_ICONS.put("kraken", 12655);
-        BOSS_GROUP_ICONS.put("muspah", 27590);   BOSS_GROUP_ICONS.put("phantom_muspah", 27590);
+        BOSS_GROUP_ICONS.put("colo", 28960);
+        // Gauntlet
+        BOSS_GROUP_ICONS.put("gaunt", 23757);    BOSS_GROUP_ICONS.put("gaunt_corrupted", 23759);
+        // Nightmare
+        BOSS_GROUP_ICONS.put("nightmare", 24491); BOSS_GROUP_ICONS.put("phosanis", 24491);
+        // Slayer / misc bosses
+        BOSS_GROUP_ICONS.put("nex", 26348);      BOSS_GROUP_ICONS.put("araxxor", 29836);
+        BOSS_GROUP_ICONS.put("cerberus", 13247); BOSS_GROUP_ICONS.put("hydra", 22746);
+        BOSS_GROUP_ICONS.put("thermy", 12648);   BOSS_GROUP_ICONS.put("kraken", 12655);
+        BOSS_GROUP_ICONS.put("sire", 13262);     BOSS_GROUP_ICONS.put("grotesque", 21748);
+        BOSS_GROUP_ICONS.put("skotizo", 21273);  BOSS_GROUP_ICONS.put("zulrah", 12921);
+        BOSS_GROUP_ICONS.put("vorkath", 21992);  BOSS_GROUP_ICONS.put("kq", 12647);
+        BOSS_GROUP_ICONS.put("corp", 12816);     BOSS_GROUP_ICONS.put("mole", 12646);
+        BOSS_GROUP_ICONS.put("sarachnis", 23495); BOSS_GROUP_ICONS.put("kbd", 12653);
+        BOSS_GROUP_ICONS.put("dks", 12644);
+        // Newer bosses
         BOSS_GROUP_ICONS.put("hueycoatl", 30152); BOSS_GROUP_ICONS.put("amoxliatl", 30154);
-        BOSS_GROUP_ICONS.put("yama", 29622);     BOSS_GROUP_ICONS.put("sire", 13262);
-        BOSS_GROUP_ICONS.put("grotesque", 21748); BOSS_GROUP_ICONS.put("thermy", 12648);
+        BOSS_GROUP_ICONS.put("yama", 29622);
+        // Wilderness
+        BOSS_GROUP_ICONS.put("callisto", 13178); BOSS_GROUP_ICONS.put("vetion", 13179);
+        BOSS_GROUP_ICONS.put("venenatis", 13177); BOSS_GROUP_ICONS.put("chaos_ele", 11995);
+        BOSS_GROUP_ICONS.put("scorpia", 13181);  BOSS_GROUP_ICONS.put("crazy_arch", 11990);
+        // Low/other
+        BOSS_GROUP_ICONS.put("barrows", 4708);   BOSS_GROUP_ICONS.put("bryophyta", 22372);
+        BOSS_GROUP_ICONS.put("obor", 20756);     BOSS_GROUP_ICONS.put("hespori", 22875);
+        BOSS_GROUP_ICONS.put("sep", 20659);      BOSS_GROUP_ICONS.put("ba", 12703);
     }
     // Built from enum 3721 on clog open: maps a slot's "bad" item id to its canonical id.
     // Replaces the old hand-maintained skip list (which dropped real slots → undercount).
@@ -1597,30 +1618,49 @@ public class ClanManagementPlugin extends Plugin
             {
                 int timeMs = (int) (timeSeconds * 1000);
                 String source = finalAllClan ? "live" : "unverified";
+                // Submit each party member's time. The first submit is synchronous so we learn
+                // the clan placement (clanRank 1 = new clan record); the rest are fire-and-forget.
+                // All members share the same time, so the rank is stable regardless of order.
+                int clanRank = 0;
+                boolean firstMember = true;
                 for (String member : sortedMembers)
                 {
-                    platformApiService.submitPb(
-                        getPlatformUrl(),
-                        getPlatformKey(),
-                        getPlatformSlug(),
-                        member.trim(),
-                        categoryKey,
-                        finalPartySize,
-                        timeMs,
-                        source
-                    );
+                    if (firstMember)
+                    {
+                        clanRank = platformApiService.submitPbSync(getPlatformUrl(), getPlatformKey(), getPlatformSlug(),
+                            member.trim(), categoryKey, finalPartySize, timeMs, source);
+                        firstMember = false;
+                    }
+                    else
+                    {
+                        platformApiService.submitPb(getPlatformUrl(), getPlatformKey(), getPlatformSlug(),
+                            member.trim(), categoryKey, finalPartySize, timeMs, source);
+                    }
                 }
-                log.debug("Speed time submitted for {}: {}", categoryKey, formattedTime);
+                log.debug("Speed time submitted for {}: {} (clanRank {})", categoryKey, formattedTime, clanRank);
 
                 // Invalidate cache so next UI view fetches fresh data
                 hiscoreCacheV2.remove(categoryKey);
                 saveHiscoreCacheV2ToDisk();
 
-                // Chat notification
+                // Chat notification — highlight when it's a clan-verified placement (top 3),
+                // and especially a new clan record (#1).
                 if (config.chatConfirmation())
                 {
-                    String msg = String.format("[%s] Speed time recorded: %s in %s",
-                        getClanName(), formattedTime, finalCategoryName);
+                    final int rank = clanRank;
+                    String msg;
+                    if (finalAllClan && rank == 1)
+                    {
+                        msg = String.format("[%s] 🏆 NEW CLAN PB! %s in %s", getClanName(), formattedTime, finalCategoryName);
+                    }
+                    else if (finalAllClan && rank >= 2 && rank <= 3)
+                    {
+                        msg = String.format("[%s] Clan #%d — %s in %s", getClanName(), rank, formattedTime, finalCategoryName);
+                    }
+                    else
+                    {
+                        msg = String.format("[%s] Speed time recorded: %s in %s", getClanName(), formattedTime, finalCategoryName);
+                    }
                     clientThread.invokeLater(() ->
                         client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", msg, "")
                     );

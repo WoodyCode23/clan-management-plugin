@@ -78,6 +78,39 @@ public class PlatformApiService
     }
 
     /**
+     * Submit a PB synchronously and return its clan placement (1 = new clan record),
+     * or 0 on failure / non-live. Call off the client thread (it blocks on the network).
+     */
+    public int submitPbSync(String baseUrl, String apiKey, String clanSlug,
+                            String rsn, String bossKey, int teamSize, int timeMs, String source)
+    {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("rsn", rsn);
+        payload.addProperty("bossKey", bossKey);
+        payload.addProperty("teamSize", teamSize);
+        payload.addProperty("timeMs", timeMs);
+        payload.addProperty("source", source);
+
+        Request request = new Request.Builder()
+            .url(baseUrl + "/clans/" + clanSlug + "/pbs")
+            .header("Authorization", "Bearer " + apiKey)
+            .post(RequestBody.create(JSON, gson.toJson(payload)))
+            .build();
+        try (Response response = httpClient.newCall(request).execute())
+        {
+            if (!response.isSuccessful() || response.body() == null) return 0;
+            JsonObject root = gson.fromJson(response.body().string(), JsonObject.class);
+            return root != null && root.has("clanRank") && !root.get("clanRank").isJsonNull()
+                ? root.get("clanRank").getAsInt() : 0;
+        }
+        catch (Exception e)
+        {
+            log.warn("submitPbSync failed", e);
+            return 0;
+        }
+    }
+
+    /**
      * Submit a single collection log entry to the platform API.
      */
     public void submitCollectionLogEntry(String baseUrl, String apiKey, String clanSlug,
