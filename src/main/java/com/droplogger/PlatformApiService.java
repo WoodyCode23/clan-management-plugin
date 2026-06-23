@@ -111,6 +111,39 @@ public class PlatformApiService
     }
 
     /**
+     * Fastest clan-verified (live) time in ms for a category + team size, or 0 if none recorded.
+     * Used to decide whether a non-personal-best completion is still a new clan PB worth submitting.
+     */
+    public int fetchClanBestTimeMs(String baseUrl, String apiKey, String clanSlug, String categoryKey, int teamSize)
+    {
+        try
+        {
+            HttpUrl url = HttpUrl.parse(baseUrl + "/clans/" + clanSlug + "/personal-bests/top").newBuilder()
+                .addQueryParameter("category", categoryKey)
+                .addQueryParameter("teamSize", String.valueOf(teamSize))
+                .addQueryParameter("limit", "1")
+                .build();
+            Request request = new Request.Builder().url(url)
+                .header("Authorization", "Bearer " + apiKey).get().build();
+            try (Response response = httpClient.newCall(request).execute())
+            {
+                if (!response.isSuccessful() || response.body() == null) return 0;
+                JsonObject root = gson.fromJson(response.body().string(), JsonObject.class);
+                if (root == null || !root.has("entries")) return 0;
+                JsonArray entries = root.getAsJsonArray("entries");
+                if (entries.size() == 0) return 0;
+                JsonObject e = entries.get(0).getAsJsonObject();
+                return e.has("timeMs") && !e.get("timeMs").isJsonNull() ? e.get("timeMs").getAsInt() : 0;
+            }
+        }
+        catch (Exception ex)
+        {
+            log.warn("fetchClanBestTimeMs failed", ex);
+            return 0;
+        }
+    }
+
+    /**
      * Submit a single collection log entry to the platform API.
      */
     public void submitCollectionLogEntry(String baseUrl, String apiKey, String clanSlug,

@@ -1606,6 +1606,7 @@ public class ClanManagementPlugin extends Plugin
         final int finalPartySize = partySize;
         final String finalCategoryName = categoryName;
         final boolean finalAllClan = allClanMembers;
+        final boolean isNewPb = completion.isPersonalBest();
 
         // Delay slightly so the requested screenshot frame lands before we submit/post.
         // Uses the scheduler's delay instead of Thread.sleep (disallowed in Plugin Hub plugins).
@@ -1618,6 +1619,22 @@ public class ClanManagementPlugin extends Plugin
             {
                 int timeMs = (int) (timeSeconds * 1000);
                 String source = finalAllClan ? "live" : "unverified";
+
+                // Only record actual PBs or clan PBs — skip ordinary (non-PB) completions so we
+                // don't spam the API/chat. A non-personal-best still counts if it beats (or is the
+                // first of) the clan's verified time for this boss + team size = a new clan PB.
+                if (!isNewPb)
+                {
+                    int clanBest = platformApiService.fetchClanBestTimeMs(
+                        getPlatformUrl(), getPlatformKey(), getPlatformSlug(), categoryKey, finalPartySize);
+                    boolean isClanPb = clanBest <= 0 || timeMs < clanBest;
+                    if (!isClanPb)
+                    {
+                        log.debug("{} {} is neither a PB nor a clan PB — skipping submit", categoryKey, formattedTime);
+                        return;
+                    }
+                }
+
                 // Submit each party member's time. The first submit is synchronous so we learn
                 // the clan placement (clanRank 1 = new clan record); the rest are fire-and-forget.
                 // All members share the same time, so the rank is stable regardless of order.
