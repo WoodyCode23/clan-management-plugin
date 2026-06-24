@@ -193,6 +193,18 @@ public class ClanManagementPlugin extends Plugin
     private static final int SEARCH_TOGGLE_PACKED = 40697932; // InterfaceID.Collection.SEARCH_TOGGLE
     private static final int CLOG_TABS_ENUM = 2102;
     private static final int CLOG_DUPE_REMAP_ENUM = 3721; // game enum: bad itemId -> canonical itemId
+    // Cross-category collection-log slots that share a single log slot in-game but carry distinct
+    // item ids that enum 3721 does NOT cover. The Volcanic Mine prospector pieces are listed under
+    // their own category with new item ids, yet the game counts them as the same slots as the
+    // Motherlode Mine set (varp 2943/2944 counts them once). Mapped variant -> canonical so our
+    // catalog and unique counts match the game's totals. Enum 3721 still takes precedence and
+    // covers any future Jagex-declared dupes; this map only fills the gaps 3721 leaves.
+    private static final Map<Integer, Integer> CLOG_DUPE_REMAP_GAPS = Map.of(
+        29472, 12013, // Prospector helmet (Volcanic Mine -> Motherlode Mine)
+        29474, 12014, // Prospector jacket
+        29476, 12015, // Prospector legs
+        29478, 12016  // Prospector boots
+    );
     private static final int VARP_CLOG_OBTAINED = 2943;   // VarPlayer.CLOG_LOGGED — authoritative unique obtained
     private static final int VARP_CLOG_TOTAL = 2944;      // VarPlayer.CLOG_TOTAL — authoritative unique total
     private static final int PARAM_TAB_NAME = 682;
@@ -745,7 +757,8 @@ public class ClanManagementPlugin extends Plugin
             EnumComposition remap = client.getEnum(CLOG_DUPE_REMAP_ENUM);
             int[] badIds = remap.getKeys();
             int[] goodIds = remap.getIntVals();
-            Map<Integer, Integer> m = new HashMap<>();
+            // Seed with the known gaps, then let enum 3721 overlay/win where it has an entry.
+            Map<Integer, Integer> m = new HashMap<>(CLOG_DUPE_REMAP_GAPS);
             for (int i = 0; i < badIds.length && i < goodIds.length; i++)
             {
                 m.put(badIds[i], goodIds[i]);
@@ -754,6 +767,8 @@ public class ClanManagementPlugin extends Plugin
         }
         catch (Exception e)
         {
+            // Enum read failed — still apply the known gap remaps so prospector dupes don't leak.
+            clogDupeRemap = CLOG_DUPE_REMAP_GAPS;
             log.warn("Failed to build clog dupe remap (enum {})", CLOG_DUPE_REMAP_ENUM, e);
         }
     }
