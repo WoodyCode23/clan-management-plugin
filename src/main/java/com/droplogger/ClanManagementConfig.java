@@ -27,6 +27,16 @@ public interface ClanManagementConfig extends Config
     )
     default String clanCode() { return ""; }
 
+    @ConfigItem(
+        keyName = "linkCode",
+        name = "Link Code",
+        description = "Paste a link code from the website (Settings) to connect this account to your Discord profile. Cleared automatically after use.",
+        section = connectionSection,
+        position = 1,
+        secret = true
+    )
+    default String linkCode() { return ""; }
+
     // ── Data Sharing ──
 
     @ConfigSection(

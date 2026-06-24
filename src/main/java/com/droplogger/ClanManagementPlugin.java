@@ -89,6 +89,9 @@ public class ClanManagementPlugin extends Plugin
     private ClanManagementConfig config;
 
     @Inject
+    private ConfigManager configManager;
+
+    @Inject
     private ClientToolbar clientToolbar;
 
     @Inject
@@ -529,6 +532,36 @@ public class ClanManagementPlugin extends Plugin
             serverConfigLoaded = false;
             executor.submit(this::refreshData);
         }
+
+        if ("linkCode".equals(event.getKey()))
+        {
+            String entered = config.linkCode();
+            if (entered == null || entered.trim().isEmpty())
+            {
+                return;
+            }
+            // Clear it immediately so the one-time code isn't persisted in the config.
+            configManager.setConfiguration("droplogger", "linkCode", "");
+
+            if (!isPlatformConfigured())
+            {
+                client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+                    "[Solus] Link failed: connect to the platform (Clan Code) first.", "");
+                return;
+            }
+
+            final String code = entered.trim();
+            final String url = getPlatformUrl();
+            final String key = getPlatformKey();
+            final String slug = getPlatformSlug();
+            final String rsn = client.getLocalPlayer() != null ? client.getLocalPlayer().getName() : "";
+            executor.submit(() ->
+            {
+                String result = platformApiService.redeemLinkCode(url, key, slug, code, rsn);
+                clientThread.invokeLater(() ->
+                    client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", "[Solus] " + result, ""));
+            });
+        }
     }
 
     @Subscribe
@@ -609,6 +642,13 @@ public class ClanManagementPlugin extends Plugin
     @Subscribe
     public void onGameStateChanged(GameStateChanged event)
     {
+        // Capture the immutable account hash so player data is keyed on the account, not the RSN.
+        if (event.getGameState() == GameState.LOGGED_IN)
+        {
+            long hash = client.getAccountHash();
+            platformApiService.setAccountHash(hash != -1 ? String.valueOf(hash) : null);
+        }
+
         // Reset fight tracker on logout/hop to avoid stale data
         if (event.getGameState() == GameState.LOGIN_SCREEN
             || event.getGameState() == GameState.HOPPING)
@@ -618,6 +658,7 @@ public class ClanManagementPlugin extends Plugin
                 fightTracker.reset();
             }
             wasInInstance = false;
+            platformApiService.setAccountHash(null);
         }
     }
 

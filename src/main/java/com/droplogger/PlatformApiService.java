@@ -22,6 +22,11 @@ public class PlatformApiService
     private final OkHttpClient httpClient;
     private final Gson gson;
 
+    // The logged-in account's immutable RuneLite account hash, set by the plugin on login.
+    // Stamped into player-data payloads so the backend keys identity on the account (not the
+    // RSN), making history rename-proof. Null until an account is logged in.
+    private volatile String accountHash;
+
     @Inject
     public PlatformApiService(OkHttpClient httpClient, Gson gson)
     {
@@ -34,6 +39,26 @@ public class PlatformApiService
         this.gson = gson;
     }
 
+    /** Set (or clear, with null) the current account hash. Called by the plugin on login/logout. */
+    public void setAccountHash(String accountHash)
+    {
+        this.accountHash = accountHash;
+    }
+
+    public String getAccountHash()
+    {
+        return accountHash;
+    }
+
+    /** Stamp the current account hash onto a player-data payload when known. */
+    private void addAccountHash(JsonObject payload)
+    {
+        if (accountHash != null && !accountHash.isEmpty())
+        {
+            payload.addProperty("accountHash", accountHash);
+        }
+    }
+
     /**
      * Submit a drop to the platform API.
      */
@@ -41,6 +66,7 @@ public class PlatformApiService
     {
         JsonObject payload = new JsonObject();
         payload.addProperty("rsn", drop.getPlayerName());
+        addAccountHash(payload);
         payload.addProperty("itemName", drop.getItemName());
         payload.addProperty("value", drop.getValue());
         payload.addProperty("monsterName", drop.getMonsterName());
@@ -69,6 +95,7 @@ public class PlatformApiService
     {
         JsonObject payload = new JsonObject();
         payload.addProperty("rsn", rsn);
+        addAccountHash(payload);
         payload.addProperty("bossKey", bossKey);
         payload.addProperty("teamSize", teamSize);
         payload.addProperty("timeMs", timeMs);
@@ -86,6 +113,7 @@ public class PlatformApiService
     {
         JsonObject payload = new JsonObject();
         payload.addProperty("rsn", rsn);
+        addAccountHash(payload);
         payload.addProperty("bossKey", bossKey);
         payload.addProperty("teamSize", teamSize);
         payload.addProperty("timeMs", timeMs);
@@ -151,6 +179,7 @@ public class PlatformApiService
     {
         JsonObject payload = new JsonObject();
         payload.addProperty("rsn", rsn);
+        addAccountHash(payload);
         payload.addProperty("itemName", itemName);
 
         postAsync(baseUrl + "/clans/" + clanSlug + "/collection-log", apiKey, payload, "Platform clog");
@@ -166,6 +195,7 @@ public class PlatformApiService
     {
         JsonObject payload = new JsonObject();
         payload.addProperty("rsn", rsn);
+        addAccountHash(payload);
         // Authoritative game counts (varp 2943/2944) — the X/Y headline the backend stores/serves.
         if (uniqueObtained > 0) payload.addProperty("uniqueObtained", uniqueObtained);
         if (uniqueTotal > 0) payload.addProperty("uniqueTotal", uniqueTotal);
@@ -227,10 +257,58 @@ public class PlatformApiService
     {
         JsonObject payload = new JsonObject();
         payload.addProperty("rsn", rsn);
+        addAccountHash(payload);
         payload.addProperty("type", type);
         payload.addProperty("detail", detail);
 
         postAsync(baseUrl + "/clans/" + clanSlug + "/achievements", apiKey, payload, "Platform achievement");
+    }
+
+    /**
+     * Redeem a website link code, binding this in-game account to the Discord user who
+     * generated it. Sends the live account hash + RSN as proof of in-game control.
+     * Blocks on the network — call off the client thread. Returns a human-readable result.
+     */
+    public String redeemLinkCode(String baseUrl, String apiKey, String clanSlug, String code, String rsn)
+    {
+        if (accountHash == null || accountHash.isEmpty())
+        {
+            return "Link failed: log in to the account you want to link first.";
+        }
+
+        JsonObject payload = new JsonObject();
+        payload.addProperty("code", code);
+        payload.addProperty("rsn", rsn);
+        payload.addProperty("accountHash", accountHash);
+
+        Request request = new Request.Builder()
+            .url(baseUrl + "/clans/" + clanSlug + "/link/redeem")
+            .header("Authorization", "Bearer " + apiKey)
+            .post(RequestBody.create(JSON, gson.toJson(payload)))
+            .build();
+        try (Response response = httpClient.newCall(request).execute())
+        {
+            String bodyStr = response.body() != null ? response.body().string() : "";
+            if (response.isSuccessful())
+            {
+                return "Account linked to your Solus profile.";
+            }
+            try
+            {
+                JsonObject err = gson.fromJson(bodyStr, JsonObject.class);
+                if (err != null && err.has("error"))
+                {
+                    return "Link failed: " + err.get("error").getAsString();
+                }
+            }
+            catch (Exception ignored) { /* fall through to generic message */ }
+            return "Link failed (HTTP " + response.code() + ").";
+        }
+        catch (Exception ex)
+        {
+            log.warn("redeemLinkCode failed", ex);
+            return "Link failed: could not reach the server.";
+        }
     }
 
     /**
