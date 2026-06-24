@@ -81,7 +81,7 @@ public class ClanPanel extends PluginPanel
     // ── WOM XP tab components ──
     private final JPanel womLeaderboardPanel = new JPanel();
     private final JComboBox<String> womMetricCombo = new JComboBox<>();
-    private final JComboBox<String> womPeriodCombo = new JComboBox<>(new String[]{"Day", "Week", "Month", "Year"});
+    private final JComboBox<String> womPeriodCombo = new JComboBox<>(new String[]{"Day", "Week", "Month", "Year", "All-Time"});
     private final JComboBox<String> womModeCombo = new JComboBox<>(new String[]{"XP Gained"});
     private java.util.function.BiConsumer<String, String> onFetchWomData;
 

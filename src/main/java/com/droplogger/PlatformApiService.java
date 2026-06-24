@@ -2,6 +2,7 @@ package com.droplogger;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import lombok.extern.slf4j.Slf4j;
 import okhttp3.*;
@@ -9,6 +10,7 @@ import okhttp3.*;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -309,6 +311,49 @@ public class PlatformApiService
             log.warn("redeemLinkCode failed", ex);
             return "Link failed: could not reach the server.";
         }
+    }
+
+    /**
+     * Fetch the clan XP leaderboard from the backend (replaces the old direct Wise Old Man
+     * call). For an "all" period the value is the player's current total XP; for day/week/
+     * month/year it's the XP gained in that window. skill="overall" (or null) ranks by total
+     * XP, otherwise by that single skill. Returns WomEntry objects so the panel render is reused
+     * (value stored in both experience and gained; the caller picks which to show by period).
+     */
+    public List<WomService.WomEntry> fetchXpLeaderboard(String baseUrl, String apiKey, String clanSlug,
+                                                         String skill, String period)
+    {
+        HttpUrl.Builder ub = HttpUrl.parse(baseUrl + "/clans/" + clanSlug + "/leaderboard").newBuilder()
+            .addQueryParameter("board", "xp")
+            .addQueryParameter("period", period)
+            .addQueryParameter("limit", "20");
+        if (skill != null && !skill.isEmpty() && !skill.equals("overall"))
+        {
+            ub.addQueryParameter("skill", skill);
+        }
+
+        Request request = new Request.Builder().url(ub.build())
+            .header("Authorization", "Bearer " + apiKey).get().build();
+        List<WomService.WomEntry> entries = new ArrayList<>();
+        try (Response response = httpClient.newCall(request).execute())
+        {
+            if (!response.isSuccessful() || response.body() == null) return entries;
+            JsonObject root = gson.fromJson(response.body().string(), JsonObject.class);
+            if (root == null || !root.has("entries")) return entries;
+            for (JsonElement el : root.getAsJsonArray("entries"))
+            {
+                JsonObject o = el.getAsJsonObject();
+                int rank = o.has("rank") ? o.get("rank").getAsInt() : entries.size() + 1;
+                String rsn = o.has("rsn") ? o.get("rsn").getAsString() : "";
+                long value = o.has("value") && !o.get("value").isJsonNull() ? o.get("value").getAsLong() : 0;
+                entries.add(new WomService.WomEntry(rank, rsn, "member", value, 0, value));
+            }
+        }
+        catch (Exception ex)
+        {
+            log.warn("fetchXpLeaderboard failed", ex);
+        }
+        return entries;
     }
 
     /**

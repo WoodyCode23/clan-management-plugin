@@ -2483,14 +2483,23 @@ public class ClanManagementPlugin extends Plugin
 
     private void doFetchWomData(String metric, String period)
     {
+        if (!isPlatformConfigured())
+        {
+            panel.updateWomLeaderboard(null, false);
+            return;
+        }
         try
         {
-            List<WomService.WomEntry> entries = womService.fetchGained(metric, period);
-            panel.updateWomLeaderboard(entries, true);
+            // All-Time ranks by current total XP (no "+"); other periods rank by gain.
+            String apiPeriod = "all-time".equals(period) ? "all" : period;
+            boolean isGained = !"all".equals(apiPeriod);
+            List<WomService.WomEntry> entries = platformApiService.fetchXpLeaderboard(
+                getPlatformUrl(), getPlatformKey(), getPlatformSlug(), metric, apiPeriod);
+            panel.updateWomLeaderboard(entries, isGained);
         }
         catch (Exception e)
         {
-            log.warn("Failed to fetch WOM data: {}", e.getMessage());
+            log.warn("Failed to fetch XP leaderboard: {}", e.getMessage());
             panel.updateWomLeaderboard(null, false);
         }
     }
