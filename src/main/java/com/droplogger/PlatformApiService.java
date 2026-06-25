@@ -356,6 +356,78 @@ public class PlatformApiService
         return entries;
     }
 
+    /** A clan activity feed item from the backend (replaces Wise Old Man's group activity). */
+    public static class ActivityItem
+    {
+        public final String type;     // "achievement" | "pb" | "drop"
+        public final String rsn;
+        public final String detail;
+        public final long value;       // pb: timeMs; drop: gp value; achievement: 0
+        public final String createdAt;
+
+        public ActivityItem(String type, String rsn, String detail, long value, String createdAt)
+        {
+            this.type = type;
+            this.rsn = rsn;
+            this.detail = detail;
+            this.value = value;
+            this.createdAt = createdAt;
+        }
+    }
+
+    /** Fetch the clan activity feed (recent achievements, PBs, notable drops) from the backend. */
+    public List<ActivityItem> fetchActivity(String baseUrl, String apiKey, String clanSlug, int limit)
+    {
+        HttpUrl url = HttpUrl.parse(baseUrl + "/clans/" + clanSlug + "/activity").newBuilder()
+            .addQueryParameter("limit", String.valueOf(limit)).build();
+        Request request = new Request.Builder().url(url)
+            .header("Authorization", "Bearer " + apiKey).get().build();
+        List<ActivityItem> out = new ArrayList<>();
+        try (Response response = httpClient.newCall(request).execute())
+        {
+            if (!response.isSuccessful() || response.body() == null) return out;
+            JsonObject root = gson.fromJson(response.body().string(), JsonObject.class);
+            if (root == null || !root.has("activity")) return out;
+            for (JsonElement el : root.getAsJsonArray("activity"))
+            {
+                JsonObject o = el.getAsJsonObject();
+                out.add(new ActivityItem(
+                    o.has("type") ? o.get("type").getAsString() : "",
+                    o.has("rsn") ? o.get("rsn").getAsString() : "",
+                    o.has("detail") && !o.get("detail").isJsonNull() ? o.get("detail").getAsString() : "",
+                    o.has("value") && !o.get("value").isJsonNull() ? o.get("value").getAsLong() : 0,
+                    o.has("createdAt") ? o.get("createdAt").getAsString() : ""));
+            }
+        }
+        catch (Exception ex) { log.warn("fetchActivity failed", ex); }
+        return out;
+    }
+
+    /** Fetch the current active event's leaderboard from the backend (replaces the WOM call). */
+    public List<WomService.WomEntry> fetchActiveEventLeaderboard(String baseUrl, String apiKey, String clanSlug)
+    {
+        Request request = new Request.Builder()
+            .url(baseUrl + "/clans/" + clanSlug + "/events/active")
+            .header("Authorization", "Bearer " + apiKey).get().build();
+        List<WomService.WomEntry> out = new ArrayList<>();
+        try (Response response = httpClient.newCall(request).execute())
+        {
+            if (!response.isSuccessful() || response.body() == null) return out;
+            JsonObject root = gson.fromJson(response.body().string(), JsonObject.class);
+            if (root == null || !root.has("leaderboard")) return out;
+            int rank = 1;
+            for (JsonElement el : root.getAsJsonArray("leaderboard"))
+            {
+                JsonObject o = el.getAsJsonObject();
+                String rsn = o.has("rsn") ? o.get("rsn").getAsString() : "";
+                long score = o.has("score") && !o.get("score").isJsonNull() ? o.get("score").getAsLong() : 0;
+                out.add(new WomService.WomEntry(rank++, rsn, "member", score, 0, score));
+            }
+        }
+        catch (Exception ex) { log.warn("fetchActiveEventLeaderboard failed", ex); }
+        return out;
+    }
+
     /**
      * Sync the full clan roster to the platform API. Admin only.
      */

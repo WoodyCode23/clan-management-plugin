@@ -1920,16 +1920,10 @@ public class ClanManagementPlugin extends Plugin
             return;
         }
 
-        if (!womService.isConfigured())
-        {
-            panel.updateActiveEvent(activeEventType, activeEventDisplayName, activeEventEndTime, null);
-            if (adminPanel != null) adminPanel.setActiveEvent(activeEventType, activeEventDisplayName, activeEventEndTime);
-            return;
-        }
-
         try
         {
-            List<WomService.WomEntry> entries = womService.fetchGained(activeEventMetric, "week");
+            List<WomService.WomEntry> entries = platformApiService.fetchActiveEventLeaderboard(
+                getPlatformUrl(), getPlatformKey(), getPlatformSlug());
             panel.updateActiveEvent(activeEventType, activeEventDisplayName, activeEventEndTime, entries);
             if (adminPanel != null) adminPanel.setActiveEvent(activeEventType, activeEventDisplayName, activeEventEndTime);
         }
@@ -2506,9 +2500,11 @@ public class ClanManagementPlugin extends Plugin
 
     private void refreshClanActivity()
     {
+        if (!isPlatformConfigured()) return;
         try
         {
-            List<WomService.ActivityEntry> activity = womService.fetchActivity(15);
+            List<PlatformApiService.ActivityItem> activity = platformApiService.fetchActivity(
+                getPlatformUrl(), getPlatformKey(), getPlatformSlug(), 15);
             panel.updateActivity(activity);
         }
         catch (Exception e)

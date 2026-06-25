@@ -579,7 +579,7 @@ public class ClanPanel extends PluginPanel
     /**
      * Update the clan activity feed on the Activity tab.
      */
-    public void updateActivity(List<WomService.ActivityEntry> entries)
+    public void updateActivity(List<PlatformApiService.ActivityItem> entries)
     {
         SwingUtilities.invokeLater(() ->
         {
@@ -594,7 +594,7 @@ public class ClanPanel extends PluginPanel
             }
             else
             {
-                for (WomService.ActivityEntry entry : entries)
+                for (PlatformApiService.ActivityItem entry : entries)
                 {
                     JPanel row = new JPanel(new BorderLayout());
                     row.setBackground(ColorScheme.DARK_GRAY_COLOR);
@@ -607,27 +607,25 @@ public class ClanPanel extends PluginPanel
                     String desc;
                     switch (entry.type)
                     {
-                        case "joined":
-                            icon = "+";
-                            color = "#4CAF50";
-                            desc = entry.username + " joined";
+                        case "achievement":
+                            icon = "\u2605"; // star
+                            color = "#FFD700";
+                            desc = entry.rsn + ": " + entry.detail;
                             break;
-                        case "left":
-                            icon = "-";
-                            color = "#FF6B6B";
-                            desc = entry.username + " left";
-                            break;
-                        case "changed_role":
-                            icon = "\u2191";
+                        case "pb":
+                            icon = "\u23f1"; // stopwatch
                             color = "#5B9BD5";
-                            String fromRole = formatRole(entry.previousRole);
-                            String toRole = formatRole(entry.role);
-                            desc = entry.username + " " + fromRole + " \u2192 " + toRole;
+                            desc = entry.rsn + " " + entry.detail + " " + formatPbTime(entry.value);
+                            break;
+                        case "drop":
+                            icon = "$";
+                            color = "#4CAF50";
+                            desc = entry.rsn + ": " + entry.detail + " (" + formatXp(entry.value) + " gp)";
                             break;
                         default:
                             icon = "\u2022";
                             color = "#888888";
-                            desc = entry.username + " " + entry.type;
+                            desc = entry.rsn + " " + entry.detail;
                     }
 
                     JLabel label = new JLabel("<html><span style='color:" + color + "'>" + icon
@@ -652,10 +650,10 @@ public class ClanPanel extends PluginPanel
         });
     }
 
-    private String formatRole(String role)
+    private String formatPbTime(long timeMs)
     {
-        if (role == null || role.isEmpty()) return "member";
-        return role.replace("_", " ");
+        long totalSec = timeMs / 1000;
+        return String.format("%d:%02d.%02d", totalSec / 60, totalSec % 60, (timeMs % 1000) / 10);
     }
 
     private String formatTimeAgo(String isoDate)
