@@ -145,10 +145,11 @@ public class ClanManagementPlugin extends Plugin
     private FightTracker fightTracker;
     private boolean wasInInstance = false;
 
-    // Decoded platform values from clanCode
-    private String decodedPlatformUrl = "";
-    private String decodedPlatformSlug = "";
-    private String decodedPlatformKey = "";
+    // Fixed platform endpoint. The plugin is Solus-only and always talks to ONE hardcoded URL
+    // — required by the RuneLite Plugin Hub (no network call to a URL derived from user input
+    // or fetched data). The only connection config a user enters is their clan API key.
+    private static final String PLATFORM_URL = "https://api.solusosrs.com";
+    private static final String PLATFORM_SLUG = "solus";
 
     private static final String WHITELIST_CACHE_FILE = "clan-whitelist-cache.json";
     private static final String HISCORE_CACHE_FILE = "clan-hiscore-cache.json";
@@ -307,42 +308,22 @@ public class ClanManagementPlugin extends Plugin
 
     private boolean isPlatformConfigured()
     {
-        return !decodedPlatformUrl.isEmpty()
-            && !decodedPlatformKey.isEmpty()
-            && !decodedPlatformSlug.isEmpty();
+        return config.apiKey() != null && !config.apiKey().trim().isEmpty();
     }
 
     private String getPlatformUrl()
     {
-        return decodedPlatformUrl;
+        return PLATFORM_URL;
     }
 
     private String getPlatformKey()
     {
-        return decodedPlatformKey;
+        return config.apiKey() == null ? "" : config.apiKey().trim();
     }
 
     private String getPlatformSlug()
     {
-        return decodedPlatformSlug;
-    }
-
-    private void decodePlatformClanCode()
-    {
-        String code = config.clanCode();
-        String[] parts = ClanCodeUtil.decode(code);
-        if (parts != null)
-        {
-            decodedPlatformUrl = parts[0];
-            decodedPlatformSlug = parts[1];
-            decodedPlatformKey = parts[2];
-        }
-        else
-        {
-            decodedPlatformUrl = "";
-            decodedPlatformSlug = "";
-            decodedPlatformKey = "";
-        }
+        return PLATFORM_SLUG;
     }
 
     /**
@@ -415,9 +396,6 @@ public class ClanManagementPlugin extends Plugin
     @Override
     protected void startUp()
     {
-        // Decode platform clan code
-        decodePlatformClanCode();
-
         // Set up side panel
         panel = new ClanPanel();
         // Show tabs only if board code is configured
@@ -525,10 +503,9 @@ public class ClanManagementPlugin extends Plugin
             return;
         }
 
-        if ("clanCode".equals(event.getKey()))
+        if ("apiKey".equals(event.getKey()))
         {
-            log.info("Clan code changed, decoding platform config...");
-            decodePlatformClanCode();
+            log.info("API key changed, refreshing platform data...");
             serverConfigLoaded = false;
             executor.submit(this::refreshData);
         }
@@ -546,7 +523,7 @@ public class ClanManagementPlugin extends Plugin
             if (!isPlatformConfigured())
             {
                 client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
-                    "[Solus] Link failed: connect to the platform (Clan Code) first.", "");
+                    "[Solus] Link failed: enter your API key in plugin settings first.", "");
                 return;
             }
 
@@ -1870,7 +1847,7 @@ public class ClanManagementPlugin extends Plugin
         if (!isPlatformConfigured())
         {
             panel.setConnected(false);
-            panel.setStatus("Enter your Clan Code in plugin settings");
+            panel.setStatus("Enter your API key in plugin settings");
             return;
         }
 

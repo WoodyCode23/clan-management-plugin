@@ -12,20 +12,20 @@ public interface ClanManagementConfig extends Config
 
     @ConfigSection(
         name = "Connection",
-        description = "Paste the code from your clan admin to connect",
+        description = "Enter the API key from your clan admin to connect",
         position = 0
     )
     String connectionSection = "connection";
 
     @ConfigItem(
-        keyName = "clanCode",
-        name = "Clan Code",
-        description = "Paste the code from your clan admin to connect to the platform",
+        keyName = "apiKey",
+        name = "API Key",
+        description = "Your clan API key (from the clan admin / dashboard). The plugin connects to the Solus platform automatically.",
         section = connectionSection,
         position = 0,
         secret = true
     )
-    default String clanCode() { return ""; }
+    default String apiKey() { return ""; }
 
     @ConfigItem(
         keyName = "linkCode",
