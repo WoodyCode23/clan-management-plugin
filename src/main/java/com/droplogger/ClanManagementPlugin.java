@@ -2803,12 +2803,12 @@ public class ClanManagementPlugin extends Plugin
             {
                 adminPanel.setStatus("Ending event...");
 
-                // Fetch final leaderboard for Discord before clearing
+                // Fetch the final standings from our backend (not WOM) for the Discord post.
                 List<WomService.WomEntry> finalLeaderboard = null;
-                if (womService.isConfigured() && !activeEventMetric.isEmpty())
+                if (isPlatformConfigured() && !activeEventMetric.isEmpty())
                 {
-                    try { finalLeaderboard = womService.fetchGained(activeEventMetric, "week"); }
-                    catch (Exception ignored) {}
+                    finalLeaderboard = platformApiService.fetchActiveEventLeaderboard(
+                        getPlatformUrl(), getPlatformKey(), getPlatformSlug());
                 }
 
                 // Post results to Discord
