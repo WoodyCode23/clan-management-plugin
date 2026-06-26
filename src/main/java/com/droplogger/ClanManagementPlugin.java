@@ -151,9 +151,6 @@ public class ClanManagementPlugin extends Plugin
     private static final String PLATFORM_URL = "https://api.solusosrs.com";
     private static final String PLATFORM_SLUG = "solus";
 
-    private static final String WHITELIST_CACHE_FILE = "clan-whitelist-cache.json";
-    private static final String HISCORE_CACHE_FILE = "clan-hiscore-cache.json";
-    private static final String DROPS_CACHE_FILE = "clan-drops-cache.json";
 
     // In-memory hiscore cache: categoryKey → list of entries
     private final Map<String, List<HiscoreEntry>> hiscoreCacheV2 = Collections.synchronizedMap(new LinkedHashMap<>());
@@ -2490,12 +2487,22 @@ public class ClanManagementPlugin extends Plugin
         }
     }
 
+    /** Plugin-specific data dir under .runelite — Hub rule: don't write loose files in the .runelite root. */
+    private static File pluginDataDir()
+    {
+        File dir = new File(net.runelite.client.RuneLite.RUNELITE_DIR, "clan-management");
+        if (!dir.exists())
+        {
+            dir.mkdirs();
+        }
+        return dir;
+    }
+
     private void saveWhitelistCacheToDisk()
     {
         try
         {
-            File cacheFile = new File(
-                net.runelite.client.RuneLite.RUNELITE_DIR, "clan-whitelist-cache.json");
+            File cacheFile = new File(pluginDataDir(), "whitelist-cache.json");
             java.util.Map<String, Object> cacheData = new java.util.LinkedHashMap<>();
             cacheData.put("whitelist", cachedClanWhitelist);
             String json = gson.toJson(cacheData);
@@ -2511,8 +2518,7 @@ public class ClanManagementPlugin extends Plugin
     {
         try
         {
-            File cacheFile = new File(
-                net.runelite.client.RuneLite.RUNELITE_DIR, "clan-whitelist-cache.json");
+            File cacheFile = new File(pluginDataDir(), "whitelist-cache.json");
             if (!cacheFile.exists()) return;
 
             String json = new String(
@@ -2549,8 +2555,7 @@ public class ClanManagementPlugin extends Plugin
 
     private File getHiscoreCacheFile()
     {
-        File runeliteDir = new File(System.getProperty("user.home"), ".runelite");
-        return new File(runeliteDir, HISCORE_CACHE_FILE);
+        return new File(pluginDataDir(), "hiscore-cache.json");
     }
 
     private void saveHiscoreCacheV2ToDisk()
@@ -2638,7 +2643,7 @@ public class ClanManagementPlugin extends Plugin
             cache.put("leaderboard", cachedLeaderboard);
             cache.put("recent", cachedRecentDrops);
 
-            File cacheFile = new File(new File(System.getProperty("user.home"), ".runelite"), DROPS_CACHE_FILE);
+            File cacheFile = new File(pluginDataDir(), "drops-cache.json");
             try (FileWriter writer = new FileWriter(cacheFile))
             {
                 gson.toJson(cache, writer);
@@ -2655,7 +2660,7 @@ public class ClanManagementPlugin extends Plugin
     {
         try
         {
-            File cacheFile = new File(new File(System.getProperty("user.home"), ".runelite"), DROPS_CACHE_FILE);
+            File cacheFile = new File(pluginDataDir(), "drops-cache.json");
             if (!cacheFile.exists()) return;
 
             Type type = new TypeToken<LinkedHashMap<String, Object>>(){}.getType();
