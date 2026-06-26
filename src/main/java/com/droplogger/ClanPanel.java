@@ -40,9 +40,6 @@ public class ClanPanel extends PluginPanel
     private static final String CARD_NOT_CONNECTED = "notConnected";
     private static final String CARD_CONNECTED = "connected";
 
-    // ── Bingo tab ──
-    private BingoPanel bingoPanel;
-    private boolean bingoTabVisible = false;
     private boolean connected = false;
 
     private Runnable onRefresh;
@@ -472,7 +469,7 @@ public class ClanPanel extends PluginPanel
      * Update the active event card on the Home tab.
      */
     public void updateActiveEvent(String type, String displayName, String endTime,
-                                  List<WomService.WomEntry> leaderboard)
+                                  List<LeaderboardEntry> leaderboard)
     {
         SwingUtilities.invokeLater(() ->
         {
@@ -502,7 +499,7 @@ public class ClanPanel extends PluginPanel
                 int shown = Math.min(5, leaderboard.size());
                 for (int i = 0; i < shown; i++)
                 {
-                    WomService.WomEntry entry = leaderboard.get(i);
+                    LeaderboardEntry entry = leaderboard.get(i);
                     String prefix = "#" + (i + 1) + " ";
                     JLabel row = new JLabel(prefix + entry.username + " — " +
                         java.text.NumberFormat.getNumberInstance(java.util.Locale.US).format(entry.gained) + unit);
@@ -787,7 +784,7 @@ public class ClanPanel extends PluginPanel
         this.onFetchWomData = callback;
     }
 
-    public void updateWomLeaderboard(List<WomService.WomEntry> entries, boolean isGained)
+    public void updateWomLeaderboard(List<LeaderboardEntry> entries, boolean isGained)
     {
         SwingUtilities.invokeLater(() ->
         {
@@ -804,7 +801,7 @@ public class ClanPanel extends PluginPanel
                 return;
             }
 
-            for (WomService.WomEntry entry : entries)
+            for (LeaderboardEntry entry : entries)
             {
                 womLeaderboardPanel.add(createWomRow(entry, isGained));
                 womLeaderboardPanel.add(Box.createVerticalStrut(1));
@@ -815,7 +812,7 @@ public class ClanPanel extends PluginPanel
         });
     }
 
-    private JPanel createWomRow(WomService.WomEntry entry, boolean isGained)
+    private JPanel createWomRow(LeaderboardEntry entry, boolean isGained)
     {
         JPanel row = new JPanel(new BorderLayout(4, 0));
         row.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -2495,51 +2492,6 @@ public class ClanPanel extends PluginPanel
             revalidate();
             repaint();
         });
-    }
-
-    // ══════════════════════════════════════════
-    // Bingo Tab
-    // ══════════════════════════════════════════
-
-    public void showBingoTab(BingoPanel panel)
-    {
-        if (bingoTabVisible) return;
-        this.bingoPanel = panel;
-        SwingUtilities.invokeLater(() ->
-        {
-            // Insert before Admin tab if it exists, otherwise at end
-            int adminIdx = tabbedPane.indexOfTab("Admin");
-            if (adminIdx >= 0)
-            {
-                tabbedPane.insertTab("Bingo", null, panel, null, adminIdx);
-            }
-            else
-            {
-                tabbedPane.addTab("Bingo", panel);
-            }
-            bingoTabVisible = true;
-            revalidate();
-            repaint();
-        });
-    }
-
-    public void hideBingoTab()
-    {
-        if (!bingoTabVisible) return;
-        SwingUtilities.invokeLater(() ->
-        {
-            int idx = tabbedPane.indexOfTab("Bingo");
-            if (idx >= 0) tabbedPane.removeTabAt(idx);
-            bingoTabVisible = false;
-            bingoPanel = null;
-            revalidate();
-            repaint();
-        });
-    }
-
-    public BingoPanel getBingoPanel()
-    {
-        return bingoPanel;
     }
 
     // ══════════════════════════════════════════

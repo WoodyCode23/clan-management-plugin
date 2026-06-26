@@ -106,13 +106,7 @@ public class ClanManagementPlugin extends Plugin
     private AdminService adminService;
 
     @Inject
-    private WomService womService;
-
-    @Inject
     private Gson gson;
-
-    @Inject
-    private BingoService bingoService;
 
     @Inject
     private PlatformApiService platformApiService;
@@ -163,13 +157,6 @@ public class ClanManagementPlugin extends Plugin
     private String activeEventDisplayName = "";
     private String activeEventEndTime = "";
     private String activeEventId = "";
-
-    // Bingo state
-    private BingoPanel bingoPanel;
-    private BountyScheduler bountyScheduler;
-    private BingoConfig bingoConfig;
-    private boolean bingoActive = false;
-    private String playerBingoTeam = "";
 
     // Collection log sync state (automatic — like WikiSync/RuneProfile)
     private final Map<Integer, ClogItem> clogSyncItems = Collections.synchronizedMap(new LinkedHashMap<>());
@@ -313,7 +300,8 @@ public class ClanManagementPlugin extends Plugin
 
     /**
      * Fetch shared config from the platform bootstrap endpoint.
-     * Updates cached values for Discord webhook URL, min drop value, active event, etc.
+     * Updates cached values for min drop value, active event, etc. (no URLs are ever
+     * read from this response — the plugin only calls the hardcoded platform endpoint.)
      */
     private void fetchBootstrapConfig()
     {
@@ -429,9 +417,6 @@ public class ClanManagementPlugin extends Plugin
         // Set up admin panel if admin key is configured
         setupAdminPanel();
 
-        // Initialize bingo panel (hidden until config says active)
-        bingoPanel = new BingoPanel();
-
         // Set up PB detector and fight tracker
         pbDetector = new PbDetector();
         fightTracker = new FightTracker();
@@ -450,14 +435,6 @@ public class ClanManagementPlugin extends Plugin
         if (fightTracker != null) fightTracker.reset();
 
         hiscoreTracker.reset();
-
-        if (bountyScheduler != null)
-        {
-            bountyScheduler.cancel();
-            bountyScheduler = null;
-        }
-        panel.hideBingoTab();
-        bingoActive = false;
 
         clogSyncItems.clear();
         // clog dedup handled by Set keys + enum-3721 canonical remap
@@ -1767,7 +1744,7 @@ public class ClanManagementPlugin extends Plugin
             return;
         }
 
-        // Fetch bootstrap config from platform (discord webhook, min drop value, active event)
+        // Fetch bootstrap config from platform (min drop value, active event)
         fetchBootstrapConfig();
 
         // Load platform config on first successful connection
@@ -1800,7 +1777,6 @@ public class ClanManagementPlugin extends Plugin
         refreshWomData();
         refreshClanActivity();
         refreshEventLeaderboard();
-        refreshBingo();
         refreshStatusBoxes();
     }
 
@@ -1815,7 +1791,7 @@ public class ClanManagementPlugin extends Plugin
 
         try
         {
-            List<WomService.WomEntry> entries = platformApiService.fetchActiveEventLeaderboard(
+            List<LeaderboardEntry> entries = platformApiService.fetchActiveEventLeaderboard(
                 getPlatformUrl(), getPlatformKey(), getPlatformSlug());
             panel.updateActiveEvent(activeEventType, activeEventDisplayName, activeEventEndTime, entries);
             if (adminPanel != null) adminPanel.setActiveEvent(activeEventType, activeEventDisplayName, activeEventEndTime);
@@ -1825,209 +1801,6 @@ public class ClanManagementPlugin extends Plugin
             log.debug("Failed to fetch event leaderboard", e);
             panel.updateActiveEvent(activeEventType, activeEventDisplayName, activeEventEndTime, null);
             if (adminPanel != null) adminPanel.setActiveEvent(activeEventType, activeEventDisplayName, activeEventEndTime);
-        }
-    }
-
-    private void refreshBingo()
-    {
-        // Bingo is archived — always return early
-        if (true) {
-            if (bingoActive) {
-                panel.hideBingoTab();
-                bingoActive = false;
-                if (bountyScheduler != null) bountyScheduler.cancel();
-            }
-            return;
-        }
-
-        try
-        {
-            // Fetch config (cached for 5 min)
-            bingoConfig = bingoService.fetchBingoConfig();
-
-            // Check if event is active based on dates
-            boolean shouldBeActive = isBingoEventActive(bingoConfig);
-
-            if (shouldBeActive && !bingoActive)
-            {
-                // Show bingo tab
-                panel.showBingoTab(bingoPanel);
-                bingoActive = true;
-
-                // Set up bounty scheduler
-                bountyScheduler = new BountyScheduler(executor, bingoService);
-                bountyScheduler.setOnHint((bounty, message) -> {
-                    clientThread.invokeLater(() ->
-                        client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", message, ""));
-                });
-                bountyScheduler.setOnRelease((bounty, message) -> {
-                    clientThread.invokeLater(() ->
-                        client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", message, ""));
-                });
-                bountyScheduler.schedule(bingoConfig.getBounties(), bingoConfig.getHintMinutesBefore());
-            }
-            else if (!shouldBeActive && bingoActive)
-            {
-                panel.hideBingoTab();
-                bingoActive = false;
-                if (bountyScheduler != null) bountyScheduler.cancel();
-            }
-
-            if (!bingoActive) return;
-
-            // Resolve player's team
-            String playerName = getLocalPlayerName();
-            if (playerName != null)
-            {
-                playerBingoTeam = bingoConfig.getRoster().getOrDefault(playerName.toLowerCase(), "");
-            }
-
-            // Find team name
-            String playerTeamName = null;
-            for (BingoTeam team : bingoConfig.getTeams())
-            {
-                if (team.getCode().equals(playerBingoTeam))
-                {
-                    playerTeamName = team.getName();
-                    break;
-                }
-            }
-
-            bingoPanel.updateConfig(bingoConfig, playerBingoTeam, playerTeamName);
-
-            // Fetch team progress for player's team
-            if (!playerBingoTeam.isEmpty())
-            {
-                Map<String, Double> progress = bingoService.fetchTeamProgress(playerBingoTeam);
-                bingoPanel.updateTeamProgress(progress);
-            }
-
-            // Fetch standings
-            BingoStandings standings = bingoService.fetchAllStandings();
-            bingoPanel.updateStandings(standings, playerName, playerBingoTeam);
-
-            // Fetch drops
-            List<Map<String, Object>> drops = bingoService.fetchDroplog(playerBingoTeam, 20);
-            bingoPanel.updateDropLog(drops);
-
-            // Update bounty display
-            String nextBounty = bountyScheduler != null ?
-                bountyScheduler.getNextBountyCountdown(bingoConfig.getBounties()) : null;
-            bingoPanel.updateBounties(bingoConfig.getBounties(), nextBounty);
-
-            // Update countdown
-            bingoPanel.updateCountdown(getBingoCountdown(bingoConfig));
-
-            // Push WOM data for KC/XP tiles
-            pushWomBingoProgress();
-        }
-        catch (Exception e)
-        {
-            log.debug("Failed to refresh bingo data", e);
-        }
-    }
-
-    private boolean isBingoEventActive(BingoConfig cfg)
-    {
-        try
-        {
-            java.time.ZoneId est = java.time.ZoneId.of("America/New_York");
-            java.time.ZonedDateTime now = java.time.ZonedDateTime.now(est);
-
-            if (!cfg.getStartDate().isEmpty())
-            {
-                java.time.ZonedDateTime start = java.time.LocalDateTime.parse(cfg.getStartDate()).atZone(est);
-                if (now.isBefore(start)) return false;
-            }
-            if (!cfg.getEndDate().isEmpty())
-            {
-                java.time.ZonedDateTime end = java.time.LocalDateTime.parse(cfg.getEndDate()).atZone(est);
-                if (now.isAfter(end)) return false;
-            }
-            return true;
-        }
-        catch (Exception e)
-        {
-            return true; // If dates can't be parsed, show anyway
-        }
-    }
-
-    private String getBingoCountdown(BingoConfig cfg)
-    {
-        try
-        {
-            java.time.ZoneId est = java.time.ZoneId.of("America/New_York");
-            java.time.ZonedDateTime now = java.time.ZonedDateTime.now(est);
-
-            if (!cfg.getEndDate().isEmpty())
-            {
-                java.time.ZonedDateTime end = java.time.LocalDateTime.parse(cfg.getEndDate()).atZone(est);
-                java.time.Duration remaining = java.time.Duration.between(now, end);
-                if (!remaining.isNegative())
-                {
-                    long days = remaining.toDays();
-                    long hours = remaining.toHours() % 24;
-                    long minutes = remaining.toMinutes() % 60;
-                    return "Ends in " + days + "d " + hours + "h " + minutes + "m";
-                }
-            }
-        }
-        catch (Exception ignored) {}
-        return "";
-    }
-
-    private void pushWomBingoProgress()
-    {
-        if (bingoConfig == null || !womService.isConfigured()) return;
-
-        String playerName = getLocalPlayerName();
-        if (playerName == null) return;
-
-        // Only push if player is on a team
-        if (playerBingoTeam.isEmpty()) return;
-
-        // Find KC/XP tiles and group by metric
-        Map<String, List<BingoTile>> metricTiles = new LinkedHashMap<>();
-        for (BingoTile tile : bingoConfig.getTiles())
-        {
-            if (("kc".equals(tile.getType()) || "xp".equals(tile.getType())) && !tile.getMetric().isEmpty())
-            {
-                metricTiles.computeIfAbsent(tile.getMetric(), k -> new ArrayList<>()).add(tile);
-            }
-        }
-
-        if (metricTiles.isEmpty()) return;
-
-        for (Map.Entry<String, List<BingoTile>> entry : metricTiles.entrySet())
-        {
-            String metric = entry.getKey();
-            try
-            {
-                List<WomService.WomEntry> gained = womService.fetchGained(metric, "week");
-                // Sum per team
-                Map<String, Double> teamGains = new LinkedHashMap<>();
-                for (WomService.WomEntry we : gained)
-                {
-                    String team = bingoConfig.getRoster().getOrDefault(we.username.toLowerCase(), "");
-                    if (!team.isEmpty())
-                    {
-                        teamGains.merge(team, (double) we.gained, Double::sum);
-                    }
-                }
-
-                // Push to sheet for each team/tile
-                for (BingoTile tile : entry.getValue())
-                {
-                    for (Map.Entry<String, Double> tg : teamGains.entrySet())
-                    {
-                        bingoService.updateTileProgress(tg.getKey(), tile.getCode(), tg.getValue());
-                    }
-                }
-            }
-            catch (Exception e)
-            {
-                log.debug("Failed to push WOM progress for metric: {}", metric, e);
-            }
         }
     }
 
@@ -2326,7 +2099,7 @@ public class ClanManagementPlugin extends Plugin
             // All-Time ranks by current total XP (no "+"); other periods rank by gain.
             String apiPeriod = "all-time".equals(period) ? "all" : period;
             boolean isGained = !"all".equals(apiPeriod);
-            List<WomService.WomEntry> entries = platformApiService.fetchXpLeaderboard(
+            List<LeaderboardEntry> entries = platformApiService.fetchXpLeaderboard(
                 getPlatformUrl(), getPlatformKey(), getPlatformSlug(), metric, apiPeriod);
             panel.updateWomLeaderboard(entries, isGained);
         }

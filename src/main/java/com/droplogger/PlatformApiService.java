@@ -320,7 +320,7 @@ public class PlatformApiService
      * XP, otherwise by that single skill. Returns WomEntry objects so the panel render is reused
      * (value stored in both experience and gained; the caller picks which to show by period).
      */
-    public List<WomService.WomEntry> fetchXpLeaderboard(String baseUrl, String apiKey, String clanSlug,
+    public List<LeaderboardEntry> fetchXpLeaderboard(String baseUrl, String apiKey, String clanSlug,
                                                          String skill, String period)
     {
         HttpUrl.Builder ub = HttpUrl.parse(baseUrl + "/clans/" + clanSlug + "/leaderboard").newBuilder()
@@ -334,7 +334,7 @@ public class PlatformApiService
 
         Request request = new Request.Builder().url(ub.build())
             .header("Authorization", "Bearer " + apiKey).get().build();
-        List<WomService.WomEntry> entries = new ArrayList<>();
+        List<LeaderboardEntry> entries = new ArrayList<>();
         try (Response response = httpClient.newCall(request).execute())
         {
             if (!response.isSuccessful() || response.body() == null) return entries;
@@ -346,7 +346,7 @@ public class PlatformApiService
                 int rank = o.has("rank") ? o.get("rank").getAsInt() : entries.size() + 1;
                 String rsn = o.has("rsn") ? o.get("rsn").getAsString() : "";
                 long value = o.has("value") && !o.get("value").isJsonNull() ? o.get("value").getAsLong() : 0;
-                entries.add(new WomService.WomEntry(rank, rsn, "member", value, 0, value));
+                entries.add(new LeaderboardEntry(rank, rsn, "member", value, 0, value));
             }
         }
         catch (Exception ex)
@@ -404,12 +404,12 @@ public class PlatformApiService
     }
 
     /** Fetch the current active event's leaderboard from the backend (replaces the WOM call). */
-    public List<WomService.WomEntry> fetchActiveEventLeaderboard(String baseUrl, String apiKey, String clanSlug)
+    public List<LeaderboardEntry> fetchActiveEventLeaderboard(String baseUrl, String apiKey, String clanSlug)
     {
         Request request = new Request.Builder()
             .url(baseUrl + "/clans/" + clanSlug + "/events/active")
             .header("Authorization", "Bearer " + apiKey).get().build();
-        List<WomService.WomEntry> out = new ArrayList<>();
+        List<LeaderboardEntry> out = new ArrayList<>();
         try (Response response = httpClient.newCall(request).execute())
         {
             if (!response.isSuccessful() || response.body() == null) return out;
@@ -421,7 +421,7 @@ public class PlatformApiService
                 JsonObject o = el.getAsJsonObject();
                 String rsn = o.has("rsn") ? o.get("rsn").getAsString() : "";
                 long score = o.has("score") && !o.get("score").isJsonNull() ? o.get("score").getAsLong() : 0;
-                out.add(new WomService.WomEntry(rank++, rsn, "member", score, 0, score));
+                out.add(new LeaderboardEntry(rank++, rsn, "member", score, 0, score));
             }
         }
         catch (Exception ex) { log.warn("fetchActiveEventLeaderboard failed", ex); }
