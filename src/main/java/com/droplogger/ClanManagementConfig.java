@@ -41,7 +41,7 @@ public interface ClanManagementConfig extends Config
 
     @ConfigSection(
         name = "Data Sharing",
-        description = "Choose what data to share with your clan",
+        description = "Opt-in — everything here is off by default and is sent only to your Solus clan's server.",
         position = 1
     )
     String dataSection = "data";
@@ -49,7 +49,7 @@ public interface ClanManagementConfig extends Config
     @ConfigItem(
         keyName = "enableDrops",
         name = "Track Drops",
-        description = "Send valuable drops to your clan automatically",
+        description = "Off by default. Sends each valuable drop (item, GP value, monster, kill count) with your RSN to the clan server, for the drop feed and leaderboards.",
         section = dataSection,
         position = 0
     )
@@ -58,7 +58,7 @@ public interface ClanManagementConfig extends Config
     @ConfigItem(
         keyName = "enableSpeedTimes",
         name = "Track Speed Times",
-        description = "Send personal best boss times to your clan automatically",
+        description = "Off by default. Sends your personal-best boss times (boss, time, team) to the clan server. Your raid party is read locally to credit the right team; your location is never sent.",
         section = dataSection,
         position = 1
     )
@@ -67,7 +67,7 @@ public interface ClanManagementConfig extends Config
     @ConfigItem(
         keyName = "enableClogSync",
         name = "Sync Collection Log",
-        description = "Sync your collection log when you open it in-game",
+        description = "Off by default. Uploads your collection log progress (obtained items + counts) when you open it in-game, for clan clog tracking.",
         section = dataSection,
         position = 2
     )
@@ -76,7 +76,7 @@ public interface ClanManagementConfig extends Config
     @ConfigItem(
         keyName = "enableStatTracking",
         name = "Track Stats",
-        description = "Track XP and stats for clan leaderboards",
+        description = "Off by default. Sends only your RSN so the clan can read your public XP/KC from the official OSRS hiscores for leaderboards. No private game data is sent.",
         section = dataSection,
         position = 3
     )
