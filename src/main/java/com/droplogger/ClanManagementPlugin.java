@@ -30,7 +30,6 @@ import net.runelite.client.game.ItemManager;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.ui.ClientToolbar;
-import net.runelite.client.ui.DrawManager;
 import net.runelite.client.ui.NavigationButton;
 import net.runelite.client.util.ImageUtil;
 import net.runelite.client.util.Text;
@@ -104,19 +103,10 @@ public class ClanManagementPlugin extends Plugin
     private BoardDataService boardDataService;
 
     @Inject
-    private DiscordWebhookService discordService;
-
-    @Inject
-    private HiscoreService hiscoreService;
-
-    @Inject
     private AdminService adminService;
 
     @Inject
     private WomService womService;
-
-    @Inject
-    private DrawManager drawManager;
 
     @Inject
     private Gson gson;
@@ -157,8 +147,6 @@ public class ClanManagementPlugin extends Plugin
     private volatile boolean hiscoreV2BatchFetched = false; // true once allTopTimes has been called this session
 
     // Server-side config fetched from Settings tab
-    private String fetchedClanDropLogUrl;
-    private String fetchedDiscordWebhookUrl;
     private int fetchedMinDropValue = 100000;
     private String clanName = "Solus";
     private boolean serverConfigLoaded = false;
@@ -340,16 +328,6 @@ public class ClanManagementPlugin extends Plugin
         {
             log.warn("Failed to fetch bootstrap config from platform");
             return;
-        }
-
-        // Discord webhook
-        if (response.has("discordWebhooks"))
-        {
-            JsonObject webhooks = response.getAsJsonObject("discordWebhooks");
-            if (webhooks.has("drops"))
-            {
-                fetchedDiscordWebhookUrl = webhooks.get("drops").getAsString();
-            }
         }
 
         // Settings
@@ -1440,30 +1418,7 @@ public class ClanManagementPlugin extends Plugin
             wp.getX(), wp.getY(), wp.getPlane(), playerName
         );
 
-        // Capture screenshot for Discord
-        final BufferedImage[] screenshotHolder = {null};
-        if (fetchedDiscordWebhookUrl != null && !fetchedDiscordWebhookUrl.isEmpty())
-        {
-            try
-            {
-                drawManager.requestNextFrameListener(image ->
-                {
-                    screenshotHolder[0] = new BufferedImage(
-                        image.getWidth(null), image.getHeight(null), BufferedImage.TYPE_INT_ARGB);
-                    java.awt.Graphics2D g = screenshotHolder[0].createGraphics();
-                    g.drawImage(image, 0, 0, null);
-                    g.dispose();
-                });
-            }
-            catch (Exception e)
-            {
-                log.warn("Failed to capture drop screenshot", e);
-            }
-        }
-
-        // Delay slightly so the requested screenshot frame lands before we submit/post.
-        // Uses the scheduler's delay instead of Thread.sleep (disallowed in Plugin Hub plugins).
-        executor.schedule(() ->
+        executor.submit(() ->
         {
             platformApiService.submitDrop(
                 getPlatformUrl(),
@@ -1472,13 +1427,7 @@ public class ClanManagementPlugin extends Plugin
                 drop
             );
             log.debug("Drop logged: {} ({} gp)", itemName, value);
-
-            // Post to Discord with screenshot
-            if (fetchedDiscordWebhookUrl != null && !fetchedDiscordWebhookUrl.isEmpty())
-            {
-                discordService.postDrop(fetchedDiscordWebhookUrl, drop, screenshotHolder[0]);
-            }
-        }, 500, TimeUnit.MILLISECONDS);
+        });
 
         // Chat confirmation
         if (config.chatConfirmation())
@@ -1612,35 +1561,12 @@ public class ClanManagementPlugin extends Plugin
         log.info("Completion time: {} {} — {} (key={}, party: {})",
             formattedTime, categoryName, sizeLabel, categoryKey, rsns);
 
-        // Capture screenshot immediately (must be done on render thread)
-        final BufferedImage[] screenshotHolder = {null};
-        if (config.enableSpeedTimes() && fetchedDiscordWebhookUrl != null && !fetchedDiscordWebhookUrl.isEmpty())
-        {
-            try
-            {
-                drawManager.requestNextFrameListener(image ->
-                {
-                    screenshotHolder[0] = new BufferedImage(
-                        image.getWidth(null), image.getHeight(null), BufferedImage.TYPE_INT_ARGB);
-                    java.awt.Graphics2D g = screenshotHolder[0].createGraphics();
-                    g.drawImage(image, 0, 0, null);
-                    g.dispose();
-                });
-            }
-            catch (Exception e)
-            {
-                log.warn("Failed to capture screenshot", e);
-            }
-        }
-
         final int finalPartySize = partySize;
         final String finalCategoryName = categoryName;
         final boolean finalAllClan = allClanMembers;
         final boolean isNewPb = completion.isPersonalBest();
 
-        // Delay slightly so the requested screenshot frame lands before we submit/post.
-        // Uses the scheduler's delay instead of Thread.sleep (disallowed in Plugin Hub plugins).
-        executor.schedule(() ->
+        executor.submit(() ->
         {
             // Submit PB to platform API — one entry per party member
             // "live" = all party members in clan chat (clan-verified)
@@ -1712,15 +1638,8 @@ public class ClanManagementPlugin extends Plugin
                         client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", msg, "")
                     );
                 }
-
-                // Post to Discord (clan-verified only)
-                if (finalAllClan && fetchedDiscordWebhookUrl != null && !fetchedDiscordWebhookUrl.isEmpty())
-                {
-                    discordService.postPb(fetchedDiscordWebhookUrl, formattedTime, 0,
-                        finalCategoryName, rsns, screenshotHolder[0]);
-                }
             }
-        }, 500, TimeUnit.MILLISECONDS);
+        });
     }
 
     /**
@@ -1940,19 +1859,10 @@ public class ClanManagementPlugin extends Plugin
                 bountyScheduler.setOnHint((bounty, message) -> {
                     clientThread.invokeLater(() ->
                         client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", message, ""));
-                    if (fetchedDiscordWebhookUrl != null && !fetchedDiscordWebhookUrl.isEmpty())
-                    {
-                        discordService.postBountyHint(fetchedDiscordWebhookUrl, bounty,
-                            bingoConfig.getHintMinutesBefore());
-                    }
                 });
                 bountyScheduler.setOnRelease((bounty, message) -> {
                     clientThread.invokeLater(() ->
                         client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", message, ""));
-                    if (fetchedDiscordWebhookUrl != null && !fetchedDiscordWebhookUrl.isEmpty())
-                    {
-                        discordService.postBountyLive(fetchedDiscordWebhookUrl, bounty);
-                    }
                 });
                 bountyScheduler.schedule(bingoConfig.getBounties(), bingoConfig.getHintMinutesBefore());
             }
@@ -2131,56 +2041,31 @@ public class ClanManagementPlugin extends Plugin
     }
 
     /**
-     * Batch-fetch all speed times, populate entire cache.
-     * Prefers platform API; falls back to Google Sheet v2 API.
+     * Batch-fetch all speed times from the platform API, populate entire cache.
      */
     private void batchFetchAllHiscores()
     {
-        // Try platform API first
-        if (isPlatformConfigured())
+        if (!isPlatformConfigured())
         {
-            try
-            {
-                Map<String, List<HiscoreEntry>> allTimes = platformApiService.fetchAllPbs(
-                    getPlatformUrl(), getPlatformKey(), getPlatformSlug());
-                if (allTimes != null)
-                {
-                    hiscoreCacheV2.putAll(allTimes);
-                    hiscoreV2BatchFetched = true;
-                    saveHiscoreCacheV2ToDisk();
-                    panel.setRecentCategories(new java.util.LinkedHashSet<>(hiscoreCacheV2.keySet()), new java.util.LinkedHashMap<>(hiscoreCacheV2));
-                    log.info("Batch-fetched speed times from platform API: {} categories", allTimes.size());
-                    return;
-                }
-            }
-            catch (Exception e)
-            {
-                log.warn("Failed to batch-fetch speed times from platform API", e);
-            }
-        }
-
-        // Fallback to Google Sheet v2 API
-        String v2Url = fetchedClanDropLogUrl;
-        String apiKey = getApiKey();
-
-        if (v2Url == null || v2Url.isEmpty())
-        {
-            log.debug("No speed times API configured — skipping batch fetch");
             return;
         }
 
         try
         {
-            Map<String, List<HiscoreEntry>> allTimes = hiscoreService.fetchAllTopTimes(v2Url, apiKey);
-            hiscoreCacheV2.putAll(allTimes);
-            hiscoreV2BatchFetched = true;
-            saveHiscoreCacheV2ToDisk();
-            panel.setRecentCategories(new java.util.LinkedHashSet<>(hiscoreCacheV2.keySet()), new java.util.LinkedHashMap<>(hiscoreCacheV2));
-            log.info("Batch-fetched speed times: {} categories", allTimes.size());
+            Map<String, List<HiscoreEntry>> allTimes = platformApiService.fetchAllPbs(
+                getPlatformUrl(), getPlatformKey(), getPlatformSlug());
+            if (allTimes != null)
+            {
+                hiscoreCacheV2.putAll(allTimes);
+                hiscoreV2BatchFetched = true;
+                saveHiscoreCacheV2ToDisk();
+                panel.setRecentCategories(new java.util.LinkedHashSet<>(hiscoreCacheV2.keySet()), new java.util.LinkedHashMap<>(hiscoreCacheV2));
+                log.info("Batch-fetched speed times from platform API: {} categories", allTimes.size());
+            }
         }
         catch (Exception e)
         {
-            log.warn("Failed to batch-fetch speed times", e);
+            log.warn("Failed to batch-fetch speed times from platform API", e);
         }
     }
 
@@ -2202,39 +2087,19 @@ public class ClanManagementPlugin extends Plugin
             return;
         }
 
-        // Category not in cache — it might just have no entries yet
+        // Category not in cache — we've batch-fetched everything from the platform API,
+        // so this category simply has no times yet.
         if (hiscoreV2BatchFetched)
         {
-            // We already fetched everything; this category simply has no times
             panel.populateTimesPanel(timesPanel, new ArrayList<>(), accentColor);
             return;
         }
 
-        // Fallback: try individual fetch
-        String v2Url = fetchedClanDropLogUrl;
-        String apiKey = getApiKey();
-
-        if (v2Url != null && !v2Url.isEmpty())
-        {
-            try
-            {
-                List<HiscoreEntry> entries = hiscoreService.fetchTopTimesV2(v2Url, cat.getKey(), apiKey);
-                hiscoreCacheV2.put(cat.getKey(), entries);
-                saveHiscoreCacheV2ToDisk();
-                panel.populateTimesPanel(timesPanel, entries, accentColor);
-                return;
-            }
-            catch (Exception e)
-            {
-                log.warn("Failed to fetch hiscore times for {}", cat.getKey(), e);
-            }
-        }
-
-        // Failed or not configured
+        // Batch fetch hasn't succeeded (platform not configured or fetch failed)
         javax.swing.SwingUtilities.invokeLater(() ->
         {
             timesPanel.removeAll();
-            String msg = (v2Url == null || v2Url.isEmpty())
+            String msg = !isPlatformConfigured()
                 ? "Speed Times API not configured"
                 : "Failed to load times";
             javax.swing.JLabel err = new javax.swing.JLabel(msg);
@@ -2764,12 +2629,6 @@ public class ClanManagementPlugin extends Plugin
 
                 serverConfigLoaded = false; // Force config re-fetch
 
-                // Post to Discord
-                if (fetchedDiscordWebhookUrl != null && !fetchedDiscordWebhookUrl.isEmpty())
-                {
-                    discordService.postEventStart(fetchedDiscordWebhookUrl, type, displayName, activeEventEndTime);
-                }
-
                 // Immediately refresh event display
                 refreshEventLeaderboard();
             }
@@ -2784,21 +2643,6 @@ public class ClanManagementPlugin extends Plugin
             try
             {
                 adminPanel.setStatus("Ending event...");
-
-                // Fetch the final standings from our backend (not WOM) for the Discord post.
-                List<WomService.WomEntry> finalLeaderboard = null;
-                if (isPlatformConfigured() && !activeEventMetric.isEmpty())
-                {
-                    finalLeaderboard = platformApiService.fetchActiveEventLeaderboard(
-                        getPlatformUrl(), getPlatformKey(), getPlatformSlug());
-                }
-
-                // Post results to Discord
-                if (fetchedDiscordWebhookUrl != null && !fetchedDiscordWebhookUrl.isEmpty())
-                {
-                    discordService.postEventEnd(fetchedDiscordWebhookUrl, activeEventType,
-                        activeEventDisplayName, finalLeaderboard);
-                }
 
                 adminService.endEventPlatform(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), activeEventId);
                 adminPanel.setStatus("Event ended");

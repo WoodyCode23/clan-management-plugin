@@ -341,9 +341,46 @@ public class PbDetector
         {
             this.group = group;
             this.formattedTime = formattedTime;
-            this.timeSeconds = HiscoreService.parseTimeToSeconds(formattedTime);
+            this.timeSeconds = parseTimeToSeconds(formattedTime);
             this.bossName = bossName;
             this.personalBest = personalBest;
         }
+    }
+
+    /** Parse a "h:mm:ss.ss" / "mm:ss.ss" / "ss.ss" completion time into seconds. Pure utility. */
+    static double parseTimeToSeconds(String timeStr)
+    {
+        if (timeStr == null || timeStr.isEmpty())
+        {
+            return 0;
+        }
+
+        String[] parts = timeStr.split(":");
+        double seconds = 0;
+
+        try
+        {
+            if (parts.length == 3)
+            {
+                seconds = Double.parseDouble(parts[0]) * 3600
+                    + Double.parseDouble(parts[1]) * 60
+                    + Double.parseDouble(parts[2]);
+            }
+            else if (parts.length == 2)
+            {
+                seconds = Double.parseDouble(parts[0]) * 60
+                    + Double.parseDouble(parts[1]);
+            }
+            else if (parts.length == 1)
+            {
+                seconds = Double.parseDouble(parts[0]);
+            }
+        }
+        catch (NumberFormatException e)
+        {
+            return 0;
+        }
+
+        return seconds;
     }
 }
