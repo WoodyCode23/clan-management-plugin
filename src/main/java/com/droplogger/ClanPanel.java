@@ -51,6 +51,10 @@ public class ClanPanel extends PluginPanel
     private final JComboBox<String> hiscoreGroupCombo = new JComboBox<>();
     private final JComboBox<String> hiscoreBossCombo = new JComboBox<>();
     private final JComboBox<String> hiscoreSizeCombo = new JComboBox<>();
+    private final JComboBox<String> hiscoreModeCombo = new JComboBox<>();
+    private java.util.function.Consumer<String> onPbModeChange;
+    private final JComboBox<String> activityFilterCombo = new JComboBox<>();
+    private java.util.function.Consumer<String> onActivityFilterChange;
     private final JLabel hiscoreSizeLabel = new JLabel("Size:");
     private final JLabel hiscoreGroupLabel = new JLabel("Category:");
     private final JLabel hiscoreBossLabel = new JLabel("Boss:");
@@ -123,7 +127,7 @@ public class ClanPanel extends PluginPanel
         notConnectedPanel.add(msgBox, BorderLayout.NORTH);
 
         tabbedPane.setBackground(ColorScheme.DARK_GRAY_COLOR);
-        tabbedPane.setFont(tabbedPane.getFont().deriveFont(10f));
+        tabbedPane.setFont(new Font("Segoe UI", Font.PLAIN, 12));
 
         // Home tab (always present, default)
         tabbedPane.addTab("Home", buildHomeTab());
@@ -183,7 +187,7 @@ public class ClanPanel extends PluginPanel
         home.add(Box.createVerticalStrut(8));
         home.add(createNavCard("Drops", "Clan drop log, leaderboard & whitelist", new Color(255, 180, 100), "Drops"));
         home.add(Box.createVerticalStrut(8));
-        home.add(createNavCard("Activity", "Clan joins, leaves & rank changes", new Color(100, 180, 255), "Activity"));
+        home.add(createNavCard("Activity", "Live feed: joins, leaves, drops, PBs & clog", new Color(100, 180, 255), "Activity"));
         home.add(Box.createVerticalStrut(20));
 
         // ── Active Event card ──
@@ -192,7 +196,7 @@ public class ClanPanel extends PluginPanel
         eventCardPanel.setBorder(BorderFactory.createCompoundBorder(
             BorderFactory.createLineBorder(new Color(60, 60, 60)),
             new EmptyBorder(10, 10, 10, 10)));
-        eventCardPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        eventCardPanel.setAlignmentX(Component.CENTER_ALIGNMENT);
         eventCardPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 300));
         eventCardPanel.setVisible(false);
 
@@ -222,20 +226,28 @@ public class ClanPanel extends PluginPanel
         clogStatusLabel.setVisible(false);
 
         // ── Announcements section ──
+        // Full-width left-aligned title that lines up with the nav cards' left edge (CENTER
+        // alignmentX + MAX_VALUE width so its box spans the panel, text drawn at the left).
         JLabel announcementsTitle = new JLabel("Announcements");
         announcementsTitle.setFont(announcementsTitle.getFont().deriveFont(Font.BOLD, 13f));
         announcementsTitle.setForeground(ACCENT_GOLD);
-        announcementsTitle.setAlignmentX(Component.LEFT_ALIGNMENT);
+        announcementsTitle.setHorizontalAlignment(SwingConstants.LEFT);
+        announcementsTitle.setAlignmentX(Component.CENTER_ALIGNMENT);
+        announcementsTitle.setMaximumSize(new Dimension(Integer.MAX_VALUE, 18));
         home.add(announcementsTitle);
         home.add(Box.createVerticalStrut(6));
 
+        // Same alignment/width treatment as the event card so announcement cards line up
+        // edge-to-edge with the nav buttons above (previously LEFT-aligned → visibly offset).
         announcementsPanel.setLayout(new BoxLayout(announcementsPanel, BoxLayout.Y_AXIS));
         announcementsPanel.setBackground(ColorScheme.DARK_GRAY_COLOR);
-        announcementsPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        announcementsPanel.setAlignmentX(Component.CENTER_ALIGNMENT);
+        announcementsPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 400));
 
         JLabel noAnnouncements = new JLabel("No announcements");
         noAnnouncements.setFont(noAnnouncements.getFont().deriveFont(Font.ITALIC, 11f));
         noAnnouncements.setForeground(new Color(100, 100, 100));
+        noAnnouncements.setAlignmentX(Component.CENTER_ALIGNMENT);
         announcementsPanel.add(noAnnouncements);
 
         home.add(announcementsPanel);
@@ -247,7 +259,7 @@ public class ClanPanel extends PluginPanel
 
         JPanel statusRow = new JPanel(new GridLayout(1, 3, 6, 0));
         statusRow.setBackground(ColorScheme.DARK_GRAY_COLOR);
-        statusRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+        statusRow.setAlignmentX(Component.CENTER_ALIGNMENT);
         statusRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 48));
 
         statusClogLabel = new JLabel("--", SwingConstants.CENTER);
@@ -256,7 +268,7 @@ public class ClanPanel extends PluginPanel
 
         statusRow.add(buildStatusBox("C-Log", statusClogLabel));
         statusRow.add(buildStatusBox("XP", statusXpLabel));
-        statusRow.add(buildStatusBox("Speed Times", statusHiscoresLabel));
+        statusRow.add(buildStatusBox("Speed", statusHiscoresLabel));
         statusRow.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         statusRow.setToolTipText("Click to refresh");
         statusRow.addMouseListener(new java.awt.event.MouseAdapter()
@@ -280,7 +292,7 @@ public class ClanPanel extends PluginPanel
         // Status
         homeStatusLabel.setFont(homeStatusLabel.getFont().deriveFont(10f));
         homeStatusLabel.setForeground(new Color(120, 120, 120));
-        homeStatusLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        homeStatusLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
         home.add(homeStatusLabel);
 
         return home;
@@ -304,11 +316,32 @@ public class ClanPanel extends PluginPanel
         tab.add(title);
         tab.add(Box.createVerticalStrut(4));
 
-        JLabel desc = new JLabel("Recent joins, leaves & rank changes");
+        JLabel desc = new JLabel("Joins, leaves, drops, PBs & collection log");
         desc.setFont(desc.getFont().deriveFont(Font.PLAIN, 11f));
         desc.setForeground(new Color(140, 140, 140));
         desc.setAlignmentX(Component.LEFT_ALIGNMENT);
         tab.add(desc);
+        tab.add(Box.createVerticalStrut(8));
+
+        // Filter dropdown — narrows the feed to a single kind of event.
+        activityFilterCombo.addItem("Everything");
+        activityFilterCombo.addItem("Joins & Leaves");
+        activityFilterCombo.addItem("Drops");
+        activityFilterCombo.addItem("Personal Bests");
+        activityFilterCombo.addItem("Collection Log");
+        activityFilterCombo.setBackground(new Color(30, 30, 30));
+        activityFilterCombo.setForeground(Color.WHITE);
+        activityFilterCombo.setFont(READABLE_FONT_SMALL);
+        activityFilterCombo.setAlignmentX(Component.LEFT_ALIGNMENT);
+        activityFilterCombo.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
+        activityFilterCombo.addActionListener(e ->
+        {
+            if (onActivityFilterChange != null)
+            {
+                onActivityFilterChange.accept(activityTypeFilter((String) activityFilterCombo.getSelectedItem()));
+            }
+        });
+        tab.add(activityFilterCombo);
         tab.add(Box.createVerticalStrut(10));
 
         activityPanel.setLayout(new BoxLayout(activityPanel, BoxLayout.Y_AXIS));
@@ -335,12 +368,12 @@ public class ClanPanel extends PluginPanel
             new EmptyBorder(4, 4, 4, 4)));
 
         JLabel titleLbl = new JLabel(title, SwingConstants.CENTER);
-        titleLbl.setFont(new Font("Segoe UI", Font.PLAIN, 9));
+        titleLbl.setFont(new Font("Segoe UI", Font.PLAIN, 10));
         titleLbl.setForeground(new Color(120, 120, 120));
         titleLbl.setAlignmentX(Component.CENTER_ALIGNMENT);
         box.add(titleLbl);
 
-        valueLabel.setFont(new Font("Segoe UI", Font.BOLD, 9));
+        valueLabel.setFont(new Font("Segoe UI", Font.BOLD, 10));
         valueLabel.setForeground(new Color(200, 200, 200));
         valueLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
         box.add(valueLabel);
@@ -356,7 +389,7 @@ public class ClanPanel extends PluginPanel
             BorderFactory.createLineBorder(new Color(60, 60, 60), 1),
             new EmptyBorder(10, 12, 10, 12)
         ));
-        card.setAlignmentX(Component.LEFT_ALIGNMENT);
+        card.setAlignmentX(Component.CENTER_ALIGNMENT);
         card.setMaximumSize(new Dimension(Integer.MAX_VALUE, 62));
         card.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 
@@ -422,24 +455,25 @@ public class ClanPanel extends PluginPanel
     }
 
     /**
-     * Set announcements on the home tab. Each string is one announcement line.
+     * Set the announcements shown on the home tab (pinned ones first, gold-accented cards).
      */
-    public void setAnnouncements(List<String> messages)
+    public void setAnnouncements(List<PlatformApiService.Announcement> items)
     {
         SwingUtilities.invokeLater(() ->
         {
             announcementsPanel.removeAll();
 
-            if (messages == null || messages.isEmpty())
+            if (items == null || items.isEmpty())
             {
                 JLabel none = new JLabel("No announcements");
                 none.setFont(none.getFont().deriveFont(Font.ITALIC, 11f));
                 none.setForeground(new Color(100, 100, 100));
+                none.setAlignmentX(Component.CENTER_ALIGNMENT);
                 announcementsPanel.add(none);
             }
             else
             {
-                for (String msg : messages)
+                for (PlatformApiService.Announcement a : items)
                 {
                     JPanel card = new JPanel(new BorderLayout(8, 0));
                     card.setBackground(new Color(30, 28, 15));
@@ -447,10 +481,13 @@ public class ClanPanel extends PluginPanel
                         BorderFactory.createMatteBorder(0, 3, 0, 0, ACCENT_GOLD_DIM),
                         new EmptyBorder(8, 10, 8, 10)
                     ));
-                    card.setAlignmentX(Component.LEFT_ALIGNMENT);
-                    card.setMaximumSize(new Dimension(Integer.MAX_VALUE, 60));
+                    card.setAlignmentX(Component.CENTER_ALIGNMENT);
+                    card.setMaximumSize(new Dimension(Integer.MAX_VALUE, 80));
 
-                    JLabel text = new JLabel("<html>" + msg + "</html>");
+                    String pin = a.pinned ? "📌 " : ""; // pushpin
+                    String author = a.author != null && !a.author.isEmpty()
+                        ? "<br><span style='color:#8a8a6a'>— " + escapeHtml(a.author) + "</span>" : "";
+                    JLabel text = new JLabel("<html>" + pin + escapeHtml(a.message) + author + "</html>");
                     text.setFont(text.getFont().deriveFont(11f));
                     text.setForeground(ACCENT_GOLD_BRIGHT);
                     card.add(text, BorderLayout.CENTER);
@@ -463,6 +500,13 @@ public class ClanPanel extends PluginPanel
             announcementsPanel.revalidate();
             announcementsPanel.repaint();
         });
+    }
+
+    /** Minimal HTML escape so announcement text renders literally inside the JLabel HTML. */
+    private static String escapeHtml(String s)
+    {
+        if (s == null) return "";
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 
     /**
@@ -602,27 +646,40 @@ public class ClanPanel extends PluginPanel
                     String icon;
                     String color;
                     String desc;
+                    String detail = entry.detail == null ? "" : entry.detail;
                     switch (entry.type)
                     {
-                        case "achievement":
-                            icon = "\u2605"; // star
-                            color = "#FFD700";
-                            desc = entry.rsn + ": " + entry.detail;
+                        case "join":
+                            icon = "+";
+                            color = "#4CAF50";
+                            desc = entry.rsn + " joined the clan";
+                            break;
+                        case "leave":
+                            icon = "\u2212"; // minus sign
+                            color = "#E05B5B";
+                            desc = entry.rsn + " left the clan";
                             break;
                         case "pb":
                             icon = "\u23f1"; // stopwatch
                             color = "#5B9BD5";
-                            desc = entry.rsn + " " + entry.detail + " " + formatPbTime(entry.value);
+                            desc = entry.rsn + ": " + entry.title + (detail.isEmpty() ? "" : " \u2014 " + detail);
                             break;
                         case "drop":
                             icon = "$";
-                            color = "#4CAF50";
-                            desc = entry.rsn + ": " + entry.detail + " (" + formatXp(entry.value) + " gp)";
+                            color = "#FFD700";
+                            desc = entry.rsn + ": " + entry.title
+                                + (entry.value > 0 ? " (" + formatXp(entry.value) + " gp)" : "")
+                                + (detail.isEmpty() ? "" : " " + detail);
+                            break;
+                        case "clog":
+                            icon = "\u2605"; // star
+                            color = "#C77DFF";
+                            desc = entry.rsn + ": " + entry.title + (detail.isEmpty() ? "" : " (" + detail + ")");
                             break;
                         default:
                             icon = "\u2022";
                             color = "#888888";
-                            desc = entry.rsn + " " + entry.detail;
+                            desc = entry.rsn + " " + entry.title;
                     }
 
                     JLabel label = new JLabel("<html><span style='color:" + color + "'>" + icon
@@ -647,11 +704,6 @@ public class ClanPanel extends PluginPanel
         });
     }
 
-    private String formatPbTime(long timeMs)
-    {
-        long totalSec = timeMs / 1000;
-        return String.format("%d:%02d.%02d", totalSec / 60, totalSec % 60, (timeMs % 1000) / 10);
-    }
 
     private String formatTimeAgo(String isoDate)
     {
@@ -961,6 +1013,30 @@ public class ClanPanel extends PluginPanel
     public void setOnClearHiscoreCache(Runnable callback)
     {
         this.onClearHiscoreCache = callback;
+    }
+
+    public void setOnPbModeChange(java.util.function.Consumer<String> callback)
+    {
+        this.onPbModeChange = callback;
+    }
+
+    public void setOnActivityFilterChange(java.util.function.Consumer<String> callback)
+    {
+        this.onActivityFilterChange = callback;
+    }
+
+    /** Map an activity filter dropdown label to the API's ?type= CSV ("" = everything). */
+    private static String activityTypeFilter(String label)
+    {
+        if (label == null) return "";
+        switch (label)
+        {
+            case "Joins & Leaves": return "join,leave";
+            case "Drops": return "drop";
+            case "Personal Bests": return "pb";
+            case "Collection Log": return "clog";
+            default: return "";
+        }
     }
 
     /**
@@ -1281,6 +1357,31 @@ public class ClanPanel extends PluginPanel
         });
 
         wrapper.add(hiscoreSearchField);
+        wrapper.add(Box.createVerticalStrut(6));
+
+        // ── Mode toggle (All PBs vs Clan-verified only) ──
+        JLabel hiscoreModeLabel = new JLabel("Mode");
+        hiscoreModeLabel.setFont(READABLE_FONT);
+        hiscoreModeLabel.setForeground(new Color(180, 180, 180));
+        hiscoreModeLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        wrapper.add(hiscoreModeLabel);
+        wrapper.add(Box.createVerticalStrut(2));
+
+        hiscoreModeCombo.addItem("All PBs");
+        hiscoreModeCombo.addItem("Clan Only");
+        hiscoreModeCombo.setBackground(new Color(30, 30, 30));
+        hiscoreModeCombo.setForeground(Color.WHITE);
+        hiscoreModeCombo.setFont(READABLE_FONT);
+        hiscoreModeCombo.setAlignmentX(Component.LEFT_ALIGNMENT);
+        hiscoreModeCombo.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
+        hiscoreModeCombo.addActionListener(e ->
+        {
+            if (onPbModeChange != null)
+            {
+                onPbModeChange.accept("Clan Only".equals(hiscoreModeCombo.getSelectedItem()) ? "clan" : "all");
+            }
+        });
+        wrapper.add(hiscoreModeCombo);
         wrapper.add(Box.createVerticalStrut(6));
 
         // ── Boss Group dropdown ──

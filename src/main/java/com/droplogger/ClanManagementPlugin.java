@@ -26,10 +26,14 @@ import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.events.NpcLootReceived;
+import net.runelite.client.plugins.loottracker.LootReceived;
+import net.runelite.client.game.ItemStack;
+import net.runelite.http.api.loottracker.LootRecordType;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.ui.ClientToolbar;
+import net.runelite.client.ui.DrawManager;
 import net.runelite.client.ui.NavigationButton;
 import net.runelite.client.util.ImageUtil;
 import net.runelite.client.util.Text;
@@ -47,6 +51,7 @@ import java.io.FileWriter;
 import java.lang.reflect.Type;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
@@ -69,10 +74,25 @@ import java.util.regex.Pattern;
 )
 public class ClanManagementPlugin extends Plugin
 {
-    private static final Pattern VALUABLE_DROP_PATTERN =
-        Pattern.compile("Valuable drop: (.+?) \\(([\\d,]+) coins\\)");
     private static final Pattern COLLECTION_LOG_PATTERN =
         Pattern.compile("New item added to your collection log: (.+)");
+
+    // Pets aren't loot-table items (they arrive via a clog unlock, not LootReceived), so they're
+    // matched by name here and posted as drops too. Add new pets to this set as they release.
+    private static final Set<String> PET_NAMES = new HashSet<>(Arrays.asList(
+        "abyssal orphan", "abyssal protector", "baby chinchompa", "baby mole", "baron",
+        "beaver", "bloodhound", "butch", "callisto cub", "chompy chick", "giant squirrel",
+        "great blue heron", "hellpuppy", "heron", "herbi", "huberte", "ikkle hydra",
+        "jal-nib-rek", "kalphite princess", "lil' creator", "lil' zik", "lil'viathan",
+        "little nightmare", "muphin", "nexling", "nid", "noon", "olmlet",
+        "pet chaos elemental", "pet dagannoth prime", "pet dagannoth rex", "pet dagannoth supreme",
+        "pet dark core", "pet general graardor", "pet k'ril tsutsaroth", "pet kraken",
+        "pet kree'arra", "pet penance queen", "pet smoke devil", "pet snakeling", "pet zilyana",
+        "phoenix", "prince black dragon", "quetzin", "rift guardian", "rock golem", "rocky",
+        "scorpia's offspring", "scurry", "skotos", "smol heredit", "smolcano", "sraracha",
+        "tangleroot", "tiny tempor", "tumeken's guardian", "tzrek-jad", "venenatis spiderling",
+        "vet'ion jr.", "vorki", "wisp", "youngllef"
+    ));
     private static final Pattern CLUE_COMPLETION_PATTERN =
         Pattern.compile("You have completed (\\d+) (easy|medium|hard|elite|master|beginner) Treasure Trails\\.");
     private static final Pattern CLOG_PB_PATTERN =
@@ -98,6 +118,9 @@ public class ClanManagementPlugin extends Plugin
 
     @Inject
     private ScheduledExecutorService executor;
+
+    @Inject
+    private DrawManager drawManager;
 
     @Inject
     private BoardDataService boardDataService;
@@ -139,6 +162,9 @@ public class ClanManagementPlugin extends Plugin
     // In-memory hiscore cache: categoryKey → list of entries
     private final Map<String, List<HiscoreEntry>> hiscoreCacheV2 = Collections.synchronizedMap(new LinkedHashMap<>());
     private volatile boolean hiscoreV2BatchFetched = false; // true once allTopTimes has been called this session
+    private volatile String pbMode = "all"; // speed-times mode: "all" (true PBs across sources) or "clan" (clan-verified live only)
+    private volatile String activityFilter = ""; // activity feed type filter: "" = all, else CSV e.g. "drop,pb"
+    private volatile boolean platformIsAdmin = false; // caller's key owner has admin/manage_announcements (from bootstrap permissions)
 
     // Server-side config fetched from Settings tab
     private int fetchedMinDropValue = 100000;
@@ -161,6 +187,7 @@ public class ClanManagementPlugin extends Plugin
     // Collection log sync state (automatic — like WikiSync/RuneProfile)
     private final Map<Integer, ClogItem> clogSyncItems = Collections.synchronizedMap(new LinkedHashMap<>());
     private Map<Integer, String[]> clogItemCategoryMap = null; // itemId -> [tab, category]
+    private Map<String, Integer> clogNameToId = null; // lowercase item name -> itemId (for pet icons)
     private int clogDebounceTicksRemaining = -1;
     private boolean clogSearchPending = false;
     private int clogRawEventCount = 0;
@@ -347,7 +374,56 @@ public class ClanManagementPlugin extends Plugin
             activeEventId = "";
         }
 
+        // Permissions — the caller key owner's clan permissions drive admin-section unlock.
+        platformIsAdmin = false;
+        if (response.has("permissions") && response.get("permissions").isJsonArray())
+        {
+            JsonArray perms = response.getAsJsonArray("permissions");
+            for (int i = 0; i < perms.size(); i++)
+            {
+                String perm = perms.get(i).getAsString();
+                if ("admin".equals(perm) || "manage_announcements".equals(perm))
+                {
+                    platformIsAdmin = true;
+                    break;
+                }
+            }
+        }
+
+        // Announcements — render on the home tab.
+        List<PlatformApiService.Announcement> anns = new ArrayList<>();
+        if (response.has("announcements") && response.get("announcements").isJsonArray())
+        {
+            JsonArray arr = response.getAsJsonArray("announcements");
+            for (int i = 0; i < arr.size(); i++)
+            {
+                JsonObject o = arr.get(i).getAsJsonObject();
+                anns.add(new PlatformApiService.Announcement(
+                    o.has("id") ? o.get("id").getAsString() : "",
+                    o.has("message") && !o.get("message").isJsonNull() ? o.get("message").getAsString() : "",
+                    o.has("author") && !o.get("author").isJsonNull() ? o.get("author").getAsString() : null,
+                    o.has("pinned") && o.get("pinned").getAsBoolean()));
+            }
+        }
+        panel.setAnnouncements(anns);
+
+        // Now that permissions are known, unlock the admin tab if this key's owner is an admin.
+        if (platformIsAdmin)
+        {
+            javax.swing.SwingUtilities.invokeLater(this::setupAdminPanel);
+        }
+
         log.info("Bootstrap config loaded from platform");
+    }
+
+    /** Re-fetch announcements and refresh both the home display and the admin management list. */
+    private void refreshAnnouncements()
+    {
+        if (!isPlatformConfigured()) return;
+        List<PlatformApiService.Announcement> anns = platformApiService.fetchAnnouncements(
+            getPlatformUrl(), getPlatformKey(), getPlatformSlug());
+        panel.setAnnouncements(anns);
+        if (adminPanel != null) adminPanel.setAnnouncementsList(anns);
     }
 
     /** Get the clan name — hardcoded to Solus. */
@@ -365,6 +441,16 @@ public class ClanManagementPlugin extends Plugin
         panel.setConnected(isPlatformConfigured());
         panel.setOnRefresh(() -> executor.submit(this::refreshData));
         panel.setOnFetchTimes((cat, timesPanel) -> executor.submit(() -> fetchAndDisplayTimesV2(cat, timesPanel)));
+        panel.setOnPbModeChange(mode -> executor.submit(() ->
+        {
+            pbMode = mode;
+            batchFetchAllHiscores(); // re-fetch in the new mode (updates the recent list)
+        }));
+        panel.setOnActivityFilterChange(filter -> executor.submit(() ->
+        {
+            activityFilter = filter;
+            refreshClanActivity();
+        }));
         panel.setOnClearHiscoreCache(() ->
         {
             hiscoreCacheV2.clear();
@@ -625,11 +711,9 @@ public class ClanManagementPlugin extends Plugin
             lastKillTime = System.currentTimeMillis();
         }
 
-        // ── Drop Logging (clan drop log) ──
-        if (config.enableDrops())
-        {
-            handleDropLogging(rawMessage);
-        }
+        // Drops are logged from the LootReceived event (onLootReceived) instead of the in-game
+        // "Valuable drop" chat line — that gives the real monster (no more "Unknown") + item IDs,
+        // so we can post only collection-log / whitelisted items rather than every valuable drop.
 
         // ── Collection Log Detection (for clan drop log) ──
         if (config.enableDrops())
@@ -1336,84 +1420,62 @@ public class ClanManagementPlugin extends Plugin
         ));
     }
 
-    private void handleDropLogging(String message)
+    /**
+     * Capture the current game frame (when capture=true) and run the callback with a scaled PNG
+     * as base64 — or null when disabled / capture fails. Event-driven (no sleep): the frame
+     * listener fires on the next render, then encoding + the callback run off the client thread.
+     * The screenshot is uploaded to OUR API only; the plugin never sends it to Discord.
+     */
+    private void withScreenshot(boolean capture, java.util.function.Consumer<String> callback)
     {
-        Matcher matcher = VALUABLE_DROP_PATTERN.matcher(message);
-        if (!matcher.find())
+        if (!capture || drawManager == null)
         {
+            executor.submit(() -> callback.accept(null));
             return;
         }
-
-        String itemName = matcher.group(1);
-        int value = Integer.parseInt(matcher.group(2).replace(",", ""));
-
-        if (value < fetchedMinDropValue)
+        drawManager.requestNextFrameListener(image ->
         {
-            return;
-        }
-
-        // Only log items that are on the clan whitelist (if whitelist is loaded)
-        if (cachedClanWhitelist != null && !cachedClanWhitelist.isEmpty())
-        {
-            boolean onWhitelist = false;
-            for (Map<String, String> entry : cachedClanWhitelist)
+            BufferedImage copy;
+            try
             {
-                String whitelistName = entry.get("item");
-                if (whitelistName != null && whitelistName.equalsIgnoreCase(itemName))
-                {
-                    onWhitelist = true;
-                    break;
-                }
+                copy = new BufferedImage(image.getWidth(null), image.getHeight(null), BufferedImage.TYPE_INT_RGB);
+                java.awt.Graphics2D g = copy.createGraphics();
+                g.drawImage(image, 0, 0, null);
+                g.dispose();
             }
-            if (!onWhitelist)
+            catch (Exception e)
             {
-                log.debug("Drop '{}' not on whitelist, skipping", itemName);
+                log.warn("Screenshot capture failed", e);
+                executor.submit(() -> callback.accept(null));
                 return;
             }
-        }
-
-        if (!isPlatformConfigured())
-        {
-            return;
-        }
-
-        String playerName = client.getLocalPlayer() != null
-            ? client.getLocalPlayer().getName()
-            : "Unknown";
-
-        WorldPoint wp = client.getLocalPlayer() != null
-            ? client.getLocalPlayer().getWorldLocation()
-            : new WorldPoint(0, 0, 0);
-
-        // Only attribute to last NPC if killed recently (within 30s) — avoids
-        // clue casket drops being attributed to a stale NPC like "Brassican Mage"
-        String npcSource = (System.currentTimeMillis() - lastKillTime < 30_000)
-            ? lastKilledNpc : "Unknown";
-
-        DropEntry drop = new DropEntry(
-            itemName, value, npcSource, lastKillCount,
-            wp.getX(), wp.getY(), wp.getPlane(), playerName
-        );
-
-        executor.submit(() ->
-        {
-            platformApiService.submitDrop(
-                getPlatformUrl(),
-                getPlatformKey(),
-                getPlatformSlug(),
-                drop
-            );
-            log.debug("Drop logged: {} ({} gp)", itemName, value);
+            final BufferedImage captured = copy;
+            executor.submit(() ->
+            {
+                String b64 = null;
+                try { b64 = encodeScaledPng(captured, 800); }
+                catch (Exception e) { log.warn("Screenshot encode failed", e); }
+                callback.accept(b64);
+            });
         });
+    }
 
-        // Chat confirmation
-        if (config.chatConfirmation())
+    private String encodeScaledPng(BufferedImage src, int maxWidth) throws java.io.IOException
+    {
+        BufferedImage img = src;
+        if (src.getWidth() > maxWidth)
         {
-            clientThread.invokeLater(() ->
-                client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
-                    "[" + getClanName() + "] Drop logged: " + itemName + " (" + value + " gp)", "")
-            );
+            int h = (int) ((double) src.getHeight() * maxWidth / src.getWidth());
+            BufferedImage scaled = new BufferedImage(maxWidth, h, BufferedImage.TYPE_INT_RGB);
+            java.awt.Graphics2D g = scaled.createGraphics();
+            g.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION, java.awt.RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+            g.drawImage(src, 0, 0, maxWidth, h, null);
+            g.dispose();
+            img = scaled;
         }
+        java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+        javax.imageio.ImageIO.write(img, "png", bos);
+        return java.util.Base64.getEncoder().encodeToString(bos.toByteArray());
     }
 
     private void handleCollectionLogEntry(String cleanedMessage)
@@ -1429,27 +1491,37 @@ public class ClanManagementPlugin extends Plugin
             ? client.getLocalPlayer().getName()
             : "Unknown";
 
-        WorldPoint wp = client.getLocalPlayer() != null
-            ? client.getLocalPlayer().getWorldLocation()
-            : new WorldPoint(0, 0, 0);
-
-        // Create a drop entry with 0 value (collection log entries don't always have a value)
-        DropEntry drop = new DropEntry(
-            itemName, 0, lastKilledNpc, lastKillCount,
-            wp.getX(), wp.getY(), wp.getPlane(), playerName
-        );
-
-        if (isPlatformConfigured())
+        if (!isPlatformConfigured())
         {
-            final String pRsn = playerName;
-            final String pItem = itemName;
-            executor.submit(() -> platformApiService.submitCollectionLogEntry(
-                getPlatformUrl(),
-                getPlatformKey(),
-                getPlatformSlug(),
-                pRsn,
-                pItem
-            ));
+            return;
+        }
+
+        final String pRsn = playerName;
+        final String pItem = itemName;
+        executor.submit(() -> platformApiService.submitCollectionLogEntry(
+            getPlatformUrl(), getPlatformKey(), getPlatformSlug(), pRsn, pItem
+        ));
+
+        // Pets arrive as a collection-log unlock rather than loot, so post them as a drop too —
+        // matched by name (PET_NAMES) since they never appear in the LootReceived item list.
+        if (PET_NAMES.contains(itemName.toLowerCase()) && config.enableDrops())
+        {
+            ensureClogCategoryMap();
+            WorldPoint wp = client.getLocalPlayer() != null
+                ? client.getLocalPlayer().getWorldLocation() : new WorldPoint(0, 0, 0);
+            int petItemId = clogNameToId != null ? clogNameToId.getOrDefault(itemName.toLowerCase(), -1) : -1;
+            // Only attribute to the last boss if it was killed recently; otherwise it's a skilling
+            // pet (no associated kill) — avoid mislabeling it with a stale boss name.
+            boolean recentKill = System.currentTimeMillis() - lastKillTime < 60_000
+                && lastKilledNpc != null && !lastKilledNpc.isEmpty();
+            String petSource = recentKill ? lastKilledNpc : "Skilling";
+            DropEntry petDrop = new DropEntry(
+                itemName, 0, petSource, recentKill ? lastKillCount : 0,
+                wp.getX(), wp.getY(), wp.getPlane(), playerName, petItemId
+            );
+            withScreenshot(true, screenshot ->
+                platformApiService.submitDrop(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), petDrop, screenshot));
+            log.debug("Pet drop logged: {} from {}", itemName, lastKilledNpc);
         }
     }
 
@@ -1543,7 +1615,8 @@ public class ClanManagementPlugin extends Plugin
         final boolean finalAllClan = allClanMembers;
         final boolean isNewPb = completion.isPersonalBest();
 
-        executor.submit(() ->
+        // Capture a screenshot only on a genuine new personal best (avoids encoding on every kill).
+        withScreenshot(isNewPb, screenshot ->
         {
             // Submit PB to platform API — one entry per party member
             // "live" = all party members in clan chat (clan-verified)
@@ -1578,7 +1651,7 @@ public class ClanManagementPlugin extends Plugin
                     if (firstMember)
                     {
                         clanRank = platformApiService.submitPbSync(getPlatformUrl(), getPlatformKey(), getPlatformSlug(),
-                            member.trim(), categoryKey, finalPartySize, timeMs, source);
+                            member.trim(), categoryKey, finalPartySize, timeMs, source, screenshot);
                         firstMember = false;
                     }
                     else
@@ -1723,6 +1796,108 @@ public class ClanManagementPlugin extends Plugin
         }
     }
 
+    /**
+     * Log clan drops from the actual loot event. Using LootReceived (vs the "Valuable drop" chat
+     * line) gives the real source name and exact item IDs, so we attribute the monster correctly
+     * AND post only the rare/unique items — collection-log entries or curated whitelist items —
+     * instead of every valuable drop (e.g. a bulk green d'hide stack from Corp).
+     */
+    @Subscribe
+    public void onLootReceived(LootReceived event)
+    {
+        if (isNonStandardWorld()) return;
+        if (!config.enableDrops() || !isPlatformConfigured()) return;
+        if (event.getItems() == null || event.getItems().isEmpty()) return;
+
+        // LootReceived fires on the client thread, so we can safely build the clog item set here.
+        ensureClogCategoryMap();
+
+        String source = event.getName();
+        int killCount = event.getType() == LootRecordType.NPC ? pbDetector.getLastKillCount() : 0;
+        String playerName = client.getLocalPlayer() != null ? client.getLocalPlayer().getName() : "Unknown";
+        WorldPoint wp = client.getLocalPlayer() != null
+            ? client.getLocalPlayer().getWorldLocation() : new WorldPoint(0, 0, 0);
+
+        for (ItemStack stack : event.getItems())
+        {
+            int itemId = stack.getId();
+            if (!isPostableDrop(itemId)) continue;
+
+            String itemName = itemManager.getItemComposition(itemId).getName();
+            long total = (long) itemManager.getItemPrice(itemId) * Math.max(1, stack.getQuantity());
+            int value = (int) Math.min(total, Integer.MAX_VALUE);
+
+            DropEntry drop = new DropEntry(itemName, value, source, killCount,
+                wp.getX(), wp.getY(), wp.getPlane(), playerName, itemId);
+
+            withScreenshot(true, screenshot ->
+                platformApiService.submitDrop(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), drop, screenshot));
+            log.debug("Rare drop logged: {} x{} from {}", itemName, stack.getQuantity(), source);
+        }
+    }
+
+    /** A drop is postable if it's a collection-log item OR on the clan's curated whitelist. */
+    private boolean isPostableDrop(int itemId)
+    {
+        if (clogItemCategoryMap != null && clogItemCategoryMap.containsKey(itemId))
+        {
+            return true;
+        }
+        if (cachedClanWhitelist != null && !cachedClanWhitelist.isEmpty())
+        {
+            String name = itemManager.getItemComposition(itemId).getName();
+            for (Map<String, String> entry : cachedClanWhitelist)
+            {
+                String wl = entry.get("item");
+                if (wl != null && wl.equalsIgnoreCase(name)) return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Build the collection-log item-id → [tab, category] map for drop filtering, without the
+     * server catalog sync that buildClogCategoryMap does (that one runs when the clog is opened).
+     * Cheap and cached after the first build; reads game enums so must run on the client thread.
+     */
+    private void ensureClogCategoryMap()
+    {
+        if (clogItemCategoryMap != null) return;
+        try
+        {
+            buildClogDupeRemap();
+            Map<Integer, String[]> map = new HashMap<>();
+            Map<String, Integer> nameToId = new HashMap<>();
+            EnumComposition tabsEnum = client.getEnum(CLOG_TABS_ENUM);
+            for (int tabStructId : tabsEnum.getIntVals())
+            {
+                StructComposition tabStruct = client.getStructComposition(tabStructId);
+                String tabName = tabStruct.getStringValue(PARAM_TAB_NAME);
+                EnumComposition categoriesEnum = client.getEnum(tabStruct.getIntValue(PARAM_TAB_CATEGORIES_ENUM));
+                for (int catStructId : categoriesEnum.getIntVals())
+                {
+                    StructComposition catStruct = client.getStructComposition(catStructId);
+                    String categoryName = catStruct.getStringValue(PARAM_CATEGORY_NAME);
+                    EnumComposition itemsEnum = client.getEnum(catStruct.getIntValue(PARAM_CATEGORY_ITEMS_ENUM));
+                    for (int rawItemId : itemsEnum.getIntVals())
+                    {
+                        int itemId = remapClogId(rawItemId);
+                        map.put(itemId, new String[]{tabName, categoryName});
+                        String nm = itemManager.getItemComposition(itemId).getName();
+                        if (nm != null && !nm.equals("null")) nameToId.put(nm.toLowerCase(), itemId);
+                    }
+                }
+            }
+            clogItemCategoryMap = map;
+            clogNameToId = nameToId;
+            log.debug("Built clog item map for drop filtering: {} items", map.size());
+        }
+        catch (Exception e)
+        {
+            log.warn("Failed to build clog item map for drop filtering", e);
+        }
+    }
+
     private void startDataRefresh()
     {
         if (refreshTask != null)
@@ -1775,6 +1950,10 @@ public class ClanManagementPlugin extends Plugin
 
         // Auto-refresh WOM data on same cycle
         refreshWomData();
+
+        // Re-fetch speed times each cycle so the recent list updates live as other players sync
+        // their PBs (previously only fetched once per session, so new times never appeared).
+        batchFetchAllHiscores();
         refreshClanActivity();
         refreshEventLeaderboard();
         refreshStatusBoxes();
@@ -1826,7 +2005,7 @@ public class ClanManagementPlugin extends Plugin
         try
         {
             Map<String, List<HiscoreEntry>> allTimes = platformApiService.fetchAllPbs(
-                getPlatformUrl(), getPlatformKey(), getPlatformSlug());
+                getPlatformUrl(), getPlatformKey(), getPlatformSlug(), pbMode);
             if (allTimes != null)
             {
                 hiscoreCacheV2.putAll(allTimes);
@@ -2116,7 +2295,7 @@ public class ClanManagementPlugin extends Plugin
         try
         {
             List<PlatformApiService.ActivityItem> activity = platformApiService.fetchActivity(
-                getPlatformUrl(), getPlatformKey(), getPlatformSlug(), 15);
+                getPlatformUrl(), getPlatformKey(), getPlatformSlug(), 25, activityFilter);
             panel.updateActivity(activity);
         }
         catch (Exception e)
@@ -2330,14 +2509,44 @@ public class ClanManagementPlugin extends Plugin
 
     private void setupAdminPanel()
     {
+        if (adminPanel != null)
+        {
+            return; // already shown (e.g. set up once from the legacy key, then again post-bootstrap)
+        }
+
         String adminKey = config.adminApiKey();
-        if (adminKey == null || adminKey.isEmpty())
+        boolean hasLegacyAdminKey = adminKey != null && !adminKey.isEmpty();
+        // Unlock admin via the personal key owner's Discord role (platformIsAdmin); keep the
+        // legacy shared admin key working as an owner fallback.
+        if (!platformIsAdmin && !hasLegacyAdminKey)
         {
             return;
         }
 
         this.adminPanel = new AdminPanel();
         panel.showAdminTab(adminPanel);
+
+        // Announcements — create/edit/pin/delete via the platform (uses the caller's key).
+        adminPanel.setOnCreateAnnouncement(a -> executor.submit(() -> {
+            if (platformApiService.createAnnouncement(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), (String) a[0], (Boolean) a[1]))
+                refreshAnnouncements();
+            else adminPanel.setStatus("Failed to post announcement");
+        }));
+        adminPanel.setOnEditAnnouncement(a -> executor.submit(() -> {
+            if (platformApiService.updateAnnouncement(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), a[0], a[1], null))
+                refreshAnnouncements();
+            else adminPanel.setStatus("Failed to edit announcement");
+        }));
+        adminPanel.setOnTogglePinAnnouncement(a -> executor.submit(() -> {
+            if (platformApiService.updateAnnouncement(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), (String) a[0], null, (Boolean) a[1]))
+                refreshAnnouncements();
+        }));
+        adminPanel.setOnDeleteAnnouncement(id -> executor.submit(() -> {
+            if (platformApiService.deleteAnnouncement(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), id))
+                refreshAnnouncements();
+            else adminPanel.setStatus("Failed to delete announcement");
+        }));
+        executor.submit(this::refreshAnnouncements);
 
         // Load shared settings — uses platform bootstrap data
         adminPanel.setOnLoadSettings(() -> executor.submit(() -> {

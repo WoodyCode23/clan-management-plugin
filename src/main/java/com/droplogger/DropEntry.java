@@ -13,9 +13,16 @@ public class DropEntry
     private final int plane;
     private final Instant timestamp;
     private final String playerName;
+    private final int itemId;
 
     public DropEntry(String itemName, int value, String monsterName, int killCount,
                      int worldX, int worldY, int plane, String playerName)
+    {
+        this(itemName, value, monsterName, killCount, worldX, worldY, plane, playerName, -1);
+    }
+
+    public DropEntry(String itemName, int value, String monsterName, int killCount,
+                     int worldX, int worldY, int plane, String playerName, int itemId)
     {
         this.itemName = itemName;
         this.value = value;
@@ -26,6 +33,7 @@ public class DropEntry
         this.plane = plane;
         this.timestamp = Instant.now();
         this.playerName = playerName;
+        this.itemId = itemId;
     }
 
     public String getItemName() { return itemName; }
@@ -37,4 +45,5 @@ public class DropEntry
     public int getPlane() { return plane; }
     public Instant getTimestamp() { return timestamp; }
     public String getPlayerName() { return playerName; }
+    public int getItemId() { return itemId; }
 }

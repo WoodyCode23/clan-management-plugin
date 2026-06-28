@@ -5,6 +5,8 @@ import net.runelite.client.ui.ColorScheme;
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import java.awt.*;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.function.Consumer;
 
 public class AdminPanel extends JPanel
@@ -26,6 +28,15 @@ public class AdminPanel extends JPanel
     // ── Rotate API Key ──
     private final JTextField newApiKeyField = new JTextField();
     private final JLabel newBoardCodeLabel = new JLabel(" ");
+
+    // ── Announcements ──
+    private final JPanel announcementsListPanel = new JPanel();
+    private final JTextArea announcementInput = new JTextArea(2, 20);
+    private final JCheckBox announcementPinned = new JCheckBox("Pin");
+    private Consumer<Object[]> onCreateAnnouncement;     // {String message, Boolean pinned}
+    private Consumer<String[]> onEditAnnouncement;       // {id, message}
+    private Consumer<Object[]> onTogglePinAnnouncement;  // {String id, Boolean pinned}
+    private Consumer<String> onDeleteAnnouncement;       // id
 
     // Callbacks
     private Consumer<String[]> onSaveSettings;
@@ -51,6 +62,50 @@ public class AdminPanel extends JPanel
         add(Box.createVerticalStrut(8));
 
         // Shared settings are managed via the web dashboard
+
+        // ══════════════════════════════════
+        // Announcements
+        // ══════════════════════════════════
+        add(createSectionTitle("Announcements"));
+        add(Box.createVerticalStrut(4));
+
+        announcementsListPanel.setLayout(new BoxLayout(announcementsListPanel, BoxLayout.Y_AXIS));
+        announcementsListPanel.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        announcementsListPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        add(announcementsListPanel);
+        add(Box.createVerticalStrut(4));
+
+        announcementInput.setLineWrap(true);
+        announcementInput.setWrapStyleWord(true);
+        announcementInput.setFont(SMALL_FONT);
+        JScrollPane inputScroll = new JScrollPane(announcementInput);
+        inputScroll.setAlignmentX(Component.LEFT_ALIGNMENT);
+        inputScroll.setMaximumSize(new Dimension(Integer.MAX_VALUE, 44));
+        add(inputScroll);
+        add(Box.createVerticalStrut(2));
+
+        JPanel addRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+        addRow.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        addRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+        addRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+        announcementPinned.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        announcementPinned.setForeground(new Color(160, 160, 160));
+        announcementPinned.setFont(SMALL_FONT);
+        JButton postBtn = createButton("Post");
+        postBtn.addActionListener(e -> {
+            String msg = announcementInput.getText().trim();
+            if (msg.isEmpty()) { setStatus("Enter an announcement"); return; }
+            if (onCreateAnnouncement != null) onCreateAnnouncement.accept(new Object[]{msg, announcementPinned.isSelected()});
+            announcementInput.setText("");
+            announcementPinned.setSelected(false);
+        });
+        addRow.add(announcementPinned);
+        addRow.add(postBtn);
+        add(addRow);
+
+        add(Box.createVerticalStrut(8));
+        add(createSeparator());
+        add(Box.createVerticalStrut(6));
 
         // ══════════════════════════════════
         // Weekly Events
@@ -311,6 +366,96 @@ public class AdminPanel extends JPanel
     public void setOnStartEvent(Consumer<String[]> cb) { this.onStartEvent = cb; }
     public void setOnEndEvent(Runnable cb) { this.onEndEvent = cb; }
     public void setOnSyncRoster(Runnable cb) { this.onSyncRoster = cb; }
+    public void setOnCreateAnnouncement(Consumer<Object[]> cb) { this.onCreateAnnouncement = cb; }
+    public void setOnEditAnnouncement(Consumer<String[]> cb) { this.onEditAnnouncement = cb; }
+    public void setOnTogglePinAnnouncement(Consumer<Object[]> cb) { this.onTogglePinAnnouncement = cb; }
+    public void setOnDeleteAnnouncement(Consumer<String> cb) { this.onDeleteAnnouncement = cb; }
+
+    /** Populate the admin announcements list with edit/pin/delete controls per row. */
+    public void setAnnouncementsList(List<PlatformApiService.Announcement> items)
+    {
+        SwingUtilities.invokeLater(() -> {
+            List<PlatformApiService.Announcement> list = items != null ? items : new ArrayList<>();
+            announcementsListPanel.removeAll();
+            if (list.isEmpty())
+            {
+                JLabel none = new JLabel("No announcements yet");
+                none.setFont(SMALL_ITALIC);
+                none.setForeground(new Color(120, 120, 120));
+                none.setAlignmentX(Component.LEFT_ALIGNMENT);
+                announcementsListPanel.add(none);
+            }
+            else
+            {
+                for (PlatformApiService.Announcement a : list)
+                {
+                    announcementsListPanel.add(buildAnnouncementRow(a));
+                    announcementsListPanel.add(Box.createVerticalStrut(2));
+                }
+            }
+            announcementsListPanel.revalidate();
+            announcementsListPanel.repaint();
+        });
+    }
+
+    private JPanel buildAnnouncementRow(PlatformApiService.Announcement a)
+    {
+        JPanel row = new JPanel(new BorderLayout(4, 0));
+        row.setBackground(new Color(35, 35, 35));
+        row.setBorder(new EmptyBorder(3, 5, 3, 5));
+        row.setAlignmentX(Component.LEFT_ALIGNMENT);
+        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 48));
+
+        String pin = a.pinned ? "📌 " : ""; // pushpin
+        JLabel text = new JLabel("<html>" + pin + escapeHtml(a.message) + "</html>");
+        text.setFont(SMALL_FONT);
+        text.setForeground(new Color(200, 200, 200));
+        row.add(text, BorderLayout.CENTER);
+
+        JPanel btns = new JPanel(new FlowLayout(FlowLayout.RIGHT, 2, 0));
+        btns.setBackground(new Color(35, 35, 35));
+
+        JButton edit = miniButton("Edit");
+        edit.addActionListener(e -> {
+            Object updated = JOptionPane.showInputDialog(this, "Edit announcement:", "Edit Announcement",
+                JOptionPane.PLAIN_MESSAGE, null, null, a.message);
+            if (updated != null && !updated.toString().trim().isEmpty() && onEditAnnouncement != null)
+            {
+                onEditAnnouncement.accept(new String[]{a.id, updated.toString().trim()});
+            }
+        });
+
+        JButton pin2 = miniButton(a.pinned ? "Unpin" : "Pin");
+        pin2.addActionListener(e -> {
+            if (onTogglePinAnnouncement != null) onTogglePinAnnouncement.accept(new Object[]{a.id, !a.pinned});
+        });
+
+        JButton del = miniButton("Del");
+        del.addActionListener(e -> {
+            if (confirmAction("Delete this announcement?") && onDeleteAnnouncement != null) onDeleteAnnouncement.accept(a.id);
+        });
+
+        btns.add(edit);
+        btns.add(pin2);
+        btns.add(del);
+        row.add(btns, BorderLayout.EAST);
+        return row;
+    }
+
+    private JButton miniButton(String text)
+    {
+        JButton b = new JButton(text);
+        b.setFont(new Font("Segoe UI", Font.PLAIN, 9));
+        b.setMargin(new Insets(1, 4, 1, 4));
+        b.setFocusPainted(false);
+        return b;
+    }
+
+    private static String escapeHtml(String s)
+    {
+        if (s == null) return "";
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+    }
 
     public void setNewBoardCode(String code)
     {

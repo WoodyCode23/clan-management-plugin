@@ -64,17 +64,25 @@ public class PlatformApiService
     /**
      * Submit a drop to the platform API.
      */
-    public void submitDrop(String baseUrl, String apiKey, String clanSlug, DropEntry drop)
+    public void submitDrop(String baseUrl, String apiKey, String clanSlug, DropEntry drop, String screenshotB64)
     {
         JsonObject payload = new JsonObject();
         payload.addProperty("rsn", drop.getPlayerName());
         addAccountHash(payload);
         payload.addProperty("itemName", drop.getItemName());
+        if (drop.getItemId() > 0)
+        {
+            payload.addProperty("itemId", drop.getItemId());
+        }
         payload.addProperty("value", drop.getValue());
         payload.addProperty("monsterName", drop.getMonsterName());
         if (drop.getKillCount() > 0)
         {
             payload.addProperty("killCount", drop.getKillCount());
+        }
+        if (screenshotB64 != null)
+        {
+            payload.addProperty("screenshot", screenshotB64);
         }
 
         postAsync(baseUrl + "/clans/" + clanSlug + "/drops", apiKey, payload, "Platform drop");
@@ -111,7 +119,7 @@ public class PlatformApiService
      * or 0 on failure / non-live. Call off the client thread (it blocks on the network).
      */
     public int submitPbSync(String baseUrl, String apiKey, String clanSlug,
-                            String rsn, String bossKey, int teamSize, int timeMs, String source)
+                            String rsn, String bossKey, int teamSize, int timeMs, String source, String screenshotB64)
     {
         JsonObject payload = new JsonObject();
         payload.addProperty("rsn", rsn);
@@ -120,6 +128,10 @@ public class PlatformApiService
         payload.addProperty("teamSize", teamSize);
         payload.addProperty("timeMs", timeMs);
         payload.addProperty("source", source);
+        if (screenshotB64 != null)
+        {
+            payload.addProperty("screenshot", screenshotB64);
+        }
 
         Request request = new Request.Builder()
             .url(baseUrl + "/clans/" + clanSlug + "/pbs")
@@ -356,31 +368,39 @@ public class PlatformApiService
         return entries;
     }
 
-    /** A clan activity feed item from the backend (replaces Wise Old Man's group activity). */
+    /** A clan activity feed item from the backend (joins, leaves, drops, PBs, clog unlocks). */
     public static class ActivityItem
     {
-        public final String type;     // "achievement" | "pb" | "drop"
+        public final String type;     // "join" | "leave" | "drop" | "pb" | "clog"
         public final String rsn;
-        public final String detail;
-        public final long value;       // pb: timeMs; drop: gp value; achievement: 0
+        public final String title;    // item / boss label / "Joined the clan"
+        public final String detail;   // "from Zulrah", formatted time, category, rank — may be ""
+        public final long value;      // pb: timeMs; drop: gp value; else 0
+        public final int itemId;      // drop/clog icon id, -1 if none
         public final String createdAt;
 
-        public ActivityItem(String type, String rsn, String detail, long value, String createdAt)
+        public ActivityItem(String type, String rsn, String title, String detail, long value, int itemId, String createdAt)
         {
             this.type = type;
             this.rsn = rsn;
+            this.title = title;
             this.detail = detail;
             this.value = value;
+            this.itemId = itemId;
             this.createdAt = createdAt;
         }
     }
 
-    /** Fetch the clan activity feed (recent achievements, PBs, notable drops) from the backend. */
-    public List<ActivityItem> fetchActivity(String baseUrl, String apiKey, String clanSlug, int limit)
+    /**
+     * Fetch the clan activity feed from the backend. typeFilter is an optional comma-separated
+     * subset (e.g. "drop,pb" or "join,leave"); null/empty returns everything.
+     */
+    public List<ActivityItem> fetchActivity(String baseUrl, String apiKey, String clanSlug, int limit, String typeFilter)
     {
-        HttpUrl url = HttpUrl.parse(baseUrl + "/clans/" + clanSlug + "/activity").newBuilder()
-            .addQueryParameter("limit", String.valueOf(limit)).build();
-        Request request = new Request.Builder().url(url)
+        HttpUrl.Builder b = HttpUrl.parse(baseUrl + "/clans/" + clanSlug + "/activity").newBuilder()
+            .addQueryParameter("limit", String.valueOf(limit));
+        if (typeFilter != null && !typeFilter.isEmpty()) b.addQueryParameter("type", typeFilter);
+        Request request = new Request.Builder().url(b.build())
             .header("Authorization", "Bearer " + apiKey).get().build();
         List<ActivityItem> out = new ArrayList<>();
         try (Response response = httpClient.newCall(request).execute())
@@ -394,8 +414,10 @@ public class PlatformApiService
                 out.add(new ActivityItem(
                     o.has("type") ? o.get("type").getAsString() : "",
                     o.has("rsn") ? o.get("rsn").getAsString() : "",
+                    o.has("title") && !o.get("title").isJsonNull() ? o.get("title").getAsString() : "",
                     o.has("detail") && !o.get("detail").isJsonNull() ? o.get("detail").getAsString() : "",
                     o.has("value") && !o.get("value").isJsonNull() ? o.get("value").getAsLong() : 0,
+                    o.has("itemId") && !o.get("itemId").isJsonNull() ? o.get("itemId").getAsInt() : -1,
                     o.has("createdAt") ? o.get("createdAt").getAsString() : ""));
             }
         }
@@ -469,9 +491,10 @@ public class PlatformApiService
      * Fetch all personal bests from the platform API and group by bossKey.
      * Returns a map of bossKey → list of HiscoreEntry, or null on error.
      */
-    public Map<String, List<HiscoreEntry>> fetchAllPbs(String baseUrl, String apiKey, String clanSlug)
+    public Map<String, List<HiscoreEntry>> fetchAllPbs(String baseUrl, String apiKey, String clanSlug, String mode)
     {
-        String url = baseUrl + "/clans/" + clanSlug + "/pbs";
+        // mode = "clan" (live/clan-verified only) or "all" (each player's best across sources)
+        String url = baseUrl + "/clans/" + clanSlug + "/pbs?mode=" + mode;
         JsonObject response = getSync(url, apiKey);
         if (response == null || !response.has("leaderboard")) return null;
 
@@ -497,10 +520,20 @@ public class PlatformApiService
                 .add(new HiscoreEntry(0, timeSeconds, formattedTime, rsn, "", bossKey, teamSize));
         }
 
-        // Sort each category by time and assign ranks
-        for (List<HiscoreEntry> entries : result.values())
+        // Sort each category by time and assign 1-based ranks. HiscoreEntry.rank is final, so
+        // rebuild each entry with its position (previously every entry kept rank 0 → showed "#0").
+        for (java.util.Map.Entry<String, List<HiscoreEntry>> e : result.entrySet())
         {
+            List<HiscoreEntry> entries = e.getValue();
             entries.sort(java.util.Comparator.comparingDouble(HiscoreEntry::getTimeSeconds));
+            List<HiscoreEntry> ranked = new java.util.ArrayList<>(entries.size());
+            for (int i = 0; i < entries.size(); i++)
+            {
+                HiscoreEntry h = entries.get(i);
+                ranked.add(new HiscoreEntry(i + 1, h.getTimeSeconds(), h.getFormattedTime(),
+                    h.getRsns(), h.getDate(), h.getCategoryKey(), h.getPartySize()));
+            }
+            e.setValue(ranked);
         }
 
         return result;
@@ -526,6 +559,81 @@ public class PlatformApiService
         {
             log.debug("GET {} failed: {}", url, e.getMessage());
             return null;
+        }
+    }
+
+    /** A clan announcement from the backend. */
+    public static class Announcement
+    {
+        public final String id;
+        public final String message;
+        public final String author;
+        public final boolean pinned;
+
+        public Announcement(String id, String message, String author, boolean pinned)
+        {
+            this.id = id;
+            this.message = message;
+            this.author = author;
+            this.pinned = pinned;
+        }
+    }
+
+    /** Fetch the clan's announcements (public list, pinned first). */
+    public List<Announcement> fetchAnnouncements(String baseUrl, String apiKey, String clanSlug)
+    {
+        List<Announcement> out = new ArrayList<>();
+        JsonObject root = getSync(baseUrl + "/clans/" + clanSlug + "/announcements", apiKey);
+        if (root == null || !root.has("announcements")) return out;
+        for (JsonElement el : root.getAsJsonArray("announcements"))
+        {
+            JsonObject o = el.getAsJsonObject();
+            out.add(new Announcement(
+                o.has("id") ? o.get("id").getAsString() : "",
+                o.has("message") && !o.get("message").isJsonNull() ? o.get("message").getAsString() : "",
+                o.has("author") && !o.get("author").isJsonNull() ? o.get("author").getAsString() : null,
+                o.has("pinned") && o.get("pinned").getAsBoolean()));
+        }
+        return out;
+    }
+
+    /** Create an announcement (admin — needs a key whose owner has manage_announcements/admin). */
+    public boolean createAnnouncement(String baseUrl, String apiKey, String clanSlug, String message, boolean pinned)
+    {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("message", message);
+        payload.addProperty("pinned", pinned);
+        return mutateSync("POST", baseUrl + "/clans/" + clanSlug + "/announcements", apiKey, payload);
+    }
+
+    /** Edit an announcement's message and/or pinned flag (null = leave unchanged). */
+    public boolean updateAnnouncement(String baseUrl, String apiKey, String clanSlug, String id, String message, Boolean pinned)
+    {
+        JsonObject payload = new JsonObject();
+        if (message != null) payload.addProperty("message", message);
+        if (pinned != null) payload.addProperty("pinned", pinned.booleanValue());
+        return mutateSync("PATCH", baseUrl + "/clans/" + clanSlug + "/announcements/" + id, apiKey, payload);
+    }
+
+    public boolean deleteAnnouncement(String baseUrl, String apiKey, String clanSlug, String id)
+    {
+        return mutateSync("DELETE", baseUrl + "/clans/" + clanSlug + "/announcements/" + id, apiKey, null);
+    }
+
+    /** Synchronous POST/PATCH/DELETE returning whether the server accepted it. */
+    private boolean mutateSync(String method, String url, String apiKey, JsonObject payload)
+    {
+        Request.Builder b = new Request.Builder().url(url).header("Authorization", "Bearer " + apiKey);
+        if ("DELETE".equals(method)) b.delete();
+        else b.method(method, RequestBody.create(JSON, payload != null ? gson.toJson(payload) : "{}"));
+        try (Response response = httpClient.newCall(b.build()).execute())
+        {
+            return response.isSuccessful();
+        }
+        catch (Exception e)
+        {
+            log.warn("{} {} failed: {}", method, url, e.getMessage());
+            return false;
         }
     }
 
