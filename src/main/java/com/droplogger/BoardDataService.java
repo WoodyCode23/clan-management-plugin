@@ -172,11 +172,11 @@ public class BoardDataService
             JsonObject d = el.getAsJsonObject();
             Map<String, String> item = new LinkedHashMap<>();
             item.put("item", str(d, "itemName"));
-            item.put("source", "");
-            item.put("points", d.has("points") ? String.valueOf(d.get("points").getAsInt()) : "0");
+            item.put("source", d.has("source") && !d.get("source").isJsonNull() ? d.get("source").getAsString() : "");
+            item.put("points", d.has("points") && !d.get("points").isJsonNull() ? String.valueOf(d.get("points").getAsInt()) : "0");
             item.put("dropRate", "");
             item.put("kph", "");
-            item.put("category", "");
+            item.put("category", d.has("category") && !d.get("category").isJsonNull() ? d.get("category").getAsString() : "");
             items.add(item);
         }
         return items;

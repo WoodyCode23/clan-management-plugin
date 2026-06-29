@@ -472,6 +472,11 @@ public class ClanManagementPlugin extends Plugin
             if (!isPlatformConfigured()) return;
             panel.showPlayerClog(rsn, platformApiService.fetchPlayerClog(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), rsn));
         }));
+        panel.setOnLoadCa(rsn -> executor.submit(() ->
+        {
+            if (!isPlatformConfigured()) return;
+            panel.showPlayerCa(rsn, platformApiService.fetchPlayerCa(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), rsn));
+        }));
         panel.setOnClearHiscoreCache(() ->
         {
             hiscoreCacheV2.clear();

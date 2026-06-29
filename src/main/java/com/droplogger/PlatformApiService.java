@@ -227,6 +227,94 @@ public class PlatformApiService
         postAsync(baseUrl + "/clans/" + clanSlug + "/combat-achievements/bulk", apiKey, payload, "Platform CA sync");
     }
 
+    /** One catalog task with the viewed player's completion state. */
+    public static class CaTaskInfo
+    {
+        public final String name;
+        public final String tier;
+        public final String monster;
+        public final String type;
+        public final int points;
+        public final boolean completed;
+        public CaTaskInfo(String name, String tier, String monster, String type, int points, boolean completed)
+        {
+            this.name = name; this.tier = tier; this.monster = monster;
+            this.type = type; this.points = points; this.completed = completed;
+        }
+    }
+
+    /** Per-tier rollup for the viewed player. */
+    public static class CaTier
+    {
+        public final String tier;
+        public final int completed;
+        public final int total;
+        public CaTier(String tier, int completed, int total)
+        {
+            this.tier = tier; this.completed = completed; this.total = total;
+        }
+    }
+
+    /** A player's full Combat Achievements view: every task + per-tier and overall rollups. */
+    public static class PlayerCa
+    {
+        public final int completed;
+        public final int total;
+        public final int pointsEarned;
+        public final int pointsTotal;
+        public final List<CaTier> tiers;
+        public final List<CaTaskInfo> tasks;
+        public PlayerCa(int completed, int total, int pointsEarned, int pointsTotal,
+                        List<CaTier> tiers, List<CaTaskInfo> tasks)
+        {
+            this.completed = completed; this.total = total;
+            this.pointsEarned = pointsEarned; this.pointsTotal = pointsTotal;
+            this.tiers = tiers; this.tasks = tasks;
+        }
+    }
+
+    /** Fetch a player's Combat Achievements (catalog + their completion), or null on error. */
+    public PlayerCa fetchPlayerCa(String baseUrl, String apiKey, String clanSlug, String rsn)
+    {
+        JsonObject root = getSync(baseUrl + "/clans/" + clanSlug + "/combat-achievements/" + encodePath(rsn), apiKey);
+        if (root == null) return null;
+
+        List<CaTaskInfo> tasks = new ArrayList<>();
+        if (root.has("tasks"))
+        {
+            for (JsonElement el : root.getAsJsonArray("tasks"))
+            {
+                JsonObject o = el.getAsJsonObject();
+                tasks.add(new CaTaskInfo(
+                    o.has("name") ? o.get("name").getAsString() : "",
+                    o.has("tier") ? o.get("tier").getAsString() : "",
+                    o.has("monster") && !o.get("monster").isJsonNull() ? o.get("monster").getAsString() : "",
+                    o.has("type") && !o.get("type").isJsonNull() ? o.get("type").getAsString() : "",
+                    o.has("points") && !o.get("points").isJsonNull() ? o.get("points").getAsInt() : 0,
+                    o.has("completed") && o.get("completed").getAsBoolean()));
+            }
+        }
+
+        List<CaTier> tiers = new ArrayList<>();
+        if (root.has("tiers"))
+        {
+            for (JsonElement el : root.getAsJsonArray("tiers"))
+            {
+                JsonObject o = el.getAsJsonObject();
+                tiers.add(new CaTier(
+                    o.has("tier") ? o.get("tier").getAsString() : "",
+                    o.has("completed") && !o.get("completed").isJsonNull() ? o.get("completed").getAsInt() : 0,
+                    o.has("total") && !o.get("total").isJsonNull() ? o.get("total").getAsInt() : 0));
+            }
+        }
+
+        int completed = root.has("completed") && !root.get("completed").isJsonNull() ? root.get("completed").getAsInt() : 0;
+        int total = root.has("total") && !root.get("total").isJsonNull() ? root.get("total").getAsInt() : 0;
+        int pointsEarned = root.has("pointsEarned") && !root.get("pointsEarned").isJsonNull() ? root.get("pointsEarned").getAsInt() : 0;
+        int pointsTotal = root.has("pointsTotal") && !root.get("pointsTotal").isJsonNull() ? root.get("pointsTotal").getAsInt() : 0;
+        return new PlayerCa(completed, total, pointsEarned, pointsTotal, tiers, tasks);
+    }
+
     /**
      * Submit a single collection log entry to the platform API.
      */
@@ -736,11 +824,16 @@ public class PlatformApiService
     {
         public final int clogObtained;
         public final int clogTotal;
+        public final int caCompleted;
+        public final int caTotal;
         public final List<PlayerPb> pbs;
         public final List<PlayerDrop> drops;
-        public PlayerProfile(int clogObtained, int clogTotal, List<PlayerPb> pbs, List<PlayerDrop> drops)
+        public PlayerProfile(int clogObtained, int clogTotal, int caCompleted, int caTotal,
+                             List<PlayerPb> pbs, List<PlayerDrop> drops)
         {
-            this.clogObtained = clogObtained; this.clogTotal = clogTotal; this.pbs = pbs; this.drops = drops;
+            this.clogObtained = clogObtained; this.clogTotal = clogTotal;
+            this.caCompleted = caCompleted; this.caTotal = caTotal;
+            this.pbs = pbs; this.drops = drops;
         }
     }
 
@@ -779,7 +872,9 @@ public class PlatformApiService
 
         int clogObtained = root.has("collectionLogCount") && !root.get("collectionLogCount").isJsonNull() ? root.get("collectionLogCount").getAsInt() : 0;
         int clogTotal = root.has("collectionLogTotal") && !root.get("collectionLogTotal").isJsonNull() ? root.get("collectionLogTotal").getAsInt() : 0;
-        return new PlayerProfile(clogObtained, clogTotal, pbs, drops);
+        int caCompleted = root.has("caCompleted") && !root.get("caCompleted").isJsonNull() ? root.get("caCompleted").getAsInt() : 0;
+        int caTotal = root.has("caTotal") && !root.get("caTotal").isJsonNull() ? root.get("caTotal").getAsInt() : 0;
+        return new PlayerProfile(clogObtained, clogTotal, caCompleted, caTotal, pbs, drops);
     }
 
     /** Create an announcement (admin — needs a key whose owner has manage_announcements/admin). */
