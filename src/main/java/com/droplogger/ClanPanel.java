@@ -3,7 +3,10 @@ package com.droplogger;
 import net.runelite.api.Skill;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.PluginPanel;
+import net.runelite.client.game.ItemManager;
+import net.runelite.client.util.AsyncBufferedImage;
 import net.runelite.client.util.ImageUtil;
+import net.runelite.client.util.LinkBrowser;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
@@ -16,9 +19,9 @@ import java.util.List;
 
 public class ClanPanel extends PluginPanel
 {
-    private static final Font READABLE_FONT = new Font("Segoe UI", Font.PLAIN, 11);
-    private static final Font READABLE_FONT_SMALL = new Font("Segoe UI", Font.PLAIN, 10);
-    private static final Font READABLE_FONT_ITALIC = new Font("Segoe UI", Font.ITALIC, 10);
+    private static final Font READABLE_FONT = new Font("Segoe UI", Font.PLAIN, 12);
+    private static final Font READABLE_FONT_SMALL = new Font("Segoe UI", Font.PLAIN, 11);
+    private static final Font READABLE_FONT_ITALIC = new Font("Segoe UI", Font.ITALIC, 11);
 
     // ── Home tab components ──
     private final JLabel homeStatusLabel = new JLabel("");
@@ -48,6 +51,38 @@ public class ClanPanel extends PluginPanel
     private final JPanel hiscoresContentPanel = new JPanel();
     private final JPanel hiscoreTimesPanel = new JPanel();
     private final JTextField hiscoreSearchField = new JTextField();
+    private final JTextField hiscorePlayerSearchField = new JTextField();
+    private static final String PLAYER_FILTER_PLACEHOLDER = "Filter by player...";
+    // The current boss leaderboard, cached so the player filter can re-render it client-side.
+    // Null means we're not showing a boss leaderboard (e.g. the recent-PBs overview), so the
+    // player filter is a no-op and won't clobber that view.
+    private java.util.List<HiscoreEntry> lastTimesEntries = null;
+    private Color lastTimesAccent = null;
+
+    // ── Members tab (browse other players' collection logs) ──
+    private final JTextField memberSearchField = new JTextField();
+    private final JPanel membersContent = new ScrollableColumn(); // tracks viewport width so cards fit beside the scrollbar
+    private final JTextField clogTabSearchField = new JTextField();
+    private final JPanel clogCatListPanel = new JPanel();
+    private java.util.List<PlatformApiService.RosterMember> currentMembers = new java.util.ArrayList<>();
+    private Runnable onLoadRoster;
+    private java.util.function.Consumer<String> onSelectMember;
+    private ItemManager itemManager; // for local item-icon rendering in the clog grid
+    private PlatformApiService.PlayerClog currentClog = null;
+    private String currentClogRsn = null;
+    private String currentClogTab = null;
+    private PlatformApiService.PlayerProfile currentProfile = null;
+    private java.util.function.Consumer<String> onLoadClog;
+
+    /** A BoxLayout column that fills the scroll viewport's WIDTH (so children fit beside the scrollbar). */
+    private static class ScrollableColumn extends JPanel implements javax.swing.Scrollable
+    {
+        @Override public Dimension getPreferredScrollableViewportSize() { return getPreferredSize(); }
+        @Override public int getScrollableUnitIncrement(java.awt.Rectangle r, int o, int d) { return 16; }
+        @Override public int getScrollableBlockIncrement(java.awt.Rectangle r, int o, int d) { return 100; }
+        @Override public boolean getScrollableTracksViewportWidth() { return true; }
+        @Override public boolean getScrollableTracksViewportHeight() { return false; }
+    }
     private final JComboBox<String> hiscoreGroupCombo = new JComboBox<>();
     private final JComboBox<String> hiscoreBossCombo = new JComboBox<>();
     private final JComboBox<String> hiscoreSizeCombo = new JComboBox<>();
@@ -106,24 +141,52 @@ public class ClanPanel extends PluginPanel
         setLayout(new BorderLayout());
         setBackground(ColorScheme.DARK_GRAY_COLOR);
 
-        // "Not connected" placeholder
+        // "Not connected" onboarding screen — everything centered.
         notConnectedPanel.setLayout(new BorderLayout());
         notConnectedPanel.setBackground(ColorScheme.DARK_GRAY_COLOR);
         JPanel msgBox = new JPanel();
         msgBox.setLayout(new BoxLayout(msgBox, BoxLayout.Y_AXIS));
         msgBox.setBackground(ColorScheme.DARK_GRAY_COLOR);
-        msgBox.setBorder(new EmptyBorder(40, 20, 20, 20));
+        msgBox.setBorder(new EmptyBorder(36, 16, 20, 16));
+
         notConnectedTitleLabel = new JLabel("Solus");
-        notConnectedTitleLabel.setFont(new Font("Segoe UI", Font.BOLD, 16));
-        notConnectedTitleLabel.setForeground(Color.WHITE);
+        notConnectedTitleLabel.setFont(new Font("Segoe UI", Font.BOLD, 18));
+        notConnectedTitleLabel.setForeground(ACCENT_GOLD);
         notConnectedTitleLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
-        JLabel instrLabel = new JLabel("<html><center>Enter your Clan Code in<br>plugin settings to connect.</center></html>");
-        instrLabel.setFont(READABLE_FONT);
-        instrLabel.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
-        instrLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
-        instrLabel.setBorder(new EmptyBorder(12, 0, 0, 0));
         msgBox.add(notConnectedTitleLabel);
-        msgBox.add(instrLabel);
+        msgBox.add(Box.createVerticalStrut(6));
+
+        JLabel introLabel = new JLabel("<html><div style='text-align:center;'>Connect with your personal API key.</div></html>");
+        introLabel.setFont(READABLE_FONT);
+        introLabel.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+        introLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
+        msgBox.add(introLabel);
+        msgBox.add(Box.createVerticalStrut(14));
+
+        JLabel stepsLabel = new JLabel("<html><div style='text-align:center; line-height:160%;'>"
+            + "1. Join the Solus Discord<br>"
+            + "2. Run <b>/getkey</b> in Discord<br>"
+            + "3. Paste your key into the<br>plugin's <b>API Key</b> setting</div></html>");
+        stepsLabel.setFont(READABLE_FONT_SMALL);
+        stepsLabel.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+        stepsLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
+        msgBox.add(stepsLabel);
+        msgBox.add(Box.createVerticalStrut(16));
+
+        JButton discordBtn = new JButton("Join the Solus Discord");
+        discordBtn.setFont(new Font("Segoe UI", Font.BOLD, 12));
+        discordBtn.setForeground(Color.WHITE);
+        discordBtn.setBackground(new Color(88, 101, 242)); // Discord blurple
+        discordBtn.setOpaque(true);
+        discordBtn.setBorderPainted(false);
+        discordBtn.setFocusPainted(false);
+        discordBtn.setAlignmentX(Component.CENTER_ALIGNMENT);
+        discordBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
+        discordBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        // Opens the user's browser via RuneLite's sanctioned helper — the plugin makes no request.
+        discordBtn.addActionListener(e -> LinkBrowser.browse("https://discord.gg/solus"));
+        msgBox.add(discordBtn);
+
         notConnectedPanel.add(msgBox, BorderLayout.NORTH);
 
         tabbedPane.setBackground(ColorScheme.DARK_GRAY_COLOR);
@@ -143,6 +206,20 @@ public class ClanPanel extends PluginPanel
 
         // Activity tab (clan joins, leaves, rank changes)
         tabbedPane.addTab("Activity", buildActivityTab());
+
+        // Members tab (browse other players' collection logs)
+        tabbedPane.addTab("Members", buildMembersTab());
+
+        // Lazily load the roster the first time the Members tab is opened.
+        tabbedPane.addChangeListener(e ->
+        {
+            int idx = tabbedPane.getSelectedIndex();
+            if (idx >= 0 && "Members".equals(tabbedPane.getTitleAt(idx))
+                && currentMembers.isEmpty() && onLoadRoster != null)
+            {
+                onLoadRoster.run();
+            }
+        });
 
         // CardLayout to switch between not-connected and connected views
         cardContainer.add(notConnectedPanel, CARD_NOT_CONNECTED);
@@ -188,6 +265,8 @@ public class ClanPanel extends PluginPanel
         home.add(createNavCard("Drops", "Clan drop log, leaderboard & whitelist", new Color(255, 180, 100), "Drops"));
         home.add(Box.createVerticalStrut(8));
         home.add(createNavCard("Activity", "Live feed: joins, leaves, drops, PBs & clog", new Color(100, 180, 255), "Activity"));
+        home.add(Box.createVerticalStrut(8));
+        home.add(createNavCard("Members", "Browse clan members' collection logs", new Color(186, 142, 255), "Members"));
         home.add(Box.createVerticalStrut(20));
 
         // ── Active Event card ──
@@ -325,7 +404,6 @@ public class ClanPanel extends PluginPanel
 
         // Filter dropdown — narrows the feed to a single kind of event.
         activityFilterCombo.addItem("Everything");
-        activityFilterCombo.addItem("Joins & Leaves");
         activityFilterCombo.addItem("Drops");
         activityFilterCombo.addItem("Personal Bests");
         activityFilterCombo.addItem("Collection Log");
@@ -380,6 +458,660 @@ public class ClanPanel extends PluginPanel
 
         return box;
     }
+
+    // ══════════════════════════════════════════
+    // Members Tab — browse other players' collection logs
+    // ══════════════════════════════════════════
+
+    private JPanel buildMembersTab()
+    {
+        JPanel tab = new JPanel(new BorderLayout(0, 6));
+        tab.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        tab.setBorder(new EmptyBorder(10, 10, 10, 10));
+
+        JPanel header = new JPanel();
+        header.setLayout(new BoxLayout(header, BoxLayout.Y_AXIS));
+        header.setBackground(ColorScheme.DARK_GRAY_COLOR);
+
+        JLabel title = new JLabel("Members");
+        title.setFont(title.getFont().deriveFont(Font.BOLD, 16f));
+        title.setForeground(new Color(186, 142, 255));
+        title.setAlignmentX(Component.LEFT_ALIGNMENT);
+        header.add(title);
+
+        JLabel desc = new JLabel("Pick a member to view their collection log");
+        desc.setFont(READABLE_FONT_SMALL);
+        desc.setForeground(new Color(140, 140, 140));
+        desc.setAlignmentX(Component.LEFT_ALIGNMENT);
+        desc.setBorder(new EmptyBorder(2, 0, 8, 0));
+        header.add(desc);
+
+        memberSearchField.setBackground(new Color(30, 30, 30));
+        memberSearchField.setForeground(Color.WHITE);
+        memberSearchField.setCaretColor(Color.WHITE);
+        memberSearchField.setFont(READABLE_FONT);
+        memberSearchField.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
+        memberSearchField.setAlignmentX(Component.LEFT_ALIGNMENT);
+        memberSearchField.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(new Color(50, 50, 50)),
+            new EmptyBorder(2, 6, 2, 6)));
+        memberSearchField.setToolTipText("Search members...");
+        memberSearchField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener()
+        {
+            public void insertUpdate(javax.swing.event.DocumentEvent e) { renderMemberList(); }
+            public void removeUpdate(javax.swing.event.DocumentEvent e) { renderMemberList(); }
+            public void changedUpdate(javax.swing.event.DocumentEvent e) { renderMemberList(); }
+        });
+        header.add(memberSearchField);
+        tab.add(header, BorderLayout.NORTH);
+
+        membersContent.setLayout(new BoxLayout(membersContent, BoxLayout.Y_AXIS));
+        membersContent.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        JScrollPane scroll = new JScrollPane(membersContent,
+            JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED, JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        scroll.setBorder(null);
+        scroll.getVerticalScrollBar().setUnitIncrement(12);
+        tab.add(scroll, BorderLayout.CENTER);
+
+        JLabel loading = new JLabel("Open this tab to load members…");
+        loading.setFont(READABLE_FONT_ITALIC);
+        loading.setForeground(new Color(100, 100, 100));
+        membersContent.add(loading);
+
+        // One-time setup for the clog tab's boss/category search (shown inside showClogTab).
+        clogCatListPanel.setLayout(new BoxLayout(clogCatListPanel, BoxLayout.Y_AXIS));
+        clogCatListPanel.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        clogCatListPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        clogTabSearchField.setBackground(new Color(30, 30, 30));
+        clogTabSearchField.setForeground(Color.WHITE);
+        clogTabSearchField.setCaretColor(Color.WHITE);
+        clogTabSearchField.setFont(READABLE_FONT_SMALL);
+        clogTabSearchField.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
+        clogTabSearchField.setAlignmentX(Component.LEFT_ALIGNMENT);
+        clogTabSearchField.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(new Color(50, 50, 50)),
+            new EmptyBorder(2, 6, 2, 6)));
+        clogTabSearchField.setToolTipText("Search…");
+        clogTabSearchField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener()
+        {
+            public void insertUpdate(javax.swing.event.DocumentEvent e) { renderClogCategories(); }
+            public void removeUpdate(javax.swing.event.DocumentEvent e) { renderClogCategories(); }
+            public void changedUpdate(javax.swing.event.DocumentEvent e) { renderClogCategories(); }
+        });
+
+        return tab;
+    }
+
+    /** Populate the Members tab from the roster. */
+    public void setMemberList(java.util.List<PlatformApiService.RosterMember> members)
+    {
+        SwingUtilities.invokeLater(() ->
+        {
+            currentMembers = members != null ? members : new java.util.ArrayList<>();
+            renderMemberList();
+        });
+    }
+
+    private void renderMemberList()
+    {
+        membersContent.removeAll();
+        String q = memberSearchField.getText() == null ? "" : memberSearchField.getText().trim().toLowerCase();
+
+        if (currentMembers.isEmpty())
+        {
+            JLabel none = new JLabel("No members loaded");
+            none.setFont(READABLE_FONT_ITALIC);
+            none.setForeground(new Color(100, 100, 100));
+            none.setAlignmentX(Component.LEFT_ALIGNMENT);
+            membersContent.add(none);
+        }
+        else
+        {
+            int shown = 0;
+            for (PlatformApiService.RosterMember m : currentMembers)
+            {
+                if (!q.isEmpty() && !m.rsn.toLowerCase().contains(q)) continue;
+                if (shown >= 80)
+                {
+                    JLabel more = new JLabel("…refine your search to see more");
+                    more.setFont(READABLE_FONT_ITALIC);
+                    more.setForeground(new Color(100, 100, 100));
+                    more.setAlignmentX(Component.LEFT_ALIGNMENT);
+                    membersContent.add(more);
+                    break;
+                }
+                membersContent.add(buildMemberRow(m));
+                membersContent.add(Box.createVerticalStrut(2));
+                shown++;
+            }
+            if (shown == 0)
+            {
+                JLabel none = new JLabel("No members match");
+                none.setFont(READABLE_FONT_ITALIC);
+                none.setForeground(new Color(100, 100, 100));
+                none.setAlignmentX(Component.LEFT_ALIGNMENT);
+                membersContent.add(none);
+            }
+        }
+        membersContent.revalidate();
+        membersContent.repaint();
+    }
+
+    private JPanel buildMemberRow(PlatformApiService.RosterMember m)
+    {
+        JPanel row = new JPanel(new BorderLayout(6, 0));
+        row.setBackground(new Color(40, 40, 40));
+        row.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(new Color(60, 60, 60)),
+            new EmptyBorder(7, 10, 7, 10)));
+        row.setAlignmentX(Component.LEFT_ALIGNMENT);
+        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 32));
+        row.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+
+        JLabel name = new JLabel(m.rsn);
+        name.setFont(READABLE_FONT);
+        name.setForeground(Color.WHITE);
+        row.add(name, BorderLayout.WEST);
+
+        if (m.rank != null && !m.rank.isEmpty())
+        {
+            JLabel rank = new JLabel(m.rank);
+            rank.setFont(READABLE_FONT_SMALL);
+            rank.setForeground(new Color(150, 150, 150));
+            row.add(rank, BorderLayout.EAST);
+        }
+
+        row.addMouseListener(new MouseAdapter()
+        {
+            @Override public void mouseClicked(MouseEvent e)
+            {
+                if (onSelectMember != null) onSelectMember.accept(m.rsn);
+            }
+        });
+        return row;
+    }
+
+    public void setItemManager(ItemManager im) { this.itemManager = im; }
+
+    /** Entry point from the plugin: cache the clog and show the tab overview. */
+    public void showPlayerClog(String rsn, PlatformApiService.PlayerClog clog)
+    {
+        SwingUtilities.invokeLater(() ->
+        {
+            currentClogRsn = rsn;
+            currentClog = clog;
+            renderClogOverview();
+        });
+    }
+
+    /** Entry point from the plugin: cache the profile and show the member's landing page. */
+    public void showMemberProfile(String rsn, PlatformApiService.PlayerProfile profile)
+    {
+        SwingUtilities.invokeLater(() ->
+        {
+            currentClogRsn = rsn;
+            currentProfile = profile;
+            currentClog = null; // the clog is fetched lazily when its section is opened
+            renderMemberProfile();
+        });
+    }
+
+    /** Member landing: name + section cards (Collection Log / Speed Times / Drops). */
+    private void renderMemberProfile()
+    {
+        membersContent.removeAll();
+        membersContent.add(clogBackButton("← Members", this::renderMemberList));
+        membersContent.add(Box.createVerticalStrut(6));
+        membersContent.add(clogTitle(currentClogRsn, new Color(186, 142, 255), 16f));
+        membersContent.add(Box.createVerticalStrut(8));
+
+        if (currentProfile == null)
+        {
+            membersContent.add(clogNote("Could not load this player's profile."));
+        }
+        else
+        {
+            String clogSub = currentProfile.clogObtained
+                + (currentProfile.clogTotal > 0 ? " / " + currentProfile.clogTotal : "") + " unique items";
+            membersContent.add(buildSectionCard("Collection Log", clogSub, new Color(186, 142, 255),
+                () -> { if (onLoadClog != null) onLoadClog.accept(currentClogRsn); }));
+            membersContent.add(Box.createVerticalStrut(6));
+            membersContent.add(buildSectionCard("Speed Times",
+                currentProfile.pbs.size() + " personal bests", new Color(100, 149, 237), this::showMemberPbs));
+            membersContent.add(Box.createVerticalStrut(6));
+            membersContent.add(buildSectionCard("Recent Drops",
+                currentProfile.drops.size() + " logged", new Color(255, 180, 100), this::showMemberDrops));
+        }
+        membersContent.revalidate();
+        membersContent.repaint();
+    }
+
+    private JPanel buildSectionCard(String title, String subtitle, Color accent, Runnable action)
+    {
+        JPanel card = new JPanel(new BorderLayout(8, 0));
+        card.setBackground(new Color(40, 40, 40));
+        card.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createMatteBorder(0, 3, 0, 0, accent),
+            new EmptyBorder(8, 10, 8, 10)));
+        card.setAlignmentX(Component.LEFT_ALIGNMENT);
+        card.setMaximumSize(new Dimension(Integer.MAX_VALUE, 50));
+
+        JPanel txt = new JPanel();
+        txt.setLayout(new BoxLayout(txt, BoxLayout.Y_AXIS));
+        txt.setBackground(card.getBackground());
+        JLabel t = new JLabel(title);
+        t.setFont(READABLE_FONT.deriveFont(Font.BOLD));
+        t.setForeground(Color.WHITE);
+        t.setAlignmentX(Component.LEFT_ALIGNMENT);
+        JLabel s = new JLabel(subtitle);
+        s.setFont(READABLE_FONT_SMALL);
+        s.setForeground(new Color(160, 160, 160));
+        s.setAlignmentX(Component.LEFT_ALIGNMENT);
+        txt.add(t);
+        txt.add(s);
+        card.add(txt, BorderLayout.CENTER);
+
+        JLabel arrow = new JLabel(">");
+        arrow.setFont(arrow.getFont().deriveFont(Font.BOLD, 12f));
+        arrow.setForeground(new Color(100, 100, 100));
+        card.add(arrow, BorderLayout.EAST);
+
+        makeCardClickable(card, action);
+        return card;
+    }
+
+    private void showMemberPbs()
+    {
+        membersContent.removeAll();
+        membersContent.add(clogBackButton("← " + currentClogRsn, this::renderMemberProfile));
+        membersContent.add(Box.createVerticalStrut(6));
+        membersContent.add(clogTitle("Speed Times", new Color(100, 149, 237), 14f));
+        membersContent.add(Box.createVerticalStrut(4));
+
+        if (currentProfile == null || currentProfile.pbs.isEmpty())
+        {
+            membersContent.add(clogNote("No personal bests recorded."));
+        }
+        else
+        {
+            for (PlatformApiService.PlayerPb pb : currentProfile.pbs)
+            {
+                membersContent.add(buildPbRow(pb));
+                membersContent.add(Box.createVerticalStrut(2));
+            }
+        }
+        membersContent.revalidate();
+        membersContent.repaint();
+    }
+
+    private JPanel buildPbRow(PlatformApiService.PlayerPb pb)
+    {
+        JPanel row = new JPanel(new BorderLayout(6, 0));
+        row.setBackground(new Color(35, 35, 35));
+        row.setBorder(new EmptyBorder(6, 8, 6, 8));
+        row.setAlignmentX(Component.LEFT_ALIGNMENT);
+        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+
+        String label = bossName(pb.bossKey) + (pb.teamSize > 1 ? " (" + pb.teamSize + ")" : "");
+        JLabel name = new JLabel(label);
+        name.setFont(READABLE_FONT_SMALL);
+        name.setForeground(Color.WHITE);
+        JLabel time = new JLabel(formatMs(pb.timeMs));
+        time.setFont(READABLE_FONT_SMALL);
+        time.setForeground(new Color(100, 149, 237));
+        row.add(time, BorderLayout.EAST);
+
+        boolean hasTeam = pb.teamSize > 1 && pb.teamMembers != null && !pb.teamMembers.isEmpty();
+        if (hasTeam)
+        {
+            // Stack the roster beneath the boss name (e.g. "BlG Woody, BlG Moby").
+            JPanel stacked = new JPanel();
+            stacked.setLayout(new BoxLayout(stacked, BoxLayout.Y_AXIS));
+            stacked.setOpaque(false);
+            name.setAlignmentX(Component.LEFT_ALIGNMENT);
+            JLabel team = new JLabel(pb.teamMembers);
+            team.setFont(READABLE_FONT_SMALL.deriveFont(Font.ITALIC));
+            team.setForeground(new Color(140, 140, 140));
+            team.setAlignmentX(Component.LEFT_ALIGNMENT);
+            stacked.add(name);
+            stacked.add(team);
+            row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 40));
+            row.add(stacked, BorderLayout.WEST);
+        }
+        else
+        {
+            row.add(name, BorderLayout.WEST);
+        }
+        return row;
+    }
+
+    private void showMemberDrops()
+    {
+        membersContent.removeAll();
+        membersContent.add(clogBackButton("← " + currentClogRsn, this::renderMemberProfile));
+        membersContent.add(Box.createVerticalStrut(6));
+        membersContent.add(clogTitle("Recent Drops", new Color(255, 180, 100), 14f));
+        membersContent.add(Box.createVerticalStrut(4));
+
+        if (currentProfile == null || currentProfile.drops.isEmpty())
+        {
+            membersContent.add(clogNote("No drops logged."));
+        }
+        else
+        {
+            for (PlatformApiService.PlayerDrop d : currentProfile.drops)
+            {
+                membersContent.add(buildMemberDropRow(d));
+                membersContent.add(Box.createVerticalStrut(2));
+            }
+        }
+        membersContent.revalidate();
+        membersContent.repaint();
+    }
+
+    private JPanel buildMemberDropRow(PlatformApiService.PlayerDrop d)
+    {
+        JPanel row = new JPanel(new BorderLayout(6, 0));
+        row.setBackground(new Color(35, 35, 35));
+        row.setBorder(new EmptyBorder(5, 8, 5, 8));
+        row.setAlignmentX(Component.LEFT_ALIGNMENT);
+        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 40));
+
+        JPanel left = new JPanel();
+        left.setLayout(new BoxLayout(left, BoxLayout.Y_AXIS));
+        left.setBackground(row.getBackground());
+        JLabel item = new JLabel(d.itemName);
+        item.setFont(READABLE_FONT_SMALL);
+        item.setForeground(Color.WHITE);
+        item.setAlignmentX(Component.LEFT_ALIGNMENT);
+        left.add(item);
+        if (d.monsterName != null && !d.monsterName.isEmpty())
+        {
+            JLabel from = new JLabel("from " + d.monsterName);
+            from.setFont(READABLE_FONT_SMALL);
+            from.setForeground(new Color(140, 140, 140));
+            from.setAlignmentX(Component.LEFT_ALIGNMENT);
+            left.add(from);
+        }
+        row.add(left, BorderLayout.CENTER);
+
+        if (d.value > 0)
+        {
+            JLabel val = new JLabel(formatXp(d.value));
+            val.setFont(READABLE_FONT_SMALL);
+            val.setForeground(ACCENT_GOLD);
+            row.add(val, BorderLayout.EAST);
+        }
+        return row;
+    }
+
+    private String bossName(String bossKey)
+    {
+        BossCategory c = BossCategory.fromKey(bossKey);
+        if (c != null) return c.getDisplayName();
+        String s = bossKey == null ? "" : bossKey.replace('_', ' ');
+        return s.isEmpty() ? "?" : Character.toUpperCase(s.charAt(0)) + s.substring(1);
+    }
+
+    private String formatMs(int ms)
+    {
+        long totalSec = ms / 1000;
+        return String.format("%d:%02d.%02d", totalSec / 60, totalSec % 60, (ms % 1000) / 10);
+    }
+
+    public void setOnLoadClog(java.util.function.Consumer<String> cb) { this.onLoadClog = cb; }
+
+    /** Level 1: per-tab progress (each tab clickable → category list). */
+    private void renderClogOverview()
+    {
+        membersContent.removeAll();
+        membersContent.add(clogBackButton("← " + currentClogRsn, this::renderMemberProfile));
+        membersContent.add(Box.createVerticalStrut(6));
+        membersContent.add(clogTitle("Collection Log", new Color(186, 142, 255), 14f));
+
+        if (currentClog == null)
+        {
+            membersContent.add(clogNote("No collection log synced for this player."));
+        }
+        else
+        {
+            int pct = currentClog.total > 0 ? (int) Math.round(currentClog.obtained * 100.0 / currentClog.total) : 0;
+            JLabel headline = new JLabel(currentClog.obtained + " / " + currentClog.total + "  (" + pct + "%)");
+            headline.setFont(READABLE_FONT);
+            headline.setForeground(ACCENT_GOLD);
+            headline.setAlignmentX(Component.LEFT_ALIGNMENT);
+            headline.setBorder(new EmptyBorder(2, 0, 8, 0));
+            membersContent.add(headline);
+
+            for (java.util.Map.Entry<String, int[]> en : groupClog(null).entrySet())
+            {
+                final String tab = en.getKey();
+                JPanel card = buildClogProgressCard(tab, en.getValue()[0], en.getValue()[1]);
+                makeCardClickable(card, () -> showClogTab(tab));
+                membersContent.add(card);
+                membersContent.add(Box.createVerticalStrut(4));
+            }
+        }
+        membersContent.revalidate();
+        membersContent.repaint();
+    }
+
+    /** Level 2: categories within a tab — searchable, each clickable → icon grid. */
+    private void showClogTab(String tab)
+    {
+        currentClogTab = tab;
+        membersContent.removeAll();
+        membersContent.add(clogBackButton("← " + currentClogRsn, this::renderClogOverview));
+        membersContent.add(Box.createVerticalStrut(6));
+        membersContent.add(clogTitle(tab, new Color(100, 149, 237), 14f));
+        membersContent.add(Box.createVerticalStrut(4));
+        clogTabSearchField.setText(""); // clear the search when entering a tab
+        membersContent.add(clogTabSearchField);
+        membersContent.add(Box.createVerticalStrut(4));
+        membersContent.add(clogCatListPanel);
+        renderClogCategories();
+        membersContent.revalidate();
+        membersContent.repaint();
+    }
+
+    /** Render the current tab's categories into the list panel, filtered by the search box. */
+    private void renderClogCategories()
+    {
+        if (currentClogTab == null) return;
+        clogCatListPanel.removeAll();
+        String q = clogTabSearchField.getText() == null ? "" : clogTabSearchField.getText().trim().toLowerCase();
+        int shown = 0;
+        for (java.util.Map.Entry<String, int[]> en : groupClog(currentClogTab).entrySet())
+        {
+            final String cat = en.getKey();
+            if (!q.isEmpty() && !cat.toLowerCase().contains(q)) continue;
+            JPanel card = buildClogProgressCard(cat, en.getValue()[0], en.getValue()[1]);
+            makeCardClickable(card, () -> showClogCategory(currentClogTab, cat));
+            clogCatListPanel.add(card);
+            clogCatListPanel.add(Box.createVerticalStrut(4));
+            shown++;
+        }
+        if (shown == 0)
+        {
+            JLabel none = new JLabel(q.isEmpty() ? "No entries" : "No matches");
+            none.setFont(READABLE_FONT_ITALIC);
+            none.setForeground(new Color(100, 100, 100));
+            none.setAlignmentX(Component.LEFT_ALIGNMENT);
+            clogCatListPanel.add(none);
+        }
+        clogCatListPanel.revalidate();
+        clogCatListPanel.repaint();
+    }
+
+    /** Level 3: the item icon grid for a category (owned bright, missing dimmed). */
+    private void showClogCategory(String tab, String category)
+    {
+        membersContent.removeAll();
+        membersContent.add(clogBackButton("← " + tab, () -> showClogTab(tab)));
+        membersContent.add(Box.createVerticalStrut(6));
+        membersContent.add(clogTitle(category, new Color(100, 149, 237), 14f));
+
+        int owned = 0, total = 0;
+        JPanel grid = new JPanel(new GridLayout(0, 5, 3, 3));
+        grid.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        for (PlatformApiService.ClogCatalogItem it : currentClog.items)
+        {
+            if (!category.equals(it.category) || !tab.equals(it.tab)) continue;
+            grid.add(iconCell(it));
+            total++;
+            if (it.owned) owned++;
+        }
+
+        JLabel cnt = new JLabel(owned + " / " + total);
+        cnt.setFont(READABLE_FONT_SMALL);
+        cnt.setForeground(new Color(170, 170, 170));
+        cnt.setAlignmentX(Component.LEFT_ALIGNMENT);
+        cnt.setBorder(new EmptyBorder(2, 0, 8, 0));
+        membersContent.add(cnt);
+
+        JPanel holder = new JPanel(new BorderLayout());
+        holder.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        holder.setAlignmentX(Component.LEFT_ALIGNMENT);
+        holder.add(grid, BorderLayout.NORTH);
+        membersContent.add(holder);
+
+        membersContent.revalidate();
+        membersContent.repaint();
+    }
+
+    /** Group the cached clog by tab (tabFilter == null) or by category within one tab. */
+    private java.util.LinkedHashMap<String, int[]> groupClog(String tabFilter)
+    {
+        java.util.LinkedHashMap<String, int[]> out = new java.util.LinkedHashMap<>();
+        if (currentClog == null) return out;
+        for (PlatformApiService.ClogCatalogItem it : currentClog.items)
+        {
+            if (tabFilter != null && !tabFilter.equals(it.tab)) continue;
+            String key = tabFilter == null ? it.tab : it.category;
+            int[] c = out.computeIfAbsent(key, k -> new int[2]);
+            c[1]++;
+            if (it.owned) c[0]++;
+        }
+        return out;
+    }
+
+    private JPanel buildClogProgressCard(String label, int obtained, int total)
+    {
+        JPanel card = new JPanel();
+        card.setLayout(new BoxLayout(card, BoxLayout.Y_AXIS));
+        card.setBackground(new Color(35, 35, 35));
+        card.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(new Color(55, 55, 55)),
+            new EmptyBorder(6, 8, 6, 8)));
+        card.setAlignmentX(Component.LEFT_ALIGNMENT);
+        card.setMaximumSize(new Dimension(Integer.MAX_VALUE, 46));
+
+        JPanel rowTop = new JPanel(new BorderLayout());
+        rowTop.setBackground(card.getBackground());
+        JLabel name = new JLabel(label);
+        name.setFont(READABLE_FONT);
+        name.setForeground(Color.WHITE);
+        JLabel cnt = new JLabel(obtained + " / " + total);
+        cnt.setFont(READABLE_FONT_SMALL);
+        cnt.setForeground(new Color(170, 170, 170));
+        rowTop.add(name, BorderLayout.WEST);
+        rowTop.add(cnt, BorderLayout.EAST);
+        card.add(rowTop);
+        card.add(Box.createVerticalStrut(3));
+
+        double frac = total > 0 ? (double) obtained / total : 0;
+        JProgressBar bar = new JProgressBar(0, 100);
+        bar.setValue((int) Math.round(frac * 100));
+        bar.setForeground(frac >= 1.0 ? new Color(76, 175, 80) : new Color(186, 142, 255));
+        bar.setBackground(new Color(20, 20, 20));
+        bar.setBorderPainted(false);
+        bar.setStringPainted(false);
+        bar.setMaximumSize(new Dimension(Integer.MAX_VALUE, 6));
+        bar.setAlignmentX(Component.LEFT_ALIGNMENT);
+        card.add(bar);
+
+        return card;
+    }
+
+    /** A single item cell: local game icon, bright if owned and faded if missing. */
+    private JComponent iconCell(PlatformApiService.ClogCatalogItem it)
+    {
+        final float alpha = it.owned ? 1.0f : 0.22f;
+        JLabel label = new JLabel()
+        {
+            @Override protected void paintComponent(Graphics g)
+            {
+                Graphics2D g2 = (Graphics2D) g.create();
+                g2.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, alpha));
+                super.paintComponent(g2);
+                g2.dispose();
+            }
+        };
+        label.setHorizontalAlignment(SwingConstants.CENTER);
+        label.setPreferredSize(new Dimension(36, 32));
+        label.setToolTipText(it.name + (it.owned ? "" : " — missing"));
+        if (itemManager != null && it.itemId > 0)
+        {
+            AsyncBufferedImage img = itemManager.getImage(it.itemId);
+            label.setIcon(new ImageIcon(img));
+            img.onLoaded(() -> { label.setIcon(new ImageIcon(img)); label.revalidate(); label.repaint(); });
+        }
+        return label;
+    }
+
+    private JButton clogBackButton(String text, Runnable action)
+    {
+        JButton back = new JButton(text);
+        back.setFont(READABLE_FONT_SMALL);
+        back.setFocusPainted(false);
+        back.setAlignmentX(Component.LEFT_ALIGNMENT);
+        back.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
+        back.addActionListener(e -> action.run());
+        return back;
+    }
+
+    private JLabel clogTitle(String text, Color color, float size)
+    {
+        JLabel l = new JLabel(text);
+        l.setFont(l.getFont().deriveFont(Font.BOLD, size));
+        l.setForeground(color);
+        l.setAlignmentX(Component.LEFT_ALIGNMENT);
+        return l;
+    }
+
+    private JLabel clogNote(String text)
+    {
+        JLabel l = new JLabel(text);
+        l.setFont(READABLE_FONT_SMALL);
+        l.setForeground(new Color(150, 150, 150));
+        l.setAlignmentX(Component.LEFT_ALIGNMENT);
+        l.setBorder(new EmptyBorder(8, 0, 0, 0));
+        return l;
+    }
+
+    /** Make a whole card (incl. its child labels) clickable. */
+    private void makeCardClickable(JComponent card, Runnable action)
+    {
+        card.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        MouseAdapter ma = new MouseAdapter()
+        {
+            @Override public void mouseClicked(MouseEvent e) { action.run(); }
+        };
+        addMouseRecursive(card, ma);
+    }
+
+    private void addMouseRecursive(Component c, MouseAdapter ma)
+    {
+        c.addMouseListener(ma);
+        if (c instanceof Container)
+        {
+            for (Component child : ((Container) c).getComponents()) addMouseRecursive(child, ma);
+        }
+    }
+
+    public void setOnLoadRoster(Runnable cb) { this.onLoadRoster = cb; }
+    public void setOnSelectMember(java.util.function.Consumer<String> cb) { this.onSelectMember = cb; }
 
     private JPanel createNavCard(String name, String description, Color accentColor, String tabName)
     {
@@ -736,7 +1468,7 @@ public class ClanPanel extends PluginPanel
 
     private JComponent buildWomTab()
     {
-        JPanel wrapper = new JPanel();
+        ScrollableColumn wrapper = new ScrollableColumn();
         wrapper.setLayout(new BoxLayout(wrapper, BoxLayout.Y_AXIS));
         wrapper.setBackground(ColorScheme.DARK_GRAY_COLOR);
         wrapper.setBorder(new EmptyBorder(6, 6, 6, 6));
@@ -1031,7 +1763,6 @@ public class ClanPanel extends PluginPanel
         if (label == null) return "";
         switch (label)
         {
-            case "Joins & Leaves": return "join,leave";
             case "Drops": return "drop";
             case "Personal Bests": return "pb";
             case "Collection Log": return "clog";
@@ -1077,34 +1808,55 @@ public class ClanPanel extends PluginPanel
     {
         SwingUtilities.invokeLater(() ->
         {
-            timesPanel.removeAll();
-
-            if (entries == null || entries.isEmpty())
-            {
-                JLabel none = new JLabel("No times recorded");
-                none.setFont(none.getFont().deriveFont(Font.ITALIC, 11f));
-                none.setForeground(new Color(80, 80, 80));
-                none.setBorder(new EmptyBorder(6, 36, 6, 10));
-                timesPanel.add(none);
-            }
-            else
-            {
-                for (HiscoreEntry entry : entries)
-                {
-                    timesPanel.add(createTimeEntry(entry, accentColor));
-                }
-            }
-
-            timesPanel.revalidate();
-            timesPanel.repaint();
+            // Cache the full leaderboard so the player filter can re-render it without a re-fetch.
+            lastTimesEntries = entries != null ? entries : new java.util.ArrayList<>();
+            lastTimesAccent = accentColor;
+            renderTimesFiltered();
         });
+    }
+
+    /** Current player-filter query (lowercased, "" when empty/placeholder). */
+    private String playerQuery()
+    {
+        String t = hiscorePlayerSearchField.getText();
+        if (t == null || t.equals(PLAYER_FILTER_PLACEHOLDER)) return "";
+        return t.trim().toLowerCase();
+    }
+
+    /** Re-render the cached boss leaderboard into the times panel, filtered by the player query. */
+    private void renderTimesFiltered()
+    {
+        if (lastTimesEntries == null) return; // not a boss-leaderboard view (e.g. recent overview)
+
+        hiscoreTimesPanel.removeAll();
+        String q = playerQuery();
+        boolean any = false;
+        for (HiscoreEntry entry : lastTimesEntries)
+        {
+            if (!q.isEmpty() && (entry.getRsns() == null || !entry.getRsns().toLowerCase().contains(q)))
+            {
+                continue;
+            }
+            hiscoreTimesPanel.add(createTimeEntry(entry, lastTimesAccent));
+            any = true;
+        }
+        if (!any)
+        {
+            JLabel none = new JLabel(q.isEmpty() ? "No times recorded" : "No players match");
+            none.setFont(READABLE_FONT_ITALIC);
+            none.setForeground(new Color(80, 80, 80));
+            none.setBorder(new EmptyBorder(6, 36, 6, 10));
+            hiscoreTimesPanel.add(none);
+        }
+        hiscoreTimesPanel.revalidate();
+        hiscoreTimesPanel.repaint();
     }
 
     private JPanel createTimeEntry(HiscoreEntry entry, Color accentColor)
     {
         JPanel container = new JPanel();
         container.setLayout(new BoxLayout(container, BoxLayout.Y_AXIS));
-        container.setBackground(new Color(18, 18, 18));
+        container.setBackground(ColorScheme.DARK_GRAY_COLOR);
         container.setAlignmentX(Component.LEFT_ALIGNMENT);
 
         String rsns = entry.getRsns() != null ? entry.getRsns().trim() : "";
@@ -1126,10 +1878,10 @@ public class ClanPanel extends PluginPanel
         {
             // ── Solo layout: clean single row — rank · time · rsn · date ──
             JPanel rowSolo = new JPanel(new BorderLayout(6, 0));
-            rowSolo.setBackground(new Color(18, 18, 18));
+            rowSolo.setBackground(ColorScheme.DARK_GRAY_COLOR);
             // Thin bottom divider only (no boxed border), light left padding
             rowSolo.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(26, 26, 26)),
+                BorderFactory.createMatteBorder(0, 0, 1, 0, ColorScheme.DARKER_GRAY_COLOR),
                 new EmptyBorder(5, 10, 5, 8)
             ));
             rowSolo.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -1167,8 +1919,8 @@ public class ClanPanel extends PluginPanel
             // Hover highlight
             rowSolo.addMouseListener(new MouseAdapter()
             {
-                @Override public void mouseEntered(MouseEvent e) { rowSolo.setBackground(new Color(26, 26, 26)); left.setBackground(new Color(26, 26, 26)); }
-                @Override public void mouseExited(MouseEvent e) { rowSolo.setBackground(new Color(18, 18, 18)); left.setBackground(new Color(18, 18, 18)); }
+                @Override public void mouseEntered(MouseEvent e) { rowSolo.setBackground(ColorScheme.DARKER_GRAY_HOVER_COLOR); left.setBackground(ColorScheme.DARKER_GRAY_HOVER_COLOR); }
+                @Override public void mouseExited(MouseEvent e) { rowSolo.setBackground(ColorScheme.DARK_GRAY_COLOR); left.setBackground(ColorScheme.DARK_GRAY_COLOR); }
             });
 
             container.add(rowSolo);
@@ -1180,7 +1932,7 @@ public class ClanPanel extends PluginPanel
             // Detail panel (hidden until clicked)
             JPanel detailPanel = new JPanel();
             detailPanel.setLayout(new BoxLayout(detailPanel, BoxLayout.Y_AXIS));
-            detailPanel.setBackground(new Color(15, 15, 15));
+            detailPanel.setBackground(ColorScheme.DARKER_GRAY_COLOR);
             detailPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
             detailPanel.setVisible(false);
             detailPanel.setBorder(new EmptyBorder(3, 28, 5, 6));
@@ -1205,9 +1957,9 @@ public class ClanPanel extends PluginPanel
 
             // Time row
             JPanel timeRow = new JPanel(new BorderLayout());
-            timeRow.setBackground(new Color(18, 18, 18));
+            timeRow.setBackground(ColorScheme.DARK_GRAY_COLOR);
             timeRow.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(30, 30, 30)),
+                BorderFactory.createMatteBorder(0, 0, 1, 0, ColorScheme.DARKER_GRAY_COLOR),
                 new EmptyBorder(4, 20, 4, 6)
             ));
             timeRow.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -1243,9 +1995,9 @@ public class ClanPanel extends PluginPanel
                     container.repaint();
                 }
                 @Override
-                public void mouseEntered(MouseEvent e) { timeRow.setBackground(new Color(28, 28, 28)); }
+                public void mouseEntered(MouseEvent e) { timeRow.setBackground(ColorScheme.DARKER_GRAY_HOVER_COLOR); }
                 @Override
-                public void mouseExited(MouseEvent e) { timeRow.setBackground(new Color(18, 18, 18)); }
+                public void mouseExited(MouseEvent e) { timeRow.setBackground(ColorScheme.DARK_GRAY_COLOR); }
             });
 
             container.add(timeRow);
@@ -1257,7 +2009,8 @@ public class ClanPanel extends PluginPanel
 
     private JPanel buildHiscoresTab()
     {
-        JPanel wrapper = new JPanel();
+        // ScrollableColumn tracks the viewport width so the tab never overflows the panel ("too wide").
+        ScrollableColumn wrapper = new ScrollableColumn();
         wrapper.setLayout(new BoxLayout(wrapper, BoxLayout.Y_AXIS));
         wrapper.setBackground(ColorScheme.DARK_GRAY_COLOR);
         wrapper.setBorder(new EmptyBorder(6, 4, 6, 4));
@@ -1459,14 +2212,50 @@ public class ClanPanel extends PluginPanel
             fetchTimesForCurrentSelection();
         });
 
+        // ── Player filter (filters the current boss leaderboard by name, client-side) ──
+        hiscorePlayerSearchField.setBackground(new Color(30, 30, 30));
+        hiscorePlayerSearchField.setForeground(new Color(100, 100, 100));
+        hiscorePlayerSearchField.setCaretColor(Color.WHITE);
+        hiscorePlayerSearchField.setFont(READABLE_FONT_SMALL);
+        hiscorePlayerSearchField.setAlignmentX(Component.LEFT_ALIGNMENT);
+        hiscorePlayerSearchField.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
+        hiscorePlayerSearchField.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(new Color(50, 50, 50)),
+            new EmptyBorder(2, 6, 2, 6)));
+        hiscorePlayerSearchField.setText(PLAYER_FILTER_PLACEHOLDER);
+        hiscorePlayerSearchField.addFocusListener(new java.awt.event.FocusAdapter()
+        {
+            @Override public void focusGained(java.awt.event.FocusEvent e)
+            {
+                if (hiscorePlayerSearchField.getText().equals(PLAYER_FILTER_PLACEHOLDER))
+                {
+                    hiscorePlayerSearchField.setText("");
+                    hiscorePlayerSearchField.setForeground(Color.WHITE);
+                }
+            }
+            @Override public void focusLost(java.awt.event.FocusEvent e)
+            {
+                if (hiscorePlayerSearchField.getText().isEmpty())
+                {
+                    hiscorePlayerSearchField.setText(PLAYER_FILTER_PLACEHOLDER);
+                    hiscorePlayerSearchField.setForeground(new Color(100, 100, 100));
+                }
+            }
+        });
+        hiscorePlayerSearchField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener()
+        {
+            public void insertUpdate(javax.swing.event.DocumentEvent e) { renderTimesFiltered(); }
+            public void removeUpdate(javax.swing.event.DocumentEvent e) { renderTimesFiltered(); }
+            public void changedUpdate(javax.swing.event.DocumentEvent e) { renderTimesFiltered(); }
+        });
+        wrapper.add(hiscorePlayerSearchField);
+        wrapper.add(Box.createVerticalStrut(4));
+
         // ── Times display panel ──
         hiscoreTimesPanel.setLayout(new BoxLayout(hiscoreTimesPanel, BoxLayout.Y_AXIS));
-        hiscoreTimesPanel.setBackground(new Color(18, 18, 18));
+        hiscoreTimesPanel.setBackground(ColorScheme.DARK_GRAY_COLOR);
         hiscoreTimesPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
-        hiscoreTimesPanel.setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createLineBorder(new Color(50, 50, 50)),
-            new EmptyBorder(4, 4, 4, 4)
-        ));
+        hiscoreTimesPanel.setBorder(new EmptyBorder(2, 0, 2, 0));
 
         JLabel selectPrompt = new JLabel("Select a boss to view times");
         selectPrompt.setFont(READABLE_FONT_ITALIC);
@@ -1673,6 +2462,7 @@ public class ClanPanel extends PluginPanel
 
     private void showRecentPbsOverview()
     {
+        lastTimesEntries = null; // recent overview isn't a boss leaderboard — disable the player filter
         hiscoreTimesPanel.removeAll();
 
         if (recentCategoryEntries.isEmpty())
@@ -1698,7 +2488,7 @@ public class ClanPanel extends PluginPanel
                 HiscoreEntry best = times.get(0);
 
                 JPanel row = new JPanel(new BorderLayout(6, 0));
-                row.setBackground(count % 2 == 0 ? new Color(18, 18, 18) : new Color(28, 28, 28));
+                row.setBackground(count % 2 == 0 ? ColorScheme.DARK_GRAY_COLOR : ColorScheme.DARKER_GRAY_COLOR);
                 row.setAlignmentX(Component.LEFT_ALIGNMENT);
                 row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 32));
                 row.setBorder(new EmptyBorder(4, 8, 4, 8));
@@ -1759,6 +2549,7 @@ public class ClanPanel extends PluginPanel
         Color accentColor = DISPLAY_GROUP_COLORS.getOrDefault(displayGroup, new Color(100, 149, 237));
 
         // Show loading
+        lastTimesEntries = null; // avoid filtering stale entries while the new boss loads
         hiscoreTimesPanel.removeAll();
         JLabel loading = new JLabel("Loading times...");
         loading.setFont(READABLE_FONT_ITALIC);
@@ -1777,7 +2568,7 @@ public class ClanPanel extends PluginPanel
 
     private JComponent buildDropsTab()
     {
-        JPanel wrapper = new JPanel();
+        ScrollableColumn wrapper = new ScrollableColumn();
         wrapper.setLayout(new BoxLayout(wrapper, BoxLayout.Y_AXIS));
         wrapper.setBackground(ColorScheme.DARK_GRAY_COLOR);
         wrapper.setBorder(new EmptyBorder(6, 4, 6, 4));
@@ -1923,7 +2714,7 @@ public class ClanPanel extends PluginPanel
         filterRow.setAlignmentX(Component.LEFT_ALIGNMENT);
         filterRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
 
-        whitelistCategoryFilter.setFont(new Font("Segoe UI", Font.PLAIN, 9));
+        whitelistCategoryFilter.setFont(READABLE_FONT_SMALL);
         whitelistCategoryFilter.setMaximumSize(new Dimension(120, 22));
         whitelistCategoryFilter.addActionListener(e -> {
             String text = whitelistSearchField.getText();
@@ -1932,7 +2723,7 @@ public class ClanPanel extends PluginPanel
         });
         filterRow.add(whitelistCategoryFilter, BorderLayout.CENTER);
 
-        whitelistSortCombo.setFont(new Font("Segoe UI", Font.PLAIN, 9));
+        whitelistSortCombo.setFont(READABLE_FONT_SMALL);
         whitelistSortCombo.setMaximumSize(new Dimension(110, 22));
         whitelistSortCombo.addActionListener(e -> {
             String text = whitelistSearchField.getText();
@@ -1998,12 +2789,12 @@ public class ClanPanel extends PluginPanel
                 headerRow.setBorder(new EmptyBorder(2, 4, 2, 4));
 
                 JLabel hdrName = new JLabel("#  Player");
-                hdrName.setFont(new Font("Segoe UI", Font.BOLD, 9));
+                hdrName.setFont(new Font("Segoe UI", Font.BOLD, 11));
                 hdrName.setForeground(new Color(150, 150, 200));
                 headerRow.add(hdrName, BorderLayout.WEST);
 
                 JLabel hdrRight = new JLabel("Pts  Drops  GP");
-                hdrRight.setFont(new Font("Segoe UI", Font.BOLD, 9));
+                hdrRight.setFont(new Font("Segoe UI", Font.BOLD, 11));
                 hdrRight.setForeground(new Color(150, 150, 200));
                 headerRow.add(hdrRight, BorderLayout.EAST);
                 dropsLeaderboardPanel.add(headerRow);
@@ -2069,7 +2860,7 @@ public class ClanPanel extends PluginPanel
 
                     JLabel statsLabel = new JLabel(
                         String.format("%d   %d   %s", points, drops, gpStr));
-                    statsLabel.setFont(new Font("Segoe UI", Font.PLAIN, 9));
+                    statsLabel.setFont(READABLE_FONT_SMALL);
                     statsLabel.setForeground(isMe
                         ? new Color(76, 175, 80)
                         : new Color(150, 150, 150));
@@ -2161,7 +2952,7 @@ public class ClanPanel extends PluginPanel
                                 ? String.format("%.0fK", value / 1_000.0)
                                 : value + " gp";
                         JLabel gpLabel = new JLabel(gpStr);
-                        gpLabel.setFont(new Font("Segoe UI", Font.PLAIN, 9));
+                        gpLabel.setFont(READABLE_FONT_SMALL);
                         gpLabel.setForeground(new Color(255, 215, 0));
                         gpLabel.setAlignmentX(Component.RIGHT_ALIGNMENT);
                         rightPanel.add(gpLabel);
@@ -2295,7 +3086,7 @@ public class ClanPanel extends PluginPanel
                     if (kc > 0) detail += " (" + kc + " kc)";
                     if (!date.isEmpty()) detail += " — " + date;
                     JLabel detLbl = new JLabel(truncate(detail, 28));
-                    detLbl.setFont(new Font("Segoe UI", Font.PLAIN, 9));
+                    detLbl.setFont(READABLE_FONT_SMALL);
                     detLbl.setForeground(new Color(110, 110, 110));
                     left.add(detLbl);
 
@@ -2505,7 +3296,7 @@ public class ClanPanel extends PluginPanel
 
         // Count label
         JLabel countLabel = new JLabel(filtered.size() + " items");
-        countLabel.setFont(new Font("Segoe UI", Font.PLAIN, 9));
+        countLabel.setFont(READABLE_FONT_SMALL);
         countLabel.setForeground(new Color(120, 120, 120));
         countLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
         countLabel.setBorder(new EmptyBorder(0, 2, 4, 0));

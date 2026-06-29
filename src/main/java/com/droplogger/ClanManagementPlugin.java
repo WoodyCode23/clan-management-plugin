@@ -269,6 +269,10 @@ public class ClanManagementPlugin extends Plugin
 
     // Adventure log PB sync state
     private int adventureLogPbTicksRemaining = -1;
+    private int caReadTicksRemaining = -1; // ticks until we read the CA task interface after it opens
+    // Task-name text color in the CA interface: bright green = completed, grey = incomplete.
+    private static final int CA_COMPLETE_COLOR = 0x0DC10D;
+    private static final int CA_TASK_NAME_COMPONENT = 10; // component 715,10 holds the task-name column
     private static final int JOURNALSCROLL_GROUP = 741;
     private static final int ADVENTURE_LOG_PB_DELAY_TICKS = 3;
     // Matches: "Fastest kill: 0:46.80", "Fastest run - (Team size: Solo): 13:52.80",
@@ -437,6 +441,7 @@ public class ClanManagementPlugin extends Plugin
     {
         // Set up side panel
         panel = new ClanPanel();
+        panel.setItemManager(itemManager); // for local item-icon rendering in the Members clog grid
         // Show tabs only if board code is configured
         panel.setConnected(isPlatformConfigured());
         panel.setOnRefresh(() -> executor.submit(this::refreshData));
@@ -450,6 +455,22 @@ public class ClanManagementPlugin extends Plugin
         {
             activityFilter = filter;
             refreshClanActivity();
+        }));
+        // Members tab: load the roster on first open, fetch a player's clog on select.
+        panel.setOnLoadRoster(() -> executor.submit(() ->
+        {
+            if (!isPlatformConfigured()) return;
+            panel.setMemberList(platformApiService.fetchRoster(getPlatformUrl(), getPlatformKey(), getPlatformSlug()));
+        }));
+        panel.setOnSelectMember(rsn -> executor.submit(() ->
+        {
+            if (!isPlatformConfigured()) return;
+            panel.showMemberProfile(rsn, platformApiService.fetchPlayerProfile(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), rsn));
+        }));
+        panel.setOnLoadClog(rsn -> executor.submit(() ->
+        {
+            if (!isPlatformConfigured()) return;
+            panel.showPlayerClog(rsn, platformApiService.fetchPlayerClog(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), rsn));
         }));
         panel.setOnClearHiscoreCache(() ->
         {
@@ -548,35 +569,6 @@ public class ClanManagementPlugin extends Plugin
             executor.submit(this::refreshData);
         }
 
-        if ("linkCode".equals(event.getKey()))
-        {
-            String entered = config.linkCode();
-            if (entered == null || entered.trim().isEmpty())
-            {
-                return;
-            }
-            // Clear it immediately so the one-time code isn't persisted in the config.
-            configManager.setConfiguration("droplogger", "linkCode", "");
-
-            if (!isPlatformConfigured())
-            {
-                client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
-                    "[Solus] Link failed: enter your API key in plugin settings first.", "");
-                return;
-            }
-
-            final String code = entered.trim();
-            final String url = getPlatformUrl();
-            final String key = getPlatformKey();
-            final String slug = getPlatformSlug();
-            final String rsn = client.getLocalPlayer() != null ? client.getLocalPlayer().getName() : "";
-            executor.submit(() ->
-            {
-                String result = platformApiService.redeemLinkCode(url, key, slug, code, rsn);
-                clientThread.invokeLater(() ->
-                    client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", "[Solus] " + result, ""));
-            });
-        }
     }
 
     @Subscribe
@@ -611,6 +603,18 @@ public class ClanManagementPlugin extends Plugin
         {
             adventureLogPbTicksRemaining = -1;
             parseAdventureLogPbs();
+        }
+
+        // Read the Combat Achievements interface a few ticks after it opens (deferred so the
+        // task list has populated its widgets).
+        if (caReadTicksRemaining > 0)
+        {
+            caReadTicksRemaining--;
+        }
+        else if (caReadTicksRemaining == 0)
+        {
+            caReadTicksRemaining = -1;
+            readCombatAchievements();
         }
 
         // Collection log auto-sync debounce
@@ -731,6 +735,12 @@ public class ClanManagementPlugin extends Plugin
             log.info("Adventure log Counters page detected (group 741), scheduling PB parse");
             // Defer by several ticks so widget text has time to populate
             adventureLogPbTicksRemaining = ADVENTURE_LOG_PB_DELAY_TICKS;
+        }
+
+        // Sync Combat Achievements whenever the player opens the CA task list.
+        if (event.getGroupId() == InterfaceID.CA_TASKS && isPlatformConfigured() && config.enableClogSync())
+        {
+            caReadTicksRemaining = 4;
         }
 
         if (event.getGroupId() == InterfaceID.COLLECTION && isPlatformConfigured() && config.enableClogSync())
@@ -1054,7 +1064,8 @@ public class ClanManagementPlugin extends Plugin
             bossKey,
             1, // solo
             timeMs,
-            "adventure_log"
+            "adventure_log",
+            null // solo — no roster
         ));
     }
 
@@ -1306,7 +1317,8 @@ public class ClanManagementPlugin extends Plugin
                     bossKey,
                     pb.teamSize,
                     pb.timeMs,
-                    "adventure_log"
+                    "adventure_log",
+                    null // imported from a single player's log — no roster
                 );
                 submitted++;
             }
@@ -1502,26 +1514,44 @@ public class ClanManagementPlugin extends Plugin
             getPlatformUrl(), getPlatformKey(), getPlatformSlug(), pRsn, pItem
         ));
 
-        // Pets arrive as a collection-log unlock rather than loot, so post them as a drop too —
-        // matched by name (PET_NAMES) since they never appear in the LootReceived item list.
-        if (PET_NAMES.contains(itemName.toLowerCase()) && config.enableDrops())
+        // A new collection-log unlock is a one-time notable event, so post it to the drop feed
+        // exactly once here. Repeat drops of the same item never re-fire this message, which is
+        // how we avoid per-kill spam (e.g. araxyte sacks). This also covers pets, which arrive
+        // as a clog unlock rather than loot and never appear in the LootReceived item list.
+        if (config.enableDrops())
         {
             ensureClogCategoryMap();
             WorldPoint wp = client.getLocalPlayer() != null
                 ? client.getLocalPlayer().getWorldLocation() : new WorldPoint(0, 0, 0);
-            int petItemId = clogNameToId != null ? clogNameToId.getOrDefault(itemName.toLowerCase(), -1) : -1;
+            int unlockItemId = clogNameToId != null ? clogNameToId.getOrDefault(itemName.toLowerCase(), -1) : -1;
             // Only attribute to the last boss if it was killed recently; otherwise it's a skilling
-            // pet (no associated kill) — avoid mislabeling it with a stale boss name.
+            // unlock (no associated kill) — avoid mislabeling it with a stale boss name.
             boolean recentKill = System.currentTimeMillis() - lastKillTime < 60_000
                 && lastKilledNpc != null && !lastKilledNpc.isEmpty();
-            String petSource = recentKill ? lastKilledNpc : "Skilling";
-            DropEntry petDrop = new DropEntry(
-                itemName, 0, petSource, recentKill ? lastKillCount : 0,
-                wp.getX(), wp.getY(), wp.getPlane(), playerName, petItemId
-            );
-            withScreenshot(true, screenshot ->
-                platformApiService.submitDrop(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), petDrop, screenshot));
-            log.debug("Pet drop logged: {} from {}", itemName, lastKilledNpc);
+            String unlockSource = recentKill ? lastKilledNpc : "Skilling";
+            int unlockValue = unlockItemId > 0 ? itemManager.getItemPrice(unlockItemId) : 0;
+
+            // Only post NOTABLE unlocks: pets, clan-whitelisted items, or anything worth at least
+            // the clan's min drop value. This keeps trash secondaries/currency (araxyte venom sack,
+            // hallowed mark) out of the feed even on first unlock.
+            boolean isPet = PET_NAMES.contains(itemName.toLowerCase());
+            boolean notable = isPet
+                || (unlockItemId > 0 && isPostableDrop(unlockItemId))
+                || unlockValue >= fetchedMinDropValue;
+            if (!notable)
+            {
+                log.debug("Skipping low-value clog unlock {} (value {})", itemName, unlockValue);
+            }
+            else
+            {
+                DropEntry unlockDrop = new DropEntry(
+                    itemName, unlockValue, unlockSource, recentKill ? lastKillCount : 0,
+                    wp.getX(), wp.getY(), wp.getPlane(), playerName, unlockItemId
+                );
+                withScreenshot(true, screenshot ->
+                    platformApiService.submitDrop(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), unlockDrop, screenshot));
+                log.debug("Clog-unlock drop logged: {} from {}", itemName, unlockSource);
+            }
         }
     }
 
@@ -1644,6 +1674,10 @@ public class ClanManagementPlugin extends Plugin
                 // Submit each party member's time. The first submit is synchronous so we learn
                 // the clan placement (clanRank 1 = new clan record); the rest are fire-and-forget.
                 // All members share the same time, so the rank is stable regardless of order.
+                // Roster string stored on every member's row so a team PB can show all names
+                // (e.g. a duo best renders "BlG Woody, BlG Moby"). Null for solo content.
+                final String teamMembers = finalPartySize > 1 ? rsns : null;
+
                 int clanRank = 0;
                 boolean firstMember = true;
                 for (String member : sortedMembers)
@@ -1651,13 +1685,13 @@ public class ClanManagementPlugin extends Plugin
                     if (firstMember)
                     {
                         clanRank = platformApiService.submitPbSync(getPlatformUrl(), getPlatformKey(), getPlatformSlug(),
-                            member.trim(), categoryKey, finalPartySize, timeMs, source, screenshot);
+                            member.trim(), categoryKey, finalPartySize, timeMs, source, teamMembers, screenshot);
                         firstMember = false;
                     }
                     else
                     {
                         platformApiService.submitPb(getPlatformUrl(), getPlatformKey(), getPlatformSlug(),
-                            member.trim(), categoryKey, finalPartySize, timeMs, source);
+                            member.trim(), categoryKey, finalPartySize, timeMs, source, teamMembers);
                     }
                 }
                 log.debug("Speed time submitted for {}: {} (clanRank {})", categoryKey, formattedTime, clanRank);
@@ -1809,9 +1843,6 @@ public class ClanManagementPlugin extends Plugin
         if (!config.enableDrops() || !isPlatformConfigured()) return;
         if (event.getItems() == null || event.getItems().isEmpty()) return;
 
-        // LootReceived fires on the client thread, so we can safely build the clog item set here.
-        ensureClogCategoryMap();
-
         String source = event.getName();
         int killCount = event.getType() == LootRecordType.NPC ? pbDetector.getLastKillCount() : 0;
         String playerName = client.getLocalPlayer() != null ? client.getLocalPlayer().getName() : "Unknown";
@@ -1836,13 +1867,14 @@ public class ClanManagementPlugin extends Plugin
         }
     }
 
-    /** A drop is postable if it's a collection-log item OR on the clan's curated whitelist. */
+    /**
+     * A loot drop is postable only if it's on the clan's curated whitelist. Collection-log
+     * uniques are NOT posted from loot — they'd spam the feed on every kill (e.g. araxyte sacks
+     * from Araxxor). Instead a clog unlock posts once via handleCollectionLogEntry the first
+     * time it's obtained.
+     */
     private boolean isPostableDrop(int itemId)
     {
-        if (clogItemCategoryMap != null && clogItemCategoryMap.containsKey(itemId))
-        {
-            return true;
-        }
         if (cachedClanWhitelist != null && !cachedClanWhitelist.isEmpty())
         {
             String name = itemManager.getItemComposition(itemId).getName();
@@ -1860,6 +1892,45 @@ public class ClanManagementPlugin extends Plugin
      * server catalog sync that buildClogCategoryMap does (that one runs when the clog is opened).
      * Cheap and cached after the first build; reads game enums so must run on the client thread.
      */
+    /**
+     * Read the open Combat Achievements task list and sync each task's completion to the platform.
+     * Each rendered row in the task-name column (component 715,10) is a task whose text is the
+     * exact task name (matches the wiki catalog) and whose text color encodes completion
+     * (green = done, grey = not done). The list isn't virtualized, so every row matching the
+     * player's current filter is present at once. Sync is per-task upsert, so any filter is safe —
+     * an "All" filter syncs everything in one open, a narrower filter just updates a subset.
+     */
+    private void readCombatAchievements()
+    {
+        if (!isPlatformConfigured()) return;
+        String rsn = client.getLocalPlayer() != null ? client.getLocalPlayer().getName() : null;
+        if (rsn == null || rsn.isEmpty()) return;
+
+        Widget list = client.getWidget(InterfaceID.CA_TASKS, CA_TASK_NAME_COMPONENT);
+        if (list == null) return;
+        Widget[] rows = list.getDynamicChildren();
+        if (rows == null || rows.length == 0) return;
+
+        List<PlatformApiService.CaTask> tasks = new ArrayList<>();
+        int completed = 0;
+        for (Widget row : rows)
+        {
+            String name = row.getText();
+            if (name == null || name.isEmpty()) continue;
+            boolean done = row.getTextColor() == CA_COMPLETE_COLOR;
+            if (done) completed++;
+            tasks.add(new PlatformApiService.CaTask(name.trim(), done));
+        }
+        if (tasks.isEmpty()) return;
+
+        final String fRsn = rsn;
+        final List<PlatformApiService.CaTask> fTasks = tasks;
+        final int fCompleted = completed;
+        executor.submit(() -> platformApiService.syncCombatAchievements(
+            getPlatformUrl(), getPlatformKey(), getPlatformSlug(), fRsn, fTasks));
+        log.info("Synced {} combat achievements ({} complete) for {}", tasks.size(), fCompleted, fRsn);
+    }
+
     private void ensureClogCategoryMap()
     {
         if (clogItemCategoryMap != null) return;

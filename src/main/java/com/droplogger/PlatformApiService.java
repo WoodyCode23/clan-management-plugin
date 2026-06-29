@@ -11,8 +11,10 @@ import javax.inject.Inject;
 import javax.inject.Singleton;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 @Slf4j
@@ -94,14 +96,15 @@ public class PlatformApiService
     public void submitPb(String baseUrl, String apiKey, String clanSlug,
                          String rsn, String bossKey, int teamSize, int timeMs)
     {
-        submitPb(baseUrl, apiKey, clanSlug, rsn, bossKey, teamSize, timeMs, "live");
+        submitPb(baseUrl, apiKey, clanSlug, rsn, bossKey, teamSize, timeMs, "live", null);
     }
 
     /**
      * Submit a personal best to the platform API with a specific source.
+     * teamMembers = comma-joined roster for team content (null for solo).
      */
     public void submitPb(String baseUrl, String apiKey, String clanSlug,
-                         String rsn, String bossKey, int teamSize, int timeMs, String source)
+                         String rsn, String bossKey, int teamSize, int timeMs, String source, String teamMembers)
     {
         JsonObject payload = new JsonObject();
         payload.addProperty("rsn", rsn);
@@ -110,6 +113,10 @@ public class PlatformApiService
         payload.addProperty("teamSize", teamSize);
         payload.addProperty("timeMs", timeMs);
         payload.addProperty("source", source);
+        if (teamMembers != null && !teamMembers.isEmpty())
+        {
+            payload.addProperty("teamMembers", teamMembers);
+        }
 
         postAsync(baseUrl + "/clans/" + clanSlug + "/pbs", apiKey, payload, "Platform PB");
     }
@@ -119,7 +126,8 @@ public class PlatformApiService
      * or 0 on failure / non-live. Call off the client thread (it blocks on the network).
      */
     public int submitPbSync(String baseUrl, String apiKey, String clanSlug,
-                            String rsn, String bossKey, int teamSize, int timeMs, String source, String screenshotB64)
+                            String rsn, String bossKey, int teamSize, int timeMs, String source,
+                            String teamMembers, String screenshotB64)
     {
         JsonObject payload = new JsonObject();
         payload.addProperty("rsn", rsn);
@@ -128,6 +136,10 @@ public class PlatformApiService
         payload.addProperty("teamSize", teamSize);
         payload.addProperty("timeMs", timeMs);
         payload.addProperty("source", source);
+        if (teamMembers != null && !teamMembers.isEmpty())
+        {
+            payload.addProperty("teamMembers", teamMembers);
+        }
         if (screenshotB64 != null)
         {
             payload.addProperty("screenshot", screenshotB64);
@@ -183,6 +195,36 @@ public class PlatformApiService
             log.warn("fetchClanBestTimeMs failed", ex);
             return 0;
         }
+    }
+
+    /** One Combat Achievement task read from the in-game CA interface. */
+    public static class CaTask
+    {
+        public final String name;
+        public final boolean completed;
+        public CaTask(String name, boolean completed) { this.name = name; this.completed = completed; }
+    }
+
+    /**
+     * Bulk-sync the player's Combat Achievement completion state. The server matches each task by
+     * name to its catalog (tier/monster/type) and upserts the player's completion per task.
+     */
+    public void syncCombatAchievements(String baseUrl, String apiKey, String clanSlug,
+                                       String rsn, java.util.List<CaTask> tasks)
+    {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("rsn", rsn);
+        addAccountHash(payload);
+        JsonArray arr = new JsonArray();
+        for (CaTask t : tasks)
+        {
+            JsonObject o = new JsonObject();
+            o.addProperty("name", t.name);
+            o.addProperty("completed", t.completed);
+            arr.add(o);
+        }
+        payload.add("tasks", arr);
+        postAsync(baseUrl + "/clans/" + clanSlug + "/combat-achievements/bulk", apiKey, payload, "Platform CA sync");
     }
 
     /**
@@ -276,53 +318,6 @@ public class PlatformApiService
         payload.addProperty("detail", detail);
 
         postAsync(baseUrl + "/clans/" + clanSlug + "/achievements", apiKey, payload, "Platform achievement");
-    }
-
-    /**
-     * Redeem a website link code, binding this in-game account to the Discord user who
-     * generated it. Sends the live account hash + RSN as proof of in-game control.
-     * Blocks on the network — call off the client thread. Returns a human-readable result.
-     */
-    public String redeemLinkCode(String baseUrl, String apiKey, String clanSlug, String code, String rsn)
-    {
-        if (accountHash == null || accountHash.isEmpty())
-        {
-            return "Link failed: log in to the account you want to link first.";
-        }
-
-        JsonObject payload = new JsonObject();
-        payload.addProperty("code", code);
-        payload.addProperty("rsn", rsn);
-        payload.addProperty("accountHash", accountHash);
-
-        Request request = new Request.Builder()
-            .url(baseUrl + "/clans/" + clanSlug + "/link/redeem")
-            .header("Authorization", "Bearer " + apiKey)
-            .post(RequestBody.create(JSON, gson.toJson(payload)))
-            .build();
-        try (Response response = httpClient.newCall(request).execute())
-        {
-            String bodyStr = response.body() != null ? response.body().string() : "";
-            if (response.isSuccessful())
-            {
-                return "Account linked to your Solus profile.";
-            }
-            try
-            {
-                JsonObject err = gson.fromJson(bodyStr, JsonObject.class);
-                if (err != null && err.has("error"))
-                {
-                    return "Link failed: " + err.get("error").getAsString();
-                }
-            }
-            catch (Exception ignored) { /* fall through to generic message */ }
-            return "Link failed (HTTP " + response.code() + ").";
-        }
-        catch (Exception ex)
-        {
-            log.warn("redeemLinkCode failed", ex);
-            return "Link failed: could not reach the server.";
-        }
     }
 
     /**
@@ -501,6 +496,10 @@ public class PlatformApiService
         Map<String, List<HiscoreEntry>> result = new java.util.LinkedHashMap<>();
         com.google.gson.JsonArray leaderboard = response.getAsJsonArray("leaderboard");
 
+        // Team content submits one row per member (same time + roster). Collapse those into a
+        // single team line so a duo best shows "BlG Woody, BlG Moby" once, not one row each.
+        java.util.Set<String> seenTeam = new java.util.HashSet<>();
+
         for (com.google.gson.JsonElement elem : leaderboard)
         {
             JsonObject pb = elem.getAsJsonObject();
@@ -508,6 +507,22 @@ public class PlatformApiService
             int teamSize = pb.has("teamSize") ? pb.get("teamSize").getAsInt() : 1;
             String rsn = pb.has("rsn") ? pb.get("rsn").getAsString() : "";
             int timeMs = pb.has("timeMs") ? pb.get("timeMs").getAsInt() : 0;
+            String teamMembers = pb.has("teamMembers") && !pb.get("teamMembers").isJsonNull()
+                ? pb.get("teamMembers").getAsString() : null;
+
+            // For team content, show the full roster (the leaderboard render already lays out
+            // multi-name entries when the name contains a comma). Fall back to the single rsn.
+            String display = (teamSize > 1 && teamMembers != null && !teamMembers.isEmpty())
+                ? teamMembers : rsn;
+
+            if (teamSize > 1)
+            {
+                String dedupeKey = bossKey + "|" + teamSize + "|" + timeMs + "|" + display;
+                if (!seenTeam.add(dedupeKey))
+                {
+                    continue; // already added this team's time from another member's row
+                }
+            }
 
             double timeSeconds = timeMs / 1000.0;
             int totalSec = (int) timeSeconds;
@@ -517,7 +532,7 @@ public class PlatformApiService
 
             // Use bossKey directly as the category key (matches BossCategory.getKey())
             result.computeIfAbsent(bossKey, k -> new java.util.ArrayList<>())
-                .add(new HiscoreEntry(0, timeSeconds, formattedTime, rsn, "", bossKey, teamSize));
+                .add(new HiscoreEntry(0, timeSeconds, formattedTime, display, "", bossKey, teamSize));
         }
 
         // Sort each category by time and assign 1-based ranks. HiscoreEntry.rank is final, so
@@ -595,6 +610,176 @@ public class PlatformApiService
                 o.has("pinned") && o.get("pinned").getAsBoolean()));
         }
         return out;
+    }
+
+    /** A clan roster member (for the in-panel member browser). */
+    public static class RosterMember
+    {
+        public final String rsn;
+        public final String rank;
+        public RosterMember(String rsn, String rank) { this.rsn = rsn; this.rank = rank; }
+    }
+
+    /** Fetch the clan roster (names + ranks) for the Members tab. */
+    public List<RosterMember> fetchRoster(String baseUrl, String apiKey, String clanSlug)
+    {
+        List<RosterMember> out = new ArrayList<>();
+        JsonObject root = getSync(baseUrl + "/clans/" + clanSlug + "/roster", apiKey);
+        if (root == null || !root.has("roster")) return out;
+        for (JsonElement el : root.getAsJsonArray("roster"))
+        {
+            JsonObject o = el.getAsJsonObject();
+            out.add(new RosterMember(
+                o.has("rsn") ? o.get("rsn").getAsString() : "",
+                o.has("rank") && !o.get("rank").isJsonNull() ? o.get("rank").getAsString() : null));
+        }
+        return out;
+    }
+
+    /** One collection-log slot + whether the viewed player owns it. */
+    public static class ClogCatalogItem
+    {
+        public final int itemId;
+        public final String name;
+        public final String tab;
+        public final String category;
+        public final boolean owned;
+        public ClogCatalogItem(int itemId, String name, String tab, String category, boolean owned)
+        {
+            this.itemId = itemId; this.name = name; this.tab = tab; this.category = category; this.owned = owned;
+        }
+    }
+
+    /** A player's full collection log: headline X/Y + every slot with owned status. */
+    public static class PlayerClog
+    {
+        public final int obtained;
+        public final int total;
+        public final List<ClogCatalogItem> items;
+        public PlayerClog(int obtained, int total, List<ClogCatalogItem> items)
+        {
+            this.obtained = obtained; this.total = total; this.items = items;
+        }
+    }
+
+    /** Fetch any clan member's collection log (catalog + owned status) for the Members tab. */
+    public PlayerClog fetchPlayerClog(String baseUrl, String apiKey, String clanSlug, String rsn)
+    {
+        JsonObject root = getSync(baseUrl + "/clans/" + clanSlug + "/collection-log/" + encodePath(rsn), apiKey);
+        if (root == null) return null;
+
+        Set<Integer> owned = new HashSet<>();
+        if (root.has("entries"))
+        {
+            for (JsonElement el : root.getAsJsonArray("entries"))
+            {
+                JsonObject o = el.getAsJsonObject();
+                if (o.has("itemId") && !o.get("itemId").isJsonNull()) owned.add(o.get("itemId").getAsInt());
+            }
+        }
+
+        List<ClogCatalogItem> items = new ArrayList<>();
+        if (root.has("catalog"))
+        {
+            for (JsonElement el : root.getAsJsonArray("catalog"))
+            {
+                JsonObject o = el.getAsJsonObject();
+                int itemId = o.has("itemId") ? o.get("itemId").getAsInt() : -1;
+                items.add(new ClogCatalogItem(
+                    itemId,
+                    o.has("itemName") && !o.get("itemName").isJsonNull() ? o.get("itemName").getAsString() : "",
+                    o.has("tab") && !o.get("tab").isJsonNull() ? o.get("tab").getAsString() : "Other",
+                    o.has("category") && !o.get("category").isJsonNull() ? o.get("category").getAsString() : "Other",
+                    owned.contains(itemId)));
+            }
+        }
+
+        int obtained = root.has("obtained") && !root.get("obtained").isJsonNull() ? root.get("obtained").getAsInt() : owned.size();
+        int total = root.has("totalSlots") && !root.get("totalSlots").isJsonNull() ? root.get("totalSlots").getAsInt() : items.size();
+        return new PlayerClog(obtained, total, items);
+    }
+
+    private static String encodePath(String s)
+    {
+        try { return java.net.URLEncoder.encode(s, "UTF-8").replace("+", "%20"); }
+        catch (Exception e) { return s; }
+    }
+
+    /** A player's best time at one boss/team-size. */
+    public static class PlayerPb
+    {
+        public final String bossKey;
+        public final int teamSize;
+        public final int timeMs;
+        public final String teamMembers; // comma-joined roster for team content, else null
+        public PlayerPb(String bossKey, int teamSize, int timeMs, String teamMembers)
+        {
+            this.bossKey = bossKey; this.teamSize = teamSize; this.timeMs = timeMs;
+            this.teamMembers = teamMembers;
+        }
+    }
+
+    /** One of a player's recent drops. */
+    public static class PlayerDrop
+    {
+        public final String itemName;
+        public final long value;
+        public final String monsterName;
+        public PlayerDrop(String itemName, long value, String monsterName)
+        {
+            this.itemName = itemName; this.value = value; this.monsterName = monsterName;
+        }
+    }
+
+    /** A member's profile for the Members tab: clog counts + their PBs + recent drops. */
+    public static class PlayerProfile
+    {
+        public final int clogObtained;
+        public final int clogTotal;
+        public final List<PlayerPb> pbs;
+        public final List<PlayerDrop> drops;
+        public PlayerProfile(int clogObtained, int clogTotal, List<PlayerPb> pbs, List<PlayerDrop> drops)
+        {
+            this.clogObtained = clogObtained; this.clogTotal = clogTotal; this.pbs = pbs; this.drops = drops;
+        }
+    }
+
+    /** Fetch a member's profile (PBs + recent drops + clog counts) in one call. */
+    public PlayerProfile fetchPlayerProfile(String baseUrl, String apiKey, String clanSlug, String rsn)
+    {
+        JsonObject root = getSync(baseUrl + "/clans/" + clanSlug + "/players/" + encodePath(rsn), apiKey);
+        if (root == null) return null;
+
+        List<PlayerPb> pbs = new ArrayList<>();
+        if (root.has("personalBests"))
+        {
+            for (JsonElement el : root.getAsJsonArray("personalBests"))
+            {
+                JsonObject o = el.getAsJsonObject();
+                pbs.add(new PlayerPb(
+                    o.has("bossKey") ? o.get("bossKey").getAsString() : "",
+                    o.has("teamSize") ? o.get("teamSize").getAsInt() : 1,
+                    o.has("timeMs") && !o.get("timeMs").isJsonNull() ? o.get("timeMs").getAsInt() : 0,
+                    o.has("teamMembers") && !o.get("teamMembers").isJsonNull() ? o.get("teamMembers").getAsString() : null));
+            }
+        }
+
+        List<PlayerDrop> drops = new ArrayList<>();
+        if (root.has("recentDrops"))
+        {
+            for (JsonElement el : root.getAsJsonArray("recentDrops"))
+            {
+                JsonObject o = el.getAsJsonObject();
+                drops.add(new PlayerDrop(
+                    o.has("itemName") ? o.get("itemName").getAsString() : "",
+                    o.has("value") && !o.get("value").isJsonNull() ? o.get("value").getAsLong() : 0,
+                    o.has("monsterName") && !o.get("monsterName").isJsonNull() ? o.get("monsterName").getAsString() : ""));
+            }
+        }
+
+        int clogObtained = root.has("collectionLogCount") && !root.get("collectionLogCount").isJsonNull() ? root.get("collectionLogCount").getAsInt() : 0;
+        int clogTotal = root.has("collectionLogTotal") && !root.get("collectionLogTotal").isJsonNull() ? root.get("collectionLogTotal").getAsInt() : 0;
+        return new PlayerProfile(clogObtained, clogTotal, pbs, drops);
     }
 
     /** Create an announcement (admin — needs a key whose owner has manage_announcements/admin). */

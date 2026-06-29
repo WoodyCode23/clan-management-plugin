@@ -11,10 +11,10 @@ import java.util.function.Consumer;
 
 public class AdminPanel extends JPanel
 {
-    private static final Font SECTION_FONT = new Font("Segoe UI", Font.BOLD, 11);
+    private static final Font SECTION_FONT = new Font("Segoe UI", Font.BOLD, 12);
     private static final Font LABEL_FONT = new Font("Segoe UI", Font.PLAIN, 11);
-    private static final Font SMALL_FONT = new Font("Segoe UI", Font.PLAIN, 10);
-    private static final Font SMALL_ITALIC = new Font("Segoe UI", Font.ITALIC, 10);
+    private static final Font SMALL_FONT = new Font("Segoe UI", Font.PLAIN, 11);
+    private static final Font SMALL_ITALIC = new Font("Segoe UI", Font.ITALIC, 11);
 
     private final JLabel statusLabel = new JLabel("Admin ready");
 
@@ -445,7 +445,7 @@ public class AdminPanel extends JPanel
     private JButton miniButton(String text)
     {
         JButton b = new JButton(text);
-        b.setFont(new Font("Segoe UI", Font.PLAIN, 9));
+        b.setFont(new Font("Segoe UI", Font.PLAIN, 10));
         b.setMargin(new Insets(1, 4, 1, 4));
         b.setFocusPainted(false);
         return b;
