@@ -1126,6 +1126,19 @@ public class ClanPanel extends PluginPanel
         row.setAlignmentX(Component.LEFT_ALIGNMENT);
         row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 40));
 
+        // Item icon (by id from the server, or resolved from the name).
+        int iconId = d.itemId > 0 ? d.itemId : resolveItemId(d.itemName);
+        if (iconId > 0 && itemManager != null)
+        {
+            JLabel icon = new JLabel();
+            icon.setHorizontalAlignment(SwingConstants.CENTER);
+            icon.setPreferredSize(new Dimension(36, 32));
+            AsyncBufferedImage img = itemManager.getImage(iconId);
+            icon.setIcon(new ImageIcon(img));
+            img.onLoaded(() -> { icon.setIcon(new ImageIcon(img)); icon.revalidate(); icon.repaint(); });
+            row.add(icon, BorderLayout.WEST);
+        }
+
         JPanel left = new JPanel();
         left.setLayout(new BoxLayout(left, BoxLayout.Y_AXIS));
         left.setBackground(row.getBackground());

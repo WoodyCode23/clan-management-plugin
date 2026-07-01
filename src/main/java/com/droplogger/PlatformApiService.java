@@ -862,11 +862,12 @@ public class PlatformApiService
     public static class PlayerDrop
     {
         public final String itemName;
+        public final int itemId;
         public final long value;
         public final String monsterName;
-        public PlayerDrop(String itemName, long value, String monsterName)
+        public PlayerDrop(String itemName, int itemId, long value, String monsterName)
         {
-            this.itemName = itemName; this.value = value; this.monsterName = monsterName;
+            this.itemName = itemName; this.itemId = itemId; this.value = value; this.monsterName = monsterName;
         }
     }
 
@@ -916,6 +917,7 @@ public class PlatformApiService
                 JsonObject o = el.getAsJsonObject();
                 drops.add(new PlayerDrop(
                     o.has("itemName") ? o.get("itemName").getAsString() : "",
+                    o.has("itemId") && !o.get("itemId").isJsonNull() ? o.get("itemId").getAsInt() : 0,
                     o.has("value") && !o.get("value").isJsonNull() ? o.get("value").getAsLong() : 0,
                     o.has("monsterName") && !o.get("monsterName").isJsonNull() ? o.get("monsterName").getAsString() : ""));
             }
