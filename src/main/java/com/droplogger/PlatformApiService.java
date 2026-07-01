@@ -11,6 +11,7 @@ import javax.inject.Inject;
 import javax.inject.Singleton;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -225,6 +226,23 @@ public class PlatformApiService
         }
         payload.add("tasks", arr);
         postAsync(baseUrl + "/clans/" + clanSlug + "/combat-achievements/bulk", apiKey, payload, "Platform CA sync");
+    }
+
+    /**
+     * Claim a clan rank. The plugin evaluates requirements LOCALLY and sends only the result
+     * (eligible + what's missing) — never any bank/item data. The server pings staff.
+     */
+    public void requestRank(String baseUrl, String apiKey, String clanSlug, String rsn,
+                            String rankName, boolean eligible, java.util.List<String> missing)
+    {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("rsn", rsn);
+        payload.addProperty("rankName", rankName);
+        payload.addProperty("eligible", eligible);
+        JsonArray arr = new JsonArray();
+        for (String m : missing) arr.add(m);
+        payload.add("missing", arr);
+        postAsync(baseUrl + "/clans/" + clanSlug + "/rank-request", apiKey, payload, "Rank request");
     }
 
     /** One catalog task with the viewed player's completion state. */
@@ -724,6 +742,39 @@ public class PlatformApiService
         return out;
     }
 
+    public static class RankMode
+    {
+        public final String mode;         // "default" | "clog_only" | "admin_set"
+        public final String assignedRank; // set only for admin_set
+        public RankMode(String mode, String assignedRank) { this.mode = mode; this.assignedRank = assignedRank; }
+    }
+
+    /** How a member's ranks should be evaluated: default auto, collection-log-only, or admin-set. */
+    public RankMode fetchRankMode(String baseUrl, String apiKey, String clanSlug, String rsn)
+    {
+        JsonObject root = getSync(baseUrl + "/clans/" + clanSlug + "/rank-mode/" + encodePath(rsn), apiKey);
+        if (root == null) return new RankMode("default", null);
+        String mode = root.has("mode") && !root.get("mode").isJsonNull() ? root.get("mode").getAsString() : "default";
+        String assigned = root.has("assignedRank") && !root.get("assignedRank").isJsonNull()
+            ? root.get("assignedRank").getAsString() : null;
+        return new RankMode(mode, assigned);
+    }
+
+    /** Boss kill counts (WiseOldMan, via our server) keyed by WOM metric name → KC. Public hiscore data. */
+    public Map<String, Integer> fetchPlayerKc(String baseUrl, String apiKey, String clanSlug, String rsn)
+    {
+        Map<String, Integer> out = new HashMap<>();
+        JsonObject root = getSync(baseUrl + "/clans/" + clanSlug + "/player-kc/" + encodePath(rsn), apiKey);
+        if (root == null || !root.has("bosses")) return out;
+        JsonObject b = root.getAsJsonObject("bosses");
+        for (Map.Entry<String, JsonElement> e : b.entrySet())
+        {
+            try { out.put(e.getKey().toLowerCase(), e.getValue().getAsInt()); }
+            catch (Exception ignored) { /* skip non-numeric */ }
+        }
+        return out;
+    }
+
     /** One collection-log slot + whether the viewed player owns it. */
     public static class ClogCatalogItem
     {
@@ -948,5 +999,47 @@ public class PlatformApiService
                 }
             }
         });
+    }
+
+    /** PUT/DELETE helper for admin mutations (rank overrides). */
+    private void mutateAsync(String url, String apiKey, JsonObject payload, String method, String label)
+    {
+        Request.Builder b = new Request.Builder().url(url).header("Authorization", "Bearer " + apiKey);
+        if ("DELETE".equals(method))
+        {
+            b.delete();
+        }
+        else
+        {
+            b.put(RequestBody.create(JSON, gson.toJson(payload == null ? new JsonObject() : payload)));
+        }
+        httpClient.newCall(b.build()).enqueue(new Callback()
+        {
+            @Override public void onFailure(Call call, IOException e) { log.error("Failed {}", label, e); }
+            @Override public void onResponse(Call call, Response response)
+            {
+                int code = response.code();
+                response.close();
+                if (code >= 200 && code < 300) { log.debug("{} ok", label); }
+                else { log.error("{} failed with status {}", label, code); }
+            }
+        });
+    }
+
+    /** Admin: set a member's rank eval override (clog_only / admin_set). Sticky until cleared. */
+    public void setRankOverride(String baseUrl, String apiKey, String clanSlug, String rsn,
+                                String mode, String assignedRank, String setBy)
+    {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("mode", mode);
+        if (assignedRank != null) payload.addProperty("assignedRank", assignedRank);
+        if (setBy != null) payload.addProperty("setBy", setBy);
+        mutateAsync(baseUrl + "/clans/" + clanSlug + "/rank-overrides/" + encodePath(rsn), apiKey, payload, "PUT", "Set rank override");
+    }
+
+    /** Admin: clear a member's rank override → back to default auto-eval. */
+    public void clearRankOverride(String baseUrl, String apiKey, String clanSlug, String rsn)
+    {
+        mutateAsync(baseUrl + "/clans/" + clanSlug + "/rank-overrides/" + encodePath(rsn), apiKey, null, "DELETE", "Clear rank override");
     }
 }

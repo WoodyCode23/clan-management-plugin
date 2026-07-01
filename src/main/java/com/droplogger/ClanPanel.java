@@ -4,6 +4,9 @@ import net.runelite.api.Skill;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.PluginPanel;
 import net.runelite.client.game.ItemManager;
+import net.runelite.http.api.item.ItemPrice;
+import net.runelite.client.game.SpriteManager;
+import net.runelite.api.gameval.SpriteID;
 import net.runelite.client.util.AsyncBufferedImage;
 import net.runelite.client.util.ImageUtil;
 import net.runelite.client.util.LinkBrowser;
@@ -67,6 +70,9 @@ public class ClanPanel extends PluginPanel
     private java.util.List<PlatformApiService.RosterMember> currentMembers = new java.util.ArrayList<>();
     private Runnable onLoadRoster;
     private java.util.function.Consumer<String> onSelectMember;
+    private boolean platformAdmin = false;
+    private java.util.function.Consumer<Object[]> onSetRankOverride; // {rsn, mode, assignedRank}
+    private java.util.function.Consumer<String> onClearRankOverride; // rsn
     private ItemManager itemManager; // for local item-icon rendering in the clog grid
     private PlatformApiService.PlayerClog currentClog = null;
     private String currentClogRsn = null;
@@ -79,6 +85,39 @@ public class ClanPanel extends PluginPanel
     private final JTextField caTaskSearchField = new JTextField();
     private final JPanel caTaskListPanel = new JPanel();
     private java.util.function.Consumer<String> onLoadCa;
+    private Runnable onLoadRanks;
+    private final JPanel ranksContent = new ScrollableColumn();
+    private boolean ranksActive = false;
+    private java.util.function.Consumer<Object[]> onRequestRank; // {rankName, eligible(Boolean), missing(List)}
+    private SpriteManager spriteManager; // in-game clan-rank icon sprites
+
+    // In-game clan-rank icon sprite per rank (the SpriteID.ClanRankIcons set — the same icons shown
+    // in the Solus CC). The clan's icon-per-rank choice isn't exposed by the RuneLite API, so these
+    // are mapped by hand; adjust each sprite id to the icon picked in the clan rank-title settings
+    // (the icon tooltip shows the current sprite id to make matching easy).
+    private static final java.util.Map<String, Integer> RANK_ICON_SPRITE = new java.util.HashMap<>();
+    static
+    {
+        // Mapped by the user against the live in-game clan-rank icons (cache sprite IDs).
+        RANK_ICON_SPRITE.put("adamant_sword", 3150);
+        RANK_ICON_SPRITE.put("rune_sword", 3143);
+        RANK_ICON_SPRITE.put("dragon_sword", 3144);
+        RANK_ICON_SPRITE.put("tzkal", 3246);
+        RANK_ICON_SPRITE.put("adamant_pick", 3150);
+        RANK_ICON_SPRITE.put("rune_pick", 3151);
+        RANK_ICON_SPRITE.put("dragon_pick", 3152);
+        RANK_ICON_SPRITE.put("maxed", 3247);
+        RANK_ICON_SPRITE.put("adamant_comp", 3323);
+        RANK_ICON_SPRITE.put("rune_comp", 3324);
+        RANK_ICON_SPRITE.put("dragon_comp", 3320);
+        RANK_ICON_SPRITE.put("beast", 3073);
+        RANK_ICON_SPRITE.put("gm_beast", 3206);
+        RANK_ICON_SPRITE.put("xp_beast", 3071);
+        RANK_ICON_SPRITE.put("log_beast", 3217);
+        RANK_ICON_SPRITE.put("heart_2", 3109);
+        RANK_ICON_SPRITE.put("heart_3", 3110);
+        RANK_ICON_SPRITE.put("heart_4", 3111);
+    }
 
     /** A BoxLayout column that fills the scroll viewport's WIDTH (so children fit beside the scrollbar). */
     private static class ScrollableColumn extends JPanel implements javax.swing.Scrollable
@@ -216,14 +255,22 @@ public class ClanPanel extends PluginPanel
         // Members tab (browse other players' collection logs)
         tabbedPane.addTab("Members", buildMembersTab());
 
-        // Lazily load the roster the first time the Members tab is opened.
+        // Ranks tab (which clan ranks YOU qualify for)
+        tabbedPane.addTab("Ranks", buildRanksTab());
+
+        // Lazy-load roster on first Members open; (re)evaluate ranks whenever the Ranks tab opens.
         tabbedPane.addChangeListener(e ->
         {
             int idx = tabbedPane.getSelectedIndex();
-            if (idx >= 0 && "Members".equals(tabbedPane.getTitleAt(idx))
-                && currentMembers.isEmpty() && onLoadRoster != null)
+            String title = idx >= 0 ? tabbedPane.getTitleAt(idx) : "";
+            if ("Members".equals(title) && currentMembers.isEmpty() && onLoadRoster != null)
             {
                 onLoadRoster.run();
+            }
+            ranksActive = "Ranks".equals(title);
+            if (ranksActive && onLoadRanks != null)
+            {
+                onLoadRanks.run();
             }
         });
 
@@ -273,6 +320,8 @@ public class ClanPanel extends PluginPanel
         home.add(createNavCard("Activity", "Live feed: joins, leaves, drops, PBs & clog", new Color(100, 180, 255), "Activity"));
         home.add(Box.createVerticalStrut(8));
         home.add(createNavCard("Members", "Browse clan members' collection logs", new Color(186, 142, 255), "Members"));
+        home.add(Box.createVerticalStrut(8));
+        home.add(createNavCard("My Ranks", "Check which clan ranks you qualify for", ACCENT_GOLD, "Ranks"));
         home.add(Box.createVerticalStrut(20));
 
         // ── Active Event card ──
@@ -669,6 +718,83 @@ public class ClanPanel extends PluginPanel
     }
 
     public void setItemManager(ItemManager im) { this.itemManager = im; }
+    public void setSpriteManager(SpriteManager sm) { this.spriteManager = sm; }
+
+    /** Admin reference: render every clan-rank icon sprite with its ID so the right ones can be mapped. */
+    private void showRankIconReference()
+    {
+        SwingUtilities.invokeLater(() ->
+        {
+            ranksContent.removeAll();
+            ranksContent.add(clogBackButton("← Ranks", () -> { if (onLoadRanks != null) onLoadRanks.run(); }));
+            ranksContent.add(Box.createVerticalStrut(4));
+            JLabel info = new JLabel("<html>These are the in-game clan-rank icons. Find the symbol for each "
+                + "rank (sword, pickaxe, infernal cape, max cape, horseshoe…) and send me its <b>#id</b>.</html>");
+            info.setFont(READABLE_FONT_SMALL);
+            info.setForeground(new Color(170, 170, 170));
+            info.setAlignmentX(Component.LEFT_ALIGNMENT);
+            info.setMaximumSize(new Dimension(Integer.MAX_VALUE, 60));
+            info.setBorder(new EmptyBorder(0, 0, 6, 0));
+            ranksContent.add(info);
+
+            JPanel grid = new JPanel(new java.awt.GridLayout(0, 4, 4, 6));
+            grid.setBackground(new Color(30, 30, 30));
+            grid.setAlignmentX(Component.LEFT_ALIGNMENT);
+            int base = SpriteID.ClanRankIcons._0; // 3062
+            for (int i = 0; i < 280; i++)
+            {
+                final int sprite = base + i;
+                JPanel cell = new JPanel();
+                cell.setLayout(new BoxLayout(cell, BoxLayout.Y_AXIS));
+                cell.setBackground(new Color(40, 40, 40));
+                cell.setBorder(new EmptyBorder(3, 3, 3, 3));
+                final JLabel icon = new JLabel();
+                icon.setAlignmentX(Component.CENTER_ALIGNMENT);
+                icon.setPreferredSize(new Dimension(24, 22));
+                if (spriteManager != null)
+                {
+                    spriteManager.getSpriteAsync(sprite, 0, img -> SwingUtilities.invokeLater(() ->
+                    {
+                        if (img != null) { icon.setIcon(new ImageIcon(img)); icon.revalidate(); icon.repaint(); }
+                    }));
+                }
+                JLabel id = new JLabel("#" + sprite);
+                id.setFont(READABLE_FONT_SMALL.deriveFont(9f));
+                id.setForeground(new Color(150, 150, 150));
+                id.setAlignmentX(Component.CENTER_ALIGNMENT);
+                cell.add(icon);
+                cell.add(id);
+                grid.add(cell);
+            }
+            JPanel gridWrap = new JPanel(new BorderLayout());
+            gridWrap.setBackground(new Color(30, 30, 30));
+            gridWrap.setAlignmentX(Component.LEFT_ALIGNMENT);
+            gridWrap.add(grid, BorderLayout.NORTH);
+            ranksContent.add(gridWrap);
+            ranksContent.revalidate();
+            ranksContent.repaint();
+        });
+    }
+
+    /** A clan-rank icon (in-game sprite) for the given rank id, async-loaded. Empty if unmapped. */
+    private JLabel rankSpriteIcon(String rankId)
+    {
+        JLabel label = new JLabel();
+        label.setPreferredSize(new Dimension(22, 20));
+        Integer sprite = RANK_ICON_SPRITE.get(rankId);
+        if (sprite != null)
+        {
+            label.setToolTipText("clan rank icon sprite #" + sprite);
+            if (spriteManager != null)
+            {
+                spriteManager.getSpriteAsync(sprite, 0, img -> SwingUtilities.invokeLater(() ->
+                {
+                    if (img != null) { label.setIcon(new ImageIcon(img)); label.revalidate(); label.repaint(); }
+                }));
+            }
+        }
+        return label;
+    }
 
     /** Entry point from the plugin: cache the clog and show the tab overview. */
     public void showPlayerClog(String rsn, PlatformApiService.PlayerClog clog)
@@ -724,9 +850,97 @@ public class ClanPanel extends PluginPanel
                 : "View combat achievements";
             membersContent.add(buildSectionCard("Combat Achievements", caSub, ACCENT_CA,
                 () -> { if (onLoadCa != null) onLoadCa.accept(currentClogRsn); }));
+
+            if (platformAdmin)
+            {
+                membersContent.add(Box.createVerticalStrut(10));
+                membersContent.add(buildRankAdminSection(currentClogRsn));
+            }
         }
         membersContent.revalidate();
         membersContent.repaint();
+    }
+
+    /** Admin-only: put a member into Collection-Log mode, set their rank manually, or clear the override. */
+    private JPanel buildRankAdminSection(String rsn)
+    {
+        JPanel box = new JPanel();
+        box.setLayout(new BoxLayout(box, BoxLayout.Y_AXIS));
+        box.setBackground(new Color(40, 40, 40));
+        box.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createMatteBorder(0, 3, 0, 0, new Color(220, 120, 120)),
+            new EmptyBorder(8, 10, 8, 10)));
+        box.setAlignmentX(Component.LEFT_ALIGNMENT);
+        box.setMaximumSize(new Dimension(Integer.MAX_VALUE, 170));
+
+        JLabel h = new JLabel("Admin — rank override");
+        h.setFont(READABLE_FONT.deriveFont(Font.BOLD));
+        h.setForeground(new Color(225, 140, 140));
+        h.setAlignmentX(Component.LEFT_ALIGNMENT);
+        box.add(h);
+        JLabel sub = new JLabel("<html>Sticky — auto-checks stay off for this member until you clear it.</html>");
+        sub.setFont(READABLE_FONT_SMALL);
+        sub.setForeground(new Color(150, 150, 150));
+        sub.setAlignmentX(Component.LEFT_ALIGNMENT);
+        box.add(sub);
+        box.add(Box.createVerticalStrut(5));
+
+        JButton clogBtn = new JButton("Collection-Log mode");
+        styleAdminBtn(clogBtn);
+        clogBtn.addActionListener(e ->
+        {
+            if (onSetRankOverride != null) onSetRankOverride.accept(new Object[]{ rsn, "clog_only", null });
+            flashAdmin(clogBtn, "Set ✓");
+        });
+        box.add(clogBtn);
+        box.add(Box.createVerticalStrut(4));
+
+        JPanel setRow = new JPanel(new BorderLayout(4, 0));
+        setRow.setBackground(box.getBackground());
+        setRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+        setRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
+        JComboBox<String> rankCombo = new JComboBox<>();
+        for (RankSystem.Rank r : RankSystem.RANKS) rankCombo.addItem(r.name);
+        rankCombo.setFont(READABLE_FONT_SMALL);
+        JButton setBtn = new JButton("Set rank");
+        styleAdminBtn(setBtn);
+        setBtn.setMaximumSize(new Dimension(90, 24));
+        setBtn.addActionListener(e ->
+        {
+            if (onSetRankOverride != null) onSetRankOverride.accept(new Object[]{ rsn, "admin_set", (String) rankCombo.getSelectedItem() });
+            flashAdmin(setBtn, "Set ✓");
+        });
+        setRow.add(rankCombo, BorderLayout.CENTER);
+        setRow.add(setBtn, BorderLayout.EAST);
+        box.add(setRow);
+        box.add(Box.createVerticalStrut(4));
+
+        JButton clearBtn = new JButton("Clear override (back to auto)");
+        styleAdminBtn(clearBtn);
+        clearBtn.addActionListener(e ->
+        {
+            if (onClearRankOverride != null) onClearRankOverride.accept(rsn);
+            flashAdmin(clearBtn, "Cleared ✓");
+        });
+        box.add(clearBtn);
+        return box;
+    }
+
+    private void styleAdminBtn(JButton b)
+    {
+        b.setFont(READABLE_FONT_SMALL);
+        b.setFocusPainted(false);
+        b.setAlignmentX(Component.LEFT_ALIGNMENT);
+        b.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
+    }
+
+    private void flashAdmin(JButton b, String text)
+    {
+        String old = b.getText();
+        b.setText(text);
+        javax.swing.Timer t = new javax.swing.Timer(1500, e -> b.setText(old));
+        t.setRepeats(false);
+        t.start();
     }
 
     private JPanel buildSectionCard(String title, String subtitle, Color accent, Runnable action)
@@ -956,6 +1170,356 @@ public class ClanPanel extends PluginPanel
 
     public void setOnLoadClog(java.util.function.Consumer<String> cb) { this.onLoadClog = cb; }
     public void setOnLoadCa(java.util.function.Consumer<String> cb) { this.onLoadCa = cb; }
+    public void setOnLoadRanks(Runnable cb) { this.onLoadRanks = cb; }
+    public void setOnRequestRank(java.util.function.Consumer<Object[]> cb) { this.onRequestRank = cb; }
+    public boolean isRanksActive() { return ranksActive; }
+
+    private JComponent buildRanksTab()
+    {
+        JPanel wrapper = new JPanel(new BorderLayout());
+        wrapper.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        wrapper.setBorder(new EmptyBorder(8, 8, 8, 8));
+
+        JPanel titleRow = new JPanel(new BorderLayout());
+        titleRow.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        JLabel title = new JLabel("My Ranks");
+        title.setFont(title.getFont().deriveFont(Font.BOLD, 16f));
+        title.setForeground(ACCENT_GOLD);
+        titleRow.add(title, BorderLayout.WEST);
+        JButton refresh = new JButton("↻");
+        refresh.setMargin(new Insets(0, 6, 0, 6));
+        refresh.setFocusPainted(false);
+        refresh.setToolTipText("Re-check (open your bank first for item requirements)");
+        refresh.addActionListener(e -> { if (onLoadRanks != null) onLoadRanks.run(); });
+        titleRow.add(refresh, BorderLayout.EAST);
+        wrapper.add(titleRow, BorderLayout.NORTH);
+
+        ranksContent.setLayout(new BoxLayout(ranksContent, BoxLayout.Y_AXIS));
+        ranksContent.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        ranksContent.setAlignmentX(Component.LEFT_ALIGNMENT);
+        JLabel hint = new JLabel("Open this tab (or refresh) to check your ranks.");
+        hint.setFont(READABLE_FONT_ITALIC);
+        hint.setForeground(new Color(120, 120, 120));
+        ranksContent.add(hint);
+
+        JScrollPane scroll = new JScrollPane(ranksContent,
+            JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED, JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        scroll.setBorder(null);
+        scroll.getViewport().setBackground(ColorScheme.DARK_GRAY_COLOR);
+        scroll.getVerticalScrollBar().setUnitIncrement(16);
+        wrapper.add(scroll, BorderLayout.CENTER);
+        return wrapper;
+    }
+
+    private java.util.Map<String, Integer> rankSnapshotIds; // owned name->id from the plugin, for icons
+
+    /** Render the local player's rank eligibility (built in-game by the plugin) into the Ranks tab.
+     *  itemIds is the player's owned name→id map (local only) so owned items always get an icon. */
+    public void showRanks(java.util.List<RankSystem.RankStatus> results, java.util.Map<String, Integer> itemIds, String mode)
+    {
+        SwingUtilities.invokeLater(() ->
+        {
+            this.rankSnapshotIds = itemIds;
+            ranksContent.removeAll();
+            if (results == null || results.isEmpty())
+            {
+                ranksContent.add(clogNote("Log in to check your ranks."));
+            }
+            else
+            {
+                boolean clogOnly = "clog_only".equals(mode);
+                String noteText = clogOnly
+                    ? "Collection Log mode (set by an admin): ranks are checked from your collection log — open it once so the plugin can read it, then ↻. Nothing is sent."
+                    : "Checked locally — nothing about your items is sent. Open your bank, then ↻.";
+                JLabel note = new JLabel("<html>" + noteText + "</html>");
+                note.setFont(READABLE_FONT_SMALL);
+                note.setForeground(clogOnly ? new Color(150, 175, 210) : new Color(130, 130, 130));
+                note.setAlignmentX(Component.LEFT_ALIGNMENT);
+                note.setMaximumSize(new Dimension(Integer.MAX_VALUE, 48));
+                note.setBorder(new EmptyBorder(0, 0, 6, 0));
+                ranksContent.add(note);
+
+                if (platformAdmin)
+                {
+                    JButton iconRef = new JButton("Find clan-rank icon IDs");
+                    iconRef.setFont(READABLE_FONT_SMALL);
+                    iconRef.setFocusPainted(false);
+                    iconRef.setAlignmentX(Component.LEFT_ALIGNMENT);
+                    iconRef.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
+                    iconRef.addActionListener(e -> showRankIconReference());
+                    ranksContent.add(iconRef);
+                    ranksContent.add(Box.createVerticalStrut(6));
+                }
+
+                for (RankSystem.RankStatus rs : results)
+                {
+                    ranksContent.add(buildRankCard(rs));
+                    ranksContent.add(Box.createVerticalStrut(6));
+                }
+            }
+            ranksContent.revalidate();
+            ranksContent.repaint();
+        });
+    }
+
+    /** Admin-set mode: the member's rank is assigned by an admin — show it, no self-evaluation. */
+    public void showAdminAssignedRank(String rankName, String mode)
+    {
+        SwingUtilities.invokeLater(() ->
+        {
+            ranksContent.removeAll();
+            JPanel card = new JPanel();
+            card.setLayout(new BoxLayout(card, BoxLayout.Y_AXIS));
+            card.setBackground(new Color(35, 35, 35));
+            card.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(0, 3, 0, 0, new Color(186, 142, 255)),
+                new EmptyBorder(10, 12, 10, 12)));
+            card.setAlignmentX(Component.LEFT_ALIGNMENT);
+            JLabel h = new JLabel("Rank set by an admin");
+            h.setFont(READABLE_FONT.deriveFont(Font.BOLD, 13f));
+            h.setForeground(new Color(186, 142, 255));
+            h.setAlignmentX(Component.LEFT_ALIGNMENT);
+            card.add(h);
+            JLabel r = new JLabel(rankName != null && !rankName.isEmpty() ? rankName : "(not assigned yet)");
+            r.setFont(READABLE_FONT.deriveFont(Font.BOLD, 15f));
+            r.setForeground(Color.WHITE);
+            r.setAlignmentX(Component.LEFT_ALIGNMENT);
+            r.setBorder(new EmptyBorder(4, 0, 4, 0));
+            card.add(r);
+            JLabel sub = new JLabel("<html>Your rank is managed manually by clan staff, so automatic checks are turned off for you.</html>");
+            sub.setFont(READABLE_FONT_SMALL);
+            sub.setForeground(new Color(140, 140, 140));
+            sub.setAlignmentX(Component.LEFT_ALIGNMENT);
+            card.add(sub);
+            card.setMaximumSize(new Dimension(Integer.MAX_VALUE, card.getPreferredSize().height + 4));
+            ranksContent.add(card);
+            ranksContent.revalidate();
+            ranksContent.repaint();
+        });
+    }
+
+    private JPanel buildRankCard(RankSystem.RankStatus rs)
+    {
+        // Card height tracks its current content so collapsing/expanding doesn't clip or over-stretch.
+        JPanel card = new JPanel()
+        {
+            @Override public Dimension getMaximumSize() { return new Dimension(Integer.MAX_VALUE, getPreferredSize().height); }
+        };
+        card.setLayout(new BoxLayout(card, BoxLayout.Y_AXIS));
+        card.setBackground(new Color(35, 35, 35));
+        card.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createMatteBorder(0, 3, 0, 0, rs.eligible ? new Color(76, 175, 80) : new Color(110, 110, 110)),
+            new EmptyBorder(4, 6, 4, 8)));
+        card.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        // ── Header (always visible; click to expand/collapse) ──
+        JPanel header = new JPanel(new BorderLayout(6, 0));
+        header.setBackground(new Color(35, 35, 35));
+        header.setAlignmentX(Component.LEFT_ALIGNMENT);
+        header.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+        header.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+
+        JPanel left = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 5, 3));
+        left.setBackground(new Color(35, 35, 35));
+        final JLabel caret = new JLabel("+");
+        caret.setFont(READABLE_FONT.deriveFont(Font.BOLD, 14f));
+        caret.setForeground(new Color(150, 150, 150));
+        caret.setPreferredSize(new Dimension(11, 16));
+        left.add(caret);
+        left.add(rankSpriteIcon(rs.rank.id));
+        JLabel name = new JLabel(rs.rank.name);
+        name.setFont(READABLE_FONT.deriveFont(Font.BOLD, 13f));
+        name.setForeground(rs.eligible ? new Color(90, 200, 90) : Color.WHITE);
+        left.add(name);
+        header.add(left, BorderLayout.WEST);
+
+        int groupsMet = 0;
+        for (RankSystem.GroupStatus gs : rs.groups) if (gs.satisfied()) groupsMet++;
+        JLabel badge = new JLabel(rs.eligible ? "QUALIFIED" : groupsMet + "/" + rs.groups.size());
+        badge.setFont(READABLE_FONT_SMALL.deriveFont(Font.BOLD));
+        badge.setForeground(rs.eligible ? new Color(90, 200, 90) : new Color(190, 160, 90));
+        badge.setBorder(new EmptyBorder(0, 0, 0, 8));
+        header.add(badge, BorderLayout.EAST);
+        card.add(header);
+
+        // ── Details (collapsed by default) ──
+        JPanel details = new JPanel();
+        details.setLayout(new BoxLayout(details, BoxLayout.Y_AXIS));
+        details.setBackground(new Color(35, 35, 35));
+        details.setAlignmentX(Component.LEFT_ALIGNMENT);
+        details.setVisible(false);
+        buildRankDetails(details, rs);
+        card.add(details);
+
+        java.awt.event.MouseAdapter toggle = new java.awt.event.MouseAdapter()
+        {
+            @Override public void mousePressed(java.awt.event.MouseEvent e)
+            {
+                boolean show = !details.isVisible();
+                details.setVisible(show);
+                caret.setText(show ? "–" : "+"); // – open / + closed (ASCII-safe glyphs)
+                card.revalidate(); card.repaint();
+                ranksContent.revalidate(); ranksContent.repaint();
+            }
+        };
+        header.addMouseListener(toggle);
+        left.addMouseListener(toggle);
+        caret.addMouseListener(toggle);
+        name.addMouseListener(toggle);
+        return card;
+    }
+
+    /** The expandable body of a rank card: prerequisites, requirement groups + checks, request button. */
+    private void buildRankDetails(JPanel details, RankSystem.RankStatus rs)
+    {
+        if (!rs.rank.requires.isEmpty())
+        {
+            boolean reqMet = rs.unmetRequires.isEmpty();
+            StringBuilder names = new StringBuilder();
+            for (String id : rs.rank.requires)
+            {
+                if (names.length() > 0) names.append(", ");
+                names.append(RankSystem.nameOf(id));
+            }
+            JLabel reqLabel = new JLabel((reqMet ? "Requires (met): " : "Requires: ") + names);
+            reqLabel.setFont(READABLE_FONT_SMALL.deriveFont(Font.ITALIC));
+            reqLabel.setForeground(reqMet ? new Color(90, 200, 90) : new Color(210, 140, 90));
+            reqLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+            reqLabel.setBorder(new EmptyBorder(4, 2, 2, 0));
+            details.add(reqLabel);
+        }
+
+        for (RankSystem.GroupStatus gs : rs.groups)
+        {
+            JLabel g = new JLabel(gs.group.label + "   " + gs.met + " / " + gs.group.need);
+            g.setFont(READABLE_FONT_SMALL.deriveFont(Font.BOLD));
+            g.setForeground(gs.satisfied() ? new Color(90, 200, 90) : new Color(210, 180, 90));
+            g.setAlignmentX(Component.LEFT_ALIGNMENT);
+            g.setBorder(new EmptyBorder(6, 2, 2, 0));
+            details.add(g);
+            for (RankSystem.Result r : gs.results)
+            {
+                details.add(buildRankCheckRow(r));
+            }
+        }
+
+        // Claim button — opt-in. Sends only the result (eligible + what's missing), never items.
+        JButton request = new JButton(rs.eligible ? "Request " + rs.rank.name : "Request anyway (not eligible)");
+        request.setFont(READABLE_FONT_SMALL);
+        request.setFocusPainted(false);
+        request.setAlignmentX(Component.LEFT_ALIGNMENT);
+        request.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
+        request.setBorder(new EmptyBorder(4, 8, 4, 8));
+        request.addActionListener(e ->
+        {
+            java.util.List<String> missing = new java.util.ArrayList<>();
+            for (RankSystem.GroupStatus gs2 : rs.groups)
+            {
+                if (!gs2.satisfied()) missing.add(gs2.group.label + " (" + gs2.met + "/" + gs2.group.need + ")");
+            }
+            if (onRequestRank != null) onRequestRank.accept(new Object[]{ rs.rank.name, rs.eligible, missing });
+            request.setText("Requested — staff pinged");
+            request.setEnabled(false);
+        });
+        details.add(Box.createVerticalStrut(6));
+        details.add(request);
+    }
+
+    /** One requirement row: painted status square + item icon (if applicable) + label. No glyphs.
+     *  BorderLayout (not FlowLayout) so long labels ellipsize on one line instead of wrapping + clipping. */
+    private JPanel buildRankCheckRow(RankSystem.Result r)
+    {
+        JPanel row = new JPanel(new BorderLayout(5, 0));
+        row.setBackground(new Color(35, 35, 35));
+        row.setAlignmentX(Component.LEFT_ALIGNMENT);
+        row.setBorder(new EmptyBorder(1, 2, 1, 2));
+        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
+
+        JPanel left = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 4, 0));
+        left.setBackground(row.getBackground());
+
+        // Status square (reliable — a painted component, not a font glyph).
+        JLabel dot = new JLabel();
+        dot.setOpaque(true);
+        dot.setBackground(r.met ? new Color(76, 175, 80) : new Color(95, 95, 95));
+        dot.setPreferredSize(new Dimension(9, 9));
+        left.add(dot);
+
+        // Item icon for item checks (bright if owned, faded if not).
+        if (r.check.kind == RankSystem.Kind.ITEMS && r.check.names != null && !r.check.names.isEmpty())
+        {
+            int id = resolveItemId(r.check.names.get(0));
+            if (id > 0) left.add(rankItemIcon(id, r.met));
+        }
+        row.add(left, BorderLayout.WEST);
+
+        JLabel l = new JLabel(r.label);
+        l.setFont(READABLE_FONT_SMALL);
+        l.setForeground(r.met ? new Color(200, 210, 200) : new Color(140, 140, 140));
+        l.setToolTipText(r.label); // full text on hover, since the row may ellipsize
+        row.add(l, BorderLayout.CENTER);
+        return row;
+    }
+
+    private JLabel rankItemIcon(int itemId, boolean met)
+    {
+        final float alpha = met ? 1.0f : 0.3f;
+        JLabel label = new JLabel()
+        {
+            @Override protected void paintComponent(Graphics gr)
+            {
+                Graphics2D g2 = (Graphics2D) gr.create();
+                g2.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, alpha));
+                super.paintComponent(g2);
+                g2.dispose();
+            }
+        };
+        label.setPreferredSize(new Dimension(20, 18));
+        if (itemManager != null)
+        {
+            AsyncBufferedImage img = itemManager.getImage(itemId);
+            label.setIcon(new ImageIcon(img));
+            img.onLoaded(() -> { label.setIcon(new ImageIcon(img)); label.revalidate(); label.repaint(); });
+        }
+        return label;
+    }
+
+    private final java.util.Map<String, Integer> rankItemIdCache = new java.util.HashMap<>();
+    private java.util.Map<String, Integer> clogNameToId; // clog name->id, resolves untradeable icons
+    public void setClogNameToId(java.util.Map<String, Integer> m) { this.clogNameToId = m; }
+
+    /** Resolve an exact in-game item name to its id (for icon display), cached.
+     *  Prefers the player's OWNED items (works for untradeables too), then falls back to GE search. */
+    private int resolveItemId(String name)
+    {
+        if (name == null || itemManager == null) return -1;
+        String key = name.toLowerCase();
+        if (rankSnapshotIds != null)
+        {
+            Integer owned = rankSnapshotIds.get(key);
+            if (owned != null && owned > 0) return owned;
+        }
+        // Collection-log name→id covers UNTRADEABLES (fire cape, void, infernal cape, fighter torso…)
+        // that the GE search below can't return.
+        if (clogNameToId != null)
+        {
+            Integer clog = clogNameToId.get(key);
+            if (clog != null && clog > 0) return clog;
+        }
+        Integer cached = rankItemIdCache.get(key);
+        if (cached != null) return cached;
+        int id = -1;
+        try
+        {
+            for (ItemPrice p : itemManager.search(name))
+            {
+                if (p.getName() != null && p.getName().equalsIgnoreCase(name)) { id = p.getId(); break; }
+            }
+        }
+        catch (Exception ignored) { /* search may fail offline */ }
+        rankItemIdCache.put(key, id);
+        return id;
+    }
 
     /** Entry point from the plugin: cache the CA data and show the tier overview. */
     public void showPlayerCa(String rsn, PlatformApiService.PlayerCa ca)
@@ -1336,6 +1900,9 @@ public class ClanPanel extends PluginPanel
 
     public void setOnLoadRoster(Runnable cb) { this.onLoadRoster = cb; }
     public void setOnSelectMember(java.util.function.Consumer<String> cb) { this.onSelectMember = cb; }
+    public void setPlatformAdmin(boolean a) { this.platformAdmin = a; }
+    public void setOnSetRankOverride(java.util.function.Consumer<Object[]> cb) { this.onSetRankOverride = cb; }
+    public void setOnClearRankOverride(java.util.function.Consumer<String> cb) { this.onClearRankOverride = cb; }
 
     private JPanel createNavCard(String name, String description, Color accentColor, String tabName)
     {

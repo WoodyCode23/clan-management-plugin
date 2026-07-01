@@ -16,11 +16,17 @@ import net.runelite.api.MenuAction;
 import net.runelite.api.StructComposition;
 import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.GameStateChanged;
+import net.runelite.api.events.ItemContainerChanged;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.ScriptPreFired;
 import net.runelite.api.events.ScriptPostFired;
 import net.runelite.api.events.WidgetLoaded;
 import net.runelite.api.gameval.InterfaceID;
+import net.runelite.api.gameval.InventoryID;
+import net.runelite.api.gameval.VarbitID;
+import net.runelite.api.Skill;
+import net.runelite.api.Item;
+import net.runelite.api.ItemContainer;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
@@ -30,6 +36,7 @@ import net.runelite.client.plugins.loottracker.LootReceived;
 import net.runelite.client.game.ItemStack;
 import net.runelite.http.api.loottracker.LootRecordType;
 import net.runelite.client.game.ItemManager;
+import net.runelite.client.game.SpriteManager;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.ui.ClientToolbar;
@@ -115,6 +122,9 @@ public class ClanManagementPlugin extends Plugin
 
     @Inject
     private ItemManager itemManager;
+
+    @Inject
+    private SpriteManager spriteManager;
 
     @Inject
     private ScheduledExecutorService executor;
@@ -442,6 +452,7 @@ public class ClanManagementPlugin extends Plugin
         // Set up side panel
         panel = new ClanPanel();
         panel.setItemManager(itemManager); // for local item-icon rendering in the Members clog grid
+        panel.setSpriteManager(spriteManager); // for in-game clan-rank icons on the Ranks tab
         // Show tabs only if board code is configured
         panel.setConnected(isPlatformConfigured());
         panel.setOnRefresh(() -> executor.submit(this::refreshData));
@@ -477,6 +488,34 @@ public class ClanManagementPlugin extends Plugin
             if (!isPlatformConfigured()) return;
             panel.showPlayerCa(rsn, platformApiService.fetchPlayerCa(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), rsn));
         }));
+        panel.setOnLoadRanks(this::loadRanksWithMode);
+        panel.setOnRequestRank(args ->
+        {
+            String rankName = (String) args[0];
+            boolean eligible = (Boolean) args[1];
+            @SuppressWarnings("unchecked")
+            java.util.List<String> missing = (java.util.List<String>) args[2];
+            String rsn = client.getLocalPlayer() != null ? client.getLocalPlayer().getName() : "";
+            if (!isPlatformConfigured() || rsn.isEmpty()) return;
+            executor.submit(() -> platformApiService.requestRank(
+                getPlatformUrl(), getPlatformKey(), getPlatformSlug(), rsn, rankName, eligible, missing));
+        });
+        panel.setOnSetRankOverride(args ->
+        {
+            String rsn = (String) args[0];
+            String mode = (String) args[1];
+            String assigned = (String) args[2];
+            if (!isPlatformConfigured()) return;
+            String setBy = client.getLocalPlayer() != null ? client.getLocalPlayer().getName() : null;
+            executor.submit(() -> platformApiService.setRankOverride(
+                getPlatformUrl(), getPlatformKey(), getPlatformSlug(), rsn, mode, assigned, setBy));
+        });
+        panel.setOnClearRankOverride(rsn ->
+        {
+            if (!isPlatformConfigured()) return;
+            executor.submit(() -> platformApiService.clearRankOverride(
+                getPlatformUrl(), getPlatformKey(), getPlatformSlug(), rsn));
+        });
         panel.setOnClearHiscoreCache(() ->
         {
             hiscoreCacheV2.clear();
@@ -683,6 +722,8 @@ public class ClanManagementPlugin extends Plugin
             }
             wasInInstance = false;
             platformApiService.setAccountHash(null);
+            rankOwnedCache.clear();   // don't carry one account's items to the next login
+            rankOwnedIds.clear();
         }
     }
 
@@ -1549,8 +1590,11 @@ public class ClanManagementPlugin extends Plugin
             }
             else
             {
+                // Only stamp a KC if this unlock came from the boss the KC counter belongs to.
+                int unlockKc = (recentKill && kcAppliesTo(unlockSource, pbDetector.getLastBossName()))
+                    ? lastKillCount : 0;
                 DropEntry unlockDrop = new DropEntry(
-                    itemName, unlockValue, unlockSource, recentKill ? lastKillCount : 0,
+                    itemName, unlockValue, unlockSource, unlockKc,
                     wp.getX(), wp.getY(), wp.getPlane(), playerName, unlockItemId
                 );
                 withScreenshot(true, screenshot ->
@@ -1836,6 +1880,23 @@ public class ClanManagementPlugin extends Plugin
     }
 
     /**
+     * True when a loot source is the same boss/counter the latest KC message belongs to, so its
+     * kill count can be trusted. Handles bosses whose loot NPC name differs from the KC name
+     * (Araxxor→Araxyte, Grotesque Guardians→Dusk/Dawn). Returns false for non-counter sources.
+     */
+    private boolean kcAppliesTo(String source, String kcBoss)
+    {
+        if (source == null || kcBoss == null) return false;
+        String s = source.toLowerCase().trim();
+        String b = kcBoss.toLowerCase().trim();
+        if (s.isEmpty() || b.isEmpty()) return false;
+        if (s.equals(b) || s.contains(b) || b.contains(s)) return true;
+        if (s.contains("araxyte") && b.contains("araxxor")) return true;
+        if ((s.equals("dusk") || s.equals("dawn")) && b.contains("grotesque")) return true;
+        return false;
+    }
+
+    /**
      * Log clan drops from the actual loot event. Using LootReceived (vs the "Valuable drop" chat
      * line) gives the real source name and exact item IDs, so we attribute the monster correctly
      * AND post only the rare/unique items — collection-log entries or curated whitelist items —
@@ -1849,7 +1910,11 @@ public class ClanManagementPlugin extends Plugin
         if (event.getItems() == null || event.getItems().isEmpty()) return;
 
         String source = event.getName();
-        int killCount = event.getType() == LootRecordType.NPC ? pbDetector.getLastKillCount() : 0;
+        // Only attach a KC when the loot source is the boss/counter the KC actually belongs to.
+        // Otherwise a stale "last boss" KC gets stamped onto unrelated NPC drops (clue NPCs, etc.).
+        // Non-counter sources post with no KC at all.
+        int killCount = (event.getType() == LootRecordType.NPC && kcAppliesTo(source, pbDetector.getLastBossName()))
+            ? pbDetector.getLastKillCount() : 0;
         String playerName = client.getLocalPlayer() != null ? client.getLocalPlayer().getName() : "Unknown";
         WorldPoint wp = client.getLocalPlayer() != null
             ? client.getLocalPlayer().getWorldLocation() : new WorldPoint(0, 0, 0);
@@ -1934,6 +1999,221 @@ public class ClanManagementPlugin extends Plugin
         executor.submit(() -> platformApiService.syncCombatAchievements(
             getPlatformUrl(), getPlatformKey(), getPlatformSlug(), fRsn, fTasks));
         log.info("Synced {} combat achievements ({} complete) for {}", tasks.size(), fCompleted, fRsn);
+    }
+
+    // PRIVACY: these item caches are IN-MEMORY ONLY and are NEVER sent anywhere. They exist solely
+    // to tick rank requirement boxes locally. Accumulated across the session (so items stay checked
+    // after the bank closes / you switch tabs) and cleared on logout. See RankSystem for the full note.
+    private final java.util.Set<String> rankOwnedCache = new java.util.HashSet<>();   // lowercased item names seen
+    private final java.util.Map<String, Integer> rankOwnedIds = new java.util.HashMap<>(); // name -> id (for icons)
+
+    // Admin-controlled eval mode for THIS player, fetched from the server (sticky override).
+    // "default" = bank/equipment auto-eval; "clog_only" = evaluate from the local collection log;
+    // "admin_set" = rank is assigned manually by an admin (no auto-eval).
+    private volatile String rankMode = "default";
+    private volatile String rankAssigned = null;
+    private volatile java.util.Map<String, Integer> rankKc = new java.util.HashMap<>(); // WOM boss key -> KC
+    private volatile java.util.Set<String> rankCaDone = new java.util.HashSet<>(); // completed CA task names (lowercased)
+
+    // Achievement Diary completion varbits per region {varbitId, completeThreshold}. Standard regions
+    // use the boolean _COMPLETE varbit (>=1); Karamja easy/medium/hard use the legacy varbit (>=2).
+    private static final int[][] DIARY_EASY = {
+        {4458,1},{4462,1},{4466,1},{4471,1},{4475,1},{4479,1},{4483,1},{4487,1},{4491,1},{4495,1},{7925,1},{3578,2}};
+    private static final int[][] DIARY_MEDIUM = {
+        {4459,1},{4463,1},{4467,1},{4472,1},{4476,1},{4480,1},{4484,1},{4488,1},{4492,1},{4496,1},{7926,1},{3599,2}};
+    private static final int[][] DIARY_HARD = {
+        {4460,1},{4464,1},{4468,1},{4473,1},{4477,1},{4481,1},{4485,1},{4489,1},{4493,1},{4497,1},{7927,1},{3611,2}};
+    private static final int[][] DIARY_ELITE = {
+        {4461,1},{4465,1},{4469,1},{4474,1},{4478,1},{4482,1},{4486,1},{4490,1},{4494,1},{4498,1},{7928,1},{4566,1}};
+
+    /** Tab-open / refresh entry point: fetch this player's eval mode from the server, then evaluate. */
+    private void loadRanksWithMode()
+    {
+        if (!isPlatformConfigured() || client.getLocalPlayer() == null) { panel.showRanks(null, null, "default"); return; }
+        String rsn = client.getLocalPlayer().getName();
+        if (rsn == null || rsn.isEmpty()) { panel.showRanks(null, null, "default"); return; }
+        executor.submit(() ->
+        {
+            PlatformApiService.RankMode rm = platformApiService.fetchRankMode(
+                getPlatformUrl(), getPlatformKey(), getPlatformSlug(), rsn);
+            rankMode = rm.mode != null ? rm.mode : "default";
+            rankAssigned = rm.assignedRank;
+            // Boss KCs from WiseOldMan (via our server) — public hiscore data, drives KC requirements.
+            rankKc = platformApiService.fetchPlayerKc(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), rsn);
+            // Completed Combat Achievement tasks (we already sync these) — drives named-CA requirements.
+            PlatformApiService.PlayerCa ca = platformApiService.fetchPlayerCa(
+                getPlatformUrl(), getPlatformKey(), getPlatformSlug(), rsn);
+            java.util.Set<String> done = new java.util.HashSet<>();
+            if (ca != null && ca.tasks != null)
+            {
+                for (PlatformApiService.CaTaskInfo t : ca.tasks)
+                {
+                    if (t.completed && t.name != null) done.add(t.name.toLowerCase());
+                }
+            }
+            rankCaDone = done;
+            evaluateAndShowRanks();
+        });
+    }
+
+    /** (Re)evaluate the local player's ranks per the cached mode and push to the panel. Nothing is sent out. */
+    private void evaluateAndShowRanks()
+    {
+        if (client.getLocalPlayer() == null) { panel.showRanks(null, null, "default"); return; }
+        if ("admin_set".equals(rankMode))
+        {
+            panel.showAdminAssignedRank(rankAssigned, rankMode);
+            return;
+        }
+        final boolean clogOnly = "clog_only".equals(rankMode);
+        clientThread.invokeLater(() ->
+        {
+            RankSystem.PlayerSnapshot snap = buildRankSnapshot(clogOnly);
+            java.util.List<RankSystem.RankStatus> results = RankSystem.evaluateAll(snap);
+            panel.showRanks(results, snap.itemIds, rankMode);
+        });
+    }
+
+    /** Cache items from worn/inventory/bank as they change so checks stay accurate after the bank closes. */
+    @Subscribe
+    public void onItemContainerChanged(ItemContainerChanged event)
+    {
+        int id = event.getContainerId();
+        if (id != InventoryID.BANK && id != InventoryID.INV && id != InventoryID.WORN) return;
+        cacheContainerItems(id);
+        if (panel != null && panel.isRanksActive()) evaluateAndShowRanks();
+    }
+
+    /** Build a snapshot of the local player's state for clan-rank validation. Client thread only.
+     *  Reads are LOCAL; nothing here is transmitted. */
+    private RankSystem.PlayerSnapshot buildRankSnapshot(boolean clogOnly)
+    {
+        RankSystem.PlayerSnapshot s = new RankSystem.PlayerSnapshot();
+        // The clog name→id map resolves UNTRADEABLE item icons (fire cape, void, infernal cape…) that
+        // itemManager.search can't find. Build it once and hand it to the panel for icon rendering.
+        ensureClogCategoryMap();
+        if (clogNameToId != null) panel.setClogNameToId(clogNameToId);
+        for (Skill sk : Skill.values())
+        {
+            if (sk == Skill.OVERALL) continue;
+            s.skills.put(sk.getName().toLowerCase(), client.getRealSkillLevel(sk));
+        }
+        s.totalLevel = client.getTotalLevel();
+        s.totalXp = client.getOverallExperience();
+        addCaTier(s, "easy", VarbitID.CA_TIER_STATUS_EASY);
+        addCaTier(s, "medium", VarbitID.CA_TIER_STATUS_MEDIUM);
+        addCaTier(s, "hard", VarbitID.CA_TIER_STATUS_HARD);
+        addCaTier(s, "elite", VarbitID.CA_TIER_STATUS_ELITE);
+        addCaTier(s, "master", VarbitID.CA_TIER_STATUS_MASTER);
+        addCaTier(s, "grandmaster", VarbitID.CA_TIER_STATUS_GRANDMASTER);
+        // Prayer-scroll unlocks read from the prayer book (the scroll itself is consumed on use).
+        addUnlock(s, "rigour", VarbitID.PRAYER_RIGOUR_UNLOCKED);
+        addUnlock(s, "augury", VarbitID.PRAYER_AUGURY_UNLOCKED);
+        addUnlock(s, "preserve", VarbitID.PRAYER_PRESERVE_UNLOCKED);
+        addUnlock(s, "deadeye", VarbitID.PRAYER_DEADEYE_UNLOCKED);
+        addUnlock(s, "mystic vigour", VarbitID.PRAYER_MYSTIC_VIGOUR_UNLOCKED);
+
+        // Achievement Diary completion (in-game varbits) → count complete per tier.
+        s.diaryComplete.put("easy", countDiaries(DIARY_EASY));
+        s.diaryComplete.put("medium", countDiaries(DIARY_MEDIUM));
+        s.diaryComplete.put("hard", countDiaries(DIARY_HARD));
+        s.diaryComplete.put("elite", countDiaries(DIARY_ELITE));
+        // Completed CA tasks (fetched from our server in loadRanksWithMode).
+        s.caDone.addAll(rankCaDone);
+
+        if (clogOnly)
+        {
+            // Collection-log-only mode (admin-assigned): treat items the player has OBTAINED per their
+            // collection log as owned, instead of their current bank/equipment. Read locally from the
+            // clog synced this session (open the collection log to populate it); never sent anywhere.
+            synchronized (clogSyncItems)
+            {
+                for (ClogItem ci : clogSyncItems.values())
+                {
+                    String key = ci.name.toLowerCase();
+                    s.ownedItems.add(key);
+                    s.itemIds.putIfAbsent(key, ci.itemId);
+                }
+            }
+        }
+        else
+        {
+            // Default: refresh the cache from whatever's readable now, then use the session cache.
+            cacheContainerItems(InventoryID.WORN);
+            cacheContainerItems(InventoryID.INV);
+            cacheContainerItems(InventoryID.BANK);
+            s.ownedItems.addAll(rankOwnedCache);
+            s.itemIds.putAll(rankOwnedIds);
+        }
+        RankSystem.expandOwned(s.ownedItems); // own Ultor → Berserker ring (i) ticks, etc.
+
+        // Boss KCs (WiseOldMan via our server) + synthetic aggregates the rank checks reference.
+        java.util.Map<String, Integer> kc = rankKc;
+        s.kc.putAll(kc);
+        int cox = kcSum(kc, "chambers_of_xeric", "chambers_of_xeric:_challenge_mode");
+        int tob = kcSum(kc, "theatre_of_blood", "theatre_of_blood:_hard_mode");
+        int toa = kcSum(kc, "tombs_of_amascut", "tombs_of_amascut:_expert_mode");
+        s.kc.put("cox_total", cox);
+        s.kc.put("tob_total", tob);
+        s.kc.put("toa_total", toa);
+        s.kc.put("raids_combined", cox + tob + toa);
+        s.kc.put("god_wars_dungeon", kcSum(kc, "general_graardor", "commander_zilyana", "kreearra", "kril_tsutsaroth"));
+        return s;
+    }
+
+    /** Count completed diaries in a tier (client thread). Each entry is {varbitId, completeThreshold}. */
+    private int countDiaries(int[][] varbits)
+    {
+        int n = 0;
+        for (int[] vt : varbits)
+        {
+            try { if (client.getVarbitValue(vt[0]) >= vt[1]) n++; }
+            catch (Exception ignored) { /* varbit id may differ across versions */ }
+        }
+        return n;
+    }
+
+    /** Sum the KC of several WiseOldMan boss keys (for GWD / combined-raid aggregates). */
+    private int kcSum(java.util.Map<String, Integer> kc, String... keys)
+    {
+        int total = 0;
+        for (String k : keys) total += kc.getOrDefault(k, 0);
+        return total;
+    }
+
+    private void addCaTier(RankSystem.PlayerSnapshot s, String tier, int varbit)
+    {
+        try { if (client.getVarbitValue(varbit) >= 2) s.caTiersComplete.add(tier); }
+        catch (Exception ignored) { /* varbit id may differ across versions */ }
+    }
+
+    /** Record a persistent unlock (e.g. a learned prayer) when its unlock varbit is set. */
+    private void addUnlock(RankSystem.PlayerSnapshot s, String key, int varbit)
+    {
+        try { if (client.getVarbitValue(varbit) >= 1) s.unlocks.add(key); }
+        catch (Exception ignored) { /* varbit id may differ across versions */ }
+    }
+
+    /** Read a container and add its item names/ids to the in-memory session cache (never transmitted). */
+    private void cacheContainerItems(int containerId)
+    {
+        ItemContainer c = client.getItemContainer(containerId);
+        if (c == null) return;
+        for (Item it : c.getItems())
+        {
+            if (it == null || it.getId() <= 0) continue;
+            try
+            {
+                String name = itemManager.getItemComposition(it.getId()).getName();
+                if (name != null && !name.isEmpty())
+                {
+                    String key = name.toLowerCase();
+                    rankOwnedCache.add(key);
+                    rankOwnedIds.putIfAbsent(key, it.getId());
+                }
+            }
+            catch (Exception ignored) { /* skip unresolvable item */ }
+        }
     }
 
     private void ensureClogCategoryMap()
@@ -2598,6 +2878,8 @@ public class ClanManagementPlugin extends Plugin
         {
             return;
         }
+
+        panel.setPlatformAdmin(true); // unlock the per-member rank-override controls in the Members tab
 
         this.adminPanel = new AdminPanel();
         panel.showAdminTab(adminPanel);

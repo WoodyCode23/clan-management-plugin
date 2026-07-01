@@ -229,6 +229,9 @@ public class PbDetector
         // Araxxor
         if (lower.contains("araxxor")) return "araxxor";
 
+        // Maggot King (Blood Moon Rises, 2026)
+        if (lower.contains("maggot king")) return "maggot_king";
+
         // Gauntlet (hunllef = corrupted, crystalline = normal)
         if (lower.contains("hunllef")) return "gaunt_corrupted";
         if (lower.contains("crystalline")) return "gaunt";
