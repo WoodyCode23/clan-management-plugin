@@ -151,6 +151,7 @@ public class BoardDataService
             Map<String, Object> drop = new LinkedHashMap<>();
             if (includePlayer) drop.put("player", str(d, "rsn"));
             drop.put("item", str(d, "itemName"));
+            drop.put("itemId", d.has("itemId") && !d.get("itemId").isJsonNull() ? d.get("itemId").getAsInt() : 0);
             drop.put("value", d.has("value") ? d.get("value").getAsLong() : 0L);
             drop.put("monster", str(d, "monsterName"));
             drop.put("kc", d.has("killCount") && !d.get("killCount").isJsonNull() ? d.get("killCount").getAsInt() : 0);

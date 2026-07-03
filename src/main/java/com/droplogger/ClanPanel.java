@@ -128,11 +128,11 @@ public class ClanPanel extends PluginPanel
         @Override public boolean getScrollableTracksViewportWidth() { return true; }
         @Override public boolean getScrollableTracksViewportHeight() { return false; }
     }
+    private final JComboBox<String> hiscoreModeCombo = new JComboBox<>();
+    private java.util.function.Consumer<String> onPbModeChange;
     private final JComboBox<String> hiscoreGroupCombo = new JComboBox<>();
     private final JComboBox<String> hiscoreBossCombo = new JComboBox<>();
     private final JComboBox<String> hiscoreSizeCombo = new JComboBox<>();
-    private final JComboBox<String> hiscoreModeCombo = new JComboBox<>();
-    private java.util.function.Consumer<String> onPbModeChange;
     private final JComboBox<String> activityFilterCombo = new JComboBox<>();
     private java.util.function.Consumer<String> onActivityFilterChange;
     private final JLabel hiscoreSizeLabel = new JLabel("Size:");
@@ -902,6 +902,8 @@ public class ClanPanel extends PluginPanel
         JComboBox<String> rankCombo = new JComboBox<>();
         for (RankSystem.Rank r : RankSystem.RANKS) rankCombo.addItem(r.name);
         rankCombo.setFont(READABLE_FONT_SMALL);
+        rankCombo.setBackground(new Color(30, 30, 30));
+        rankCombo.setForeground(Color.WHITE);
         JButton setBtn = new JButton("Set rank");
         styleAdminBtn(setBtn);
         setBtn.setMaximumSize(new Dimension(90, 24));
@@ -1243,10 +1245,10 @@ public class ClanPanel extends PluginPanel
                 boolean clogOnly = "clog_only".equals(mode);
                 String noteText = clogOnly
                     ? "Collection Log mode (set by an admin): ranks are checked from your collection log — open it once so the plugin can read it, then ↻. Nothing is sent."
-                    : "Checked locally — nothing about your items is sent. Open your bank, then ↻.";
+                    : "Checked locally — nothing about your items is sent. Open your bank and collection log once, then ↻.";
                 JLabel note = new JLabel("<html>" + noteText + "</html>");
                 note.setFont(READABLE_FONT_SMALL);
-                note.setForeground(clogOnly ? new Color(150, 175, 210) : new Color(130, 130, 130));
+                note.setForeground(clogOnly ? new Color(190, 175, 130) : new Color(130, 130, 130));
                 note.setAlignmentX(Component.LEFT_ALIGNMENT);
                 note.setMaximumSize(new Dimension(Integer.MAX_VALUE, 48));
                 note.setBorder(new EmptyBorder(0, 0, 6, 0));
@@ -1342,15 +1344,18 @@ public class ClanPanel extends PluginPanel
         left.add(rankSpriteIcon(rs.rank.id));
         JLabel name = new JLabel(rs.rank.name);
         name.setFont(READABLE_FONT.deriveFont(Font.BOLD, 13f));
-        name.setForeground(rs.eligible ? new Color(90, 200, 90) : Color.WHITE);
+        name.setForeground(rs.granted ? ACCENT_GOLD : (rs.eligible ? new Color(90, 200, 90) : Color.WHITE));
         left.add(name);
         header.add(left, BorderLayout.WEST);
 
         int groupsMet = 0;
         for (RankSystem.GroupStatus gs : rs.groups) if (gs.satisfied()) groupsMet++;
-        JLabel badge = new JLabel(rs.eligible ? "QUALIFIED" : groupsMet + "/" + rs.groups.size());
+        String badgeText = rs.granted ? "Held" : (rs.eligible ? "QUALIFIED" : groupsMet + "/" + rs.groups.size());
+        Color badgeColor = rs.granted ? ACCENT_GOLD
+            : (rs.eligible ? new Color(90, 200, 90) : new Color(190, 160, 90));
+        JLabel badge = new JLabel(badgeText);
         badge.setFont(READABLE_FONT_SMALL.deriveFont(Font.BOLD));
-        badge.setForeground(rs.eligible ? new Color(90, 200, 90) : new Color(190, 160, 90));
+        badge.setForeground(badgeColor);
         badge.setBorder(new EmptyBorder(0, 0, 0, 8));
         header.add(badge, BorderLayout.EAST);
         card.add(header);
@@ -1385,6 +1390,18 @@ public class ClanPanel extends PluginPanel
     /** The expandable body of a rank card: prerequisites, requirement groups + checks, request button. */
     private void buildRankDetails(JPanel details, RankSystem.RankStatus rs)
     {
+        // Held via the member's Discord rank — no need to show requirements or a request button.
+        if (rs.granted)
+        {
+            JLabel held = new JLabel("<html>You already hold this rank (from your Discord rank).</html>");
+            held.setFont(READABLE_FONT_SMALL);
+            held.setForeground(new Color(190, 175, 130));
+            held.setAlignmentX(Component.LEFT_ALIGNMENT);
+            held.setBorder(new EmptyBorder(4, 2, 2, 0));
+            details.add(held);
+            return;
+        }
+
         if (!rs.rank.requires.isEmpty())
         {
             boolean reqMet = rs.unmetRequires.isEmpty();
@@ -2174,46 +2191,91 @@ public class ClanPanel extends PluginPanel
                 int idx = 0;
                 for (PlatformApiService.ActivityItem entry : entries)
                 {
-                    JPanel row = new JPanel(new BorderLayout(6, 0));
+                    // Height follows content \u2014 the description wraps to two lines when needed.
+                    JPanel row = new JPanel(new BorderLayout(6, 0))
+                    {
+                        @Override public Dimension getMaximumSize() { return new Dimension(Integer.MAX_VALUE, getPreferredSize().height); }
+                    };
                     row.setBackground(idx++ % 2 == 0 ? ColorScheme.DARK_GRAY_COLOR : new Color(35, 35, 35));
                     row.setAlignmentX(Component.LEFT_ALIGNMENT);
-                    row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
                     row.setBorder(new EmptyBorder(3, 6, 3, 6));
 
-                    String icon;
+                    String badge;   // small text badge (NO unicode glyphs \u2014 the RL panel font renders them as boxes)
                     String color;
                     String desc;
                     String detail = entry.detail == null ? "" : entry.detail;
+                    boolean clanBest = "pb".equals(entry.type) && detail.contains("new clan record");
                     switch (entry.type)
                     {
-                        case "join": icon = "+"; color = "#4CAF50"; desc = entry.rsn + " joined the clan"; break;
-                        case "leave": icon = "\u2212"; color = "#E05B5B"; desc = entry.rsn + " left the clan"; break;
-                        case "pb": icon = "\u23f1"; color = "#5B9BD5"; desc = entry.rsn + ": " + entry.title + (detail.isEmpty() ? "" : " \u2014 " + detail); break;
-                        case "drop": icon = "$"; color = "#FFD700"; desc = entry.rsn + ": " + entry.title
+                        case "join": badge = "+"; color = "#4CAF50"; desc = entry.rsn + " joined the clan"; break;
+                        case "leave": badge = "-"; color = "#E05B5B"; desc = entry.rsn + " left the clan"; break;
+                        case "pb":
+                            badge = "PB"; color = "#5B9BD5";
+                            // Lead with the time; flag records loudly (the row also goes gold).
+                            String time = detail.replace("\u00b7 new clan record", "").replace("new clan record", "").trim();
+                            desc = entry.rsn + ": " + entry.title + (time.isEmpty() ? "" : " - " + time) + (clanBest ? "  CLAN BEST" : "");
+                            break;
+                        case "drop": badge = "$"; color = "#FFD700"; desc = entry.rsn + ": " + entry.title
                             + (entry.value > 0 ? " (" + formatXp(entry.value) + " gp)" : "") + (detail.isEmpty() ? "" : " " + detail); break;
-                        case "clog": icon = "\u2605"; color = "#C77DFF"; desc = entry.rsn + ": " + entry.title + (detail.isEmpty() ? "" : " (" + detail + ")"); break;
-                        case "ca": icon = "\u2694"; color = "#DC7A3C"; desc = entry.rsn + ": " + entry.title; break;
-                        default: icon = "\u2022"; color = "#888888"; desc = entry.rsn + " " + entry.title;
+                        case "clog": badge = "LOG"; color = "#C77DFF"; desc = entry.rsn + ": " + entry.title + (detail.isEmpty() ? "" : " (" + detail + ")"); break;
+                        case "ca": badge = "CA"; color = "#DC7A3C"; desc = entry.rsn + ": " + entry.title; break;
+                        default: badge = "*"; color = "#888888"; desc = entry.rsn + " " + entry.title;
                     }
 
-                    // Colored icon on the left.
-                    JLabel iconLabel = new JLabel(icon);
-                    iconLabel.setFont(READABLE_FONT_SMALL.deriveFont(Font.BOLD));
-                    try { iconLabel.setForeground(Color.decode(color)); }
-                    catch (Exception ignored) { iconLabel.setForeground(new Color(150, 150, 150)); }
-                    row.add(iconLabel, BorderLayout.WEST);
+                    // Left: the item's icon for drops/clogs, the boss icon for PBs;
+                    // a small colored text badge otherwise.
+                    JComponent leftCol;
+                    ImageIcon pbBossIcon = "pb".equals(entry.type) ? bossIconForLabel(entry.title) : null;
+                    if (("drop".equals(entry.type) || "clog".equals(entry.type)) && entry.itemId > 0 && itemManager != null)
+                    {
+                        JLabel iconLabel = new JLabel();
+                        iconLabel.setPreferredSize(new Dimension(26, 24));
+                        iconLabel.setHorizontalAlignment(SwingConstants.CENTER);
+                        AsyncBufferedImage img = itemManager.getImage(entry.itemId);
+                        iconLabel.setIcon(new ImageIcon(img));
+                        img.onLoaded(() -> { iconLabel.setIcon(new ImageIcon(img)); iconLabel.revalidate(); iconLabel.repaint(); });
+                        leftCol = iconLabel;
+                    }
+                    else if (pbBossIcon != null)
+                    {
+                        JLabel iconLabel = new JLabel(pbBossIcon);
+                        iconLabel.setPreferredSize(new Dimension(26, 24));
+                        iconLabel.setHorizontalAlignment(SwingConstants.CENTER);
+                        leftCol = iconLabel;
+                    }
+                    else
+                    {
+                        JLabel badgeLabel = new JLabel(badge);
+                        badgeLabel.setFont(READABLE_FONT_SMALL.deriveFont(Font.BOLD, 10f));
+                        badgeLabel.setPreferredSize(new Dimension(26, 24));
+                        badgeLabel.setHorizontalAlignment(SwingConstants.CENTER);
+                        try { badgeLabel.setForeground(Color.decode(color)); }
+                        catch (Exception ignored) { badgeLabel.setForeground(new Color(150, 150, 150)); }
+                        leftCol = badgeLabel;
+                    }
+                    row.add(leftCol, BorderLayout.WEST);
 
-                    // Description fills the middle (truncated so it never pushes the row wide). Full text on hover.
-                    JLabel label = new JLabel(truncate(desc, 40));
-                    label.setFont(READABLE_FONT_SMALL);
-                    label.setForeground(new Color(200, 200, 200));
-                    label.setToolTipText(desc);
+                    // Description wraps (html) instead of hard-truncating names. Clan bests go gold.
+                    // The leading RSN gets the member's clan rank appended in dim gold.
+                    String descHtml = desc.startsWith(entry.rsn)
+                        ? nameWithRankHtml(entry.rsn) + escapeHtml(desc.substring(entry.rsn.length()))
+                        : escapeHtml(desc);
+                    JLabel label = new JLabel("<html>" + descHtml + "</html>");
+                    label.setFont(clanBest ? READABLE_FONT_SMALL.deriveFont(Font.BOLD) : READABLE_FONT_SMALL);
+                    label.setForeground(clanBest ? ACCENT_GOLD : new Color(200, 200, 200));
                     row.add(label, BorderLayout.CENTER);
+                    if (clanBest)
+                    {
+                        row.setBorder(BorderFactory.createCompoundBorder(
+                            BorderFactory.createMatteBorder(0, 2, 0, 0, ACCENT_GOLD),
+                            new EmptyBorder(3, 4, 3, 6)));
+                    }
 
-                    // Time-ago on the right.
+                    // Time-ago on the right, top-aligned beside wrapped text.
                     JLabel timeLabel = new JLabel(formatTimeAgo(entry.createdAt));
                     timeLabel.setFont(READABLE_FONT_SMALL);
                     timeLabel.setForeground(new Color(110, 110, 110));
+                    timeLabel.setVerticalAlignment(SwingConstants.TOP);
                     row.add(timeLabel, BorderLayout.EAST);
 
                     activityPanel.add(row);
@@ -2226,6 +2288,49 @@ public class ClanPanel extends PluginPanel
         });
     }
 
+
+    /**
+     * Resolve a PB activity title like "Zulrah (Solo)" or "The Nightmare (5-Man)" to its boss
+     * group's icon. Matches the base name against BossCategory display names (ignoring a leading
+     * "The "), since activity events carry the display label, not the boss key.
+     */
+    // Server activity labels that abbreviate the boss name — mapped straight to the icon group.
+    private static final java.util.Map<String, String> LABEL_GROUP_ALIASES = new java.util.HashMap<>();
+    static
+    {
+        LABEL_GROUP_ALIASES.put("tob: entry mode", "tob_entry");
+        LABEL_GROUP_ALIASES.put("tob: hard mode", "tob_hm");
+        LABEL_GROUP_ALIASES.put("toa: entry mode", "toa_entry");
+        LABEL_GROUP_ALIASES.put("toa: expert mode", "toa_expert");
+        LABEL_GROUP_ALIASES.put("cm chambers of xeric", "cox_cm");
+        LABEL_GROUP_ALIASES.put("phosani's nightmare", "phosanis");
+        LABEL_GROUP_ALIASES.put("corrupted gauntlet", "gaunt_corrupted");
+    }
+
+    private ImageIcon bossIconForLabel(String title)
+    {
+        if (title == null || bossIcons.isEmpty()) return null;
+        String base = title;
+        int paren = base.lastIndexOf(" (");
+        if (paren > 0) base = base.substring(0, paren);
+        base = base.toLowerCase().replaceFirst("^the ", "").trim();
+        String alias = LABEL_GROUP_ALIASES.get(base);
+        if (alias != null)
+        {
+            ImageIcon aliased = bossIcons.get(alias);
+            if (aliased != null) return aliased;
+        }
+        for (BossCategory cat : BossCategory.getAll())
+        {
+            String name = cat.getDisplayName().toLowerCase().replaceFirst("^the ", "").trim();
+            if (name.equals(base))
+            {
+                ImageIcon icon = bossIcons.get(cat.getGroup());
+                if (icon != null) return icon;
+            }
+        }
+        return null;
+    }
 
     private String formatTimeAgo(String isoDate)
     {
@@ -2569,6 +2674,62 @@ public class ClanPanel extends PluginPanel
     // Boss group-key -> small icon, supplied by the plugin (which has ItemManager).
     private java.util.Map<String, ImageIcon> bossIcons = java.util.Collections.emptyMap();
 
+    // rsn (lowercased) -> in-game clan rank title (Xerician, Senator, Maxed…), from the roster.
+    // Shown beside player names across the panel feeds.
+    private java.util.Map<String, String> rosterRanks = java.util.Collections.emptyMap();
+
+    public void setRosterRanks(java.util.Map<String, String> ranks)
+    {
+        this.rosterRanks = ranks != null ? ranks : java.util.Collections.emptyMap();
+    }
+
+    /** The member's clan rank title, or null. Handles nbsp-vs-space RSN variants. */
+    private String rankOf(String rsn)
+    {
+        if (rsn == null || rosterRanks.isEmpty()) return null;
+        String key = rsn.replace(' ', ' ').trim().toLowerCase();
+        String rank = rosterRanks.get(key);
+        return rank != null && !rank.isEmpty() ? rank : null;
+    }
+
+    // Rank icon sprites exported to small PNGs so they can render INLINE beside names in html
+    // labels (<img> needs a URL; Swing html can't reference in-memory images).
+    private final java.util.Map<String, String> rankIconUrls = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** Export every mapped clan-rank icon sprite to dir once and remember the file URLs. */
+    public void exportRankIcons(java.io.File dir)
+    {
+        if (spriteManager == null) return;
+        //noinspection ResultOfMethodCallIgnored
+        dir.mkdirs();
+        for (java.util.Map.Entry<String, Integer> e : RANK_ICON_SPRITE.entrySet())
+        {
+            String rankId = e.getKey();
+            java.io.File f = new java.io.File(dir, rankId + ".png");
+            if (f.exists()) { rankIconUrls.put(rankId, f.toURI().toString()); continue; }
+            spriteManager.getSpriteAsync(e.getValue(), 0, img ->
+            {
+                try
+                {
+                    if (img != null && javax.imageio.ImageIO.write(img, "png", f))
+                    {
+                        rankIconUrls.put(rankId, f.toURI().toString());
+                    }
+                }
+                catch (Exception ignored) { /* icon just won't show */ }
+            });
+        }
+    }
+
+    /** HTML fragment "Name <rank icon>" — the member's clan-rank SYMBOL beside their name. */
+    private String nameWithRankHtml(String rsn)
+    {
+        String esc = escapeHtml(rsn);
+        String rank = rankOf(rsn);
+        String url = rank != null ? rankIconUrls.get(rank) : null;
+        return url == null ? esc : esc + " <img src='" + url + "'>";
+    }
+
     public void setBossIcons(java.util.Map<String, ImageIcon> icons)
     {
         this.bossIcons = icons != null ? icons : java.util.Collections.emptyMap();
@@ -2692,8 +2853,8 @@ public class ClanPanel extends PluginPanel
             left.add(timeLabel);
             rowSolo.add(left, BorderLayout.WEST);
 
-            // Center: rsn (muted)
-            JLabel rsnLabel = new JLabel(rsns);
+            // Center: rsn (muted) + clan rank in dim gold
+            JLabel rsnLabel = new JLabel("<html>" + nameWithRankHtml(rsns) + "</html>");
             rsnLabel.setFont(READABLE_FONT);
             rsnLabel.setForeground(new Color(170, 170, 170));
             rsnLabel.setBorder(new EmptyBorder(0, 6, 0, 0));
@@ -2912,8 +3073,9 @@ public class ClanPanel extends PluginPanel
         wrapper.add(hiscoreModeLabel);
         wrapper.add(Box.createVerticalStrut(2));
 
-        hiscoreModeCombo.addItem("All PBs");
         hiscoreModeCombo.addItem("Clan Only");
+        hiscoreModeCombo.addItem("All PBs");
+        hiscoreModeCombo.setSelectedItem("Clan Only"); // default: live times only; imports via All PBs
         hiscoreModeCombo.setBackground(new Color(30, 30, 30));
         hiscoreModeCombo.setForeground(Color.WHITE);
         hiscoreModeCombo.setFont(READABLE_FONT);
@@ -3279,10 +3441,14 @@ public class ClanPanel extends PluginPanel
                 String sizeLabel = cat != null && cat.getMaxPlayers() > 1 ? " (" + cat.getSizeLabel() + ")" : "";
                 HiscoreEntry best = times.get(0);
 
-                JPanel row = new JPanel(new BorderLayout(6, 0));
+                JPanel row = new JPanel(new BorderLayout(6, 0))
+                {
+                    // Two text lines + padding — cap at the real preferred height so the
+                    // second line (time — names) never clips.
+                    @Override public Dimension getMaximumSize() { return new Dimension(Integer.MAX_VALUE, getPreferredSize().height); }
+                };
                 row.setBackground(count % 2 == 0 ? ColorScheme.DARK_GRAY_COLOR : ColorScheme.DARKER_GRAY_COLOR);
                 row.setAlignmentX(Component.LEFT_ALIGNMENT);
-                row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 32));
                 row.setBorder(new EmptyBorder(4, 8, 4, 8));
 
                 // Boss icon (left of the name), if we have one for this group
@@ -3305,7 +3471,9 @@ public class ClanPanel extends PluginPanel
                 bossLabel.setForeground(new Color(100, 149, 237));
                 leftPanel.add(bossLabel);
 
-                JLabel detailLabel = new JLabel(best.getFormattedTime() + " — " + best.getRsns());
+                String bestRsns = best.getRsns() != null ? best.getRsns() : "";
+                JLabel detailLabel = new JLabel("<html>" + escapeHtml(best.getFormattedTime()) + " — "
+                    + (bestRsns.contains(",") ? escapeHtml(bestRsns) : nameWithRankHtml(bestRsns)) + "</html>");
                 detailLabel.setFont(READABLE_FONT_SMALL);
                 detailLabel.setForeground(new Color(170, 170, 170));
                 leftPanel.add(detailLabel);
@@ -3500,31 +3668,8 @@ public class ClanPanel extends PluginPanel
         wrapper.add(whitelistSearchField);
         wrapper.add(Box.createVerticalStrut(4));
 
-        // Filter/sort row
-        JPanel filterRow = new JPanel(new BorderLayout(4, 0));
-        filterRow.setBackground(ColorScheme.DARK_GRAY_COLOR);
-        filterRow.setAlignmentX(Component.LEFT_ALIGNMENT);
-        filterRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
-
-        whitelistCategoryFilter.setFont(READABLE_FONT_SMALL);
-        whitelistCategoryFilter.setMaximumSize(new Dimension(120, 22));
-        whitelistCategoryFilter.addActionListener(e -> {
-            String text = whitelistSearchField.getText();
-            if (text.equals("Search item or boss...")) text = "";
-            renderWhitelistBrowser(text.toLowerCase().trim());
-        });
-        filterRow.add(whitelistCategoryFilter, BorderLayout.CENTER);
-
-        whitelistSortCombo.setFont(READABLE_FONT_SMALL);
-        whitelistSortCombo.setMaximumSize(new Dimension(110, 22));
-        whitelistSortCombo.addActionListener(e -> {
-            String text = whitelistSearchField.getText();
-            if (text.equals("Search item or boss...")) text = "";
-            renderWhitelistBrowser(text.toLowerCase().trim());
-        });
-        filterRow.add(whitelistSortCombo, BorderLayout.EAST);
-        wrapper.add(filterRow);
-        wrapper.add(Box.createVerticalStrut(4));
+        // Search-only browser: no category/sort combos, no default listing — results appear
+        // below the search bar as you type (sorted by points, high first).
 
         // Browser results panel
         whitelistBrowserPanel.setLayout(new BoxLayout(whitelistBrowserPanel, BoxLayout.Y_AXIS));
@@ -3541,7 +3686,7 @@ public class ClanPanel extends PluginPanel
 
         // ── Player Detail (shown when clicking a player name) ──
         playerDetailPanel.setLayout(new BoxLayout(playerDetailPanel, BoxLayout.Y_AXIS));
-        playerDetailPanel.setBackground(new Color(25, 25, 30));
+        playerDetailPanel.setBackground(new Color(30, 30, 30));
         playerDetailPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
         playerDetailPanel.setVisible(false);
         playerDetailPanel.setBorder(BorderFactory.createCompoundBorder(
@@ -3582,12 +3727,12 @@ public class ClanPanel extends PluginPanel
 
                 JLabel hdrName = new JLabel("#  Player");
                 hdrName.setFont(new Font("Segoe UI", Font.BOLD, 11));
-                hdrName.setForeground(new Color(150, 150, 200));
+                hdrName.setForeground(new Color(170, 170, 170));
                 headerRow.add(hdrName, BorderLayout.WEST);
 
                 JLabel hdrRight = new JLabel("Pts  Drops  GP");
                 hdrRight.setFont(new Font("Segoe UI", Font.BOLD, 11));
-                hdrRight.setForeground(new Color(150, 150, 200));
+                hdrRight.setForeground(new Color(170, 170, 170));
                 headerRow.add(hdrRight, BorderLayout.EAST);
                 dropsLeaderboardPanel.add(headerRow);
 
@@ -3614,7 +3759,9 @@ public class ClanPanel extends PluginPanel
 
                     String prefix = "#" + rank + " ";
 
-                    JLabel nameLabel = new JLabel(prefix + truncate(rsn, 13));
+                    String rankUrl = rankOf(rsn) != null ? rankIconUrls.get(rankOf(rsn)) : null;
+                    JLabel nameLabel = new JLabel("<html>" + escapeHtml(prefix + truncate(rsn, 13))
+                        + (rankUrl != null ? " <img src='" + rankUrl + "'>" : "") + "</html>");
                     nameLabel.setFont(new Font("Segoe UI",
                         isMe ? Font.BOLD : Font.PLAIN, 10));
                     nameLabel.setForeground(isMe
@@ -3691,30 +3838,47 @@ public class ClanPanel extends PluginPanel
                     long value = ((Number) drop.getOrDefault("value", 0L)).longValue();
                     int points = ((Number) drop.getOrDefault("points", 0)).intValue();
                     String monster = (String) drop.getOrDefault("monster", "");
+                    int dropItemId = ((Number) drop.getOrDefault("itemId", 0)).intValue();
 
-                    JPanel row = new JPanel(new BorderLayout(2, 0));
+                    JPanel row = new JPanel(new BorderLayout(4, 0))
+                    {
+                        @Override public Dimension getMaximumSize() { return new Dimension(Integer.MAX_VALUE, getPreferredSize().height); }
+                    };
                     row.setBackground(i % 2 == 0
                         ? ColorScheme.DARK_GRAY_COLOR
                         : new Color(35, 35, 35));
                     row.setAlignmentX(Component.LEFT_ALIGNMENT);
-                    row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 32));
                     row.setBorder(new EmptyBorder(2, 4, 2, 4));
 
-                    // Left: item name + player
+                    // Item icon on the left (id from the server, name-resolve fallback).
+                    int iconId = dropItemId > 0 ? dropItemId : resolveItemId(item);
+                    if (iconId > 0 && itemManager != null)
+                    {
+                        JLabel icon = new JLabel();
+                        icon.setPreferredSize(new Dimension(30, 28));
+                        icon.setHorizontalAlignment(SwingConstants.CENTER);
+                        AsyncBufferedImage img = itemManager.getImage(iconId);
+                        icon.setIcon(new ImageIcon(img));
+                        img.onLoaded(() -> { icon.setIcon(new ImageIcon(img)); icon.revalidate(); icon.repaint(); });
+                        row.add(icon, BorderLayout.WEST);
+                    }
+
+                    // Center: item name + "player Rank — boss"
                     JPanel leftPanel = new JPanel();
                     leftPanel.setLayout(new BoxLayout(leftPanel, BoxLayout.Y_AXIS));
                     leftPanel.setBackground(row.getBackground());
 
-                    JLabel itemLabel = new JLabel(truncate(item, 22));
+                    JLabel itemLabel = new JLabel(truncate(item, 24));
                     itemLabel.setFont(READABLE_FONT);
                     itemLabel.setForeground(points >= 25
                         ? new Color(255, 100, 100)
                         : points >= 15
                             ? new Color(255, 180, 100)
                             : new Color(220, 220, 220));
+                    itemLabel.setToolTipText(item);
 
-                    JLabel detailLabel = new JLabel(
-                        truncate(player, 12) + " — " + truncate(monster, 12));
+                    JLabel detailLabel = new JLabel("<html>" + nameWithRankHtml(player)
+                        + (monster.isEmpty() ? "" : " — " + escapeHtml(monster)) + "</html>");
                     detailLabel.setFont(READABLE_FONT_SMALL);
                     detailLabel.setForeground(new Color(120, 120, 120));
 
@@ -3779,14 +3943,14 @@ public class ClanPanel extends PluginPanel
 
             // Header with close button
             JPanel header = new JPanel(new BorderLayout());
-            header.setBackground(new Color(30, 30, 55));
+            header.setBackground(new Color(45, 42, 30)); // gold-tinted header band
             header.setAlignmentX(Component.LEFT_ALIGNMENT);
-            header.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
-            header.setBorder(new EmptyBorder(3, 6, 3, 6));
+            header.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
+            header.setBorder(new EmptyBorder(4, 8, 4, 6));
 
             JLabel title = new JLabel(rsn + " — " + (drops != null ? drops.size() : 0) + " drops");
-            title.setFont(new Font("Segoe UI", Font.BOLD, 11));
-            title.setForeground(new Color(100, 180, 255));
+            title.setFont(new Font("Segoe UI", Font.BOLD, 12));
+            title.setForeground(ACCENT_GOLD);
             header.add(title, BorderLayout.WEST);
 
             JLabel closeBtn = new JLabel("\u2715");
@@ -3853,33 +4017,51 @@ public class ClanPanel extends PluginPanel
                     // Extract just the date portion
                     String date = ts.length() >= 10 ? ts.substring(0, 10) : ts;
 
-                    JPanel row = new JPanel(new BorderLayout(2, 0));
+                    // Height follows the two text lines — a fixed cap was clipping the detail line.
+                    JPanel row = new JPanel(new BorderLayout(4, 0))
+                    {
+                        @Override public Dimension getMaximumSize() { return new Dimension(Integer.MAX_VALUE, getPreferredSize().height); }
+                    };
                     row.setBackground(i % 2 == 0
-                        ? new Color(25, 25, 30)
-                        : new Color(30, 30, 38));
+                        ? ColorScheme.DARK_GRAY_COLOR
+                        : new Color(35, 35, 35));
                     row.setAlignmentX(Component.LEFT_ALIGNMENT);
-                    row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
                     row.setBorder(new EmptyBorder(2, 6, 2, 4));
+
+                    // Item icon (resolved by name — these rows don't carry an id)
+                    int rowIconId = resolveItemId(item);
+                    if (rowIconId > 0 && itemManager != null)
+                    {
+                        JLabel icon = new JLabel();
+                        icon.setPreferredSize(new Dimension(28, 26));
+                        icon.setHorizontalAlignment(SwingConstants.CENTER);
+                        AsyncBufferedImage img = itemManager.getImage(rowIconId);
+                        icon.setIcon(new ImageIcon(img));
+                        img.onLoaded(() -> { icon.setIcon(new ImageIcon(img)); icon.revalidate(); icon.repaint(); });
+                        row.add(icon, BorderLayout.WEST);
+                    }
 
                     JPanel left = new JPanel();
                     left.setLayout(new BoxLayout(left, BoxLayout.Y_AXIS));
                     left.setBackground(row.getBackground());
 
-                    JLabel itemLbl = new JLabel(truncate(item, 22));
+                    JLabel itemLbl = new JLabel(truncate(item, 26));
                     itemLbl.setFont(READABLE_FONT);
                     itemLbl.setForeground(pts >= 25
                         ? new Color(255, 100, 100)
                         : pts >= 15
                             ? new Color(255, 180, 100)
-                            : new Color(200, 200, 200));
+                            : new Color(220, 220, 220));
+                    itemLbl.setToolTipText(item);
                     left.add(itemLbl);
 
                     String detail = monster;
                     if (kc > 0) detail += " (" + kc + " kc)";
                     if (!date.isEmpty()) detail += " — " + date;
-                    JLabel detLbl = new JLabel(truncate(detail, 28));
+                    JLabel detLbl = new JLabel(detail);
                     detLbl.setFont(READABLE_FONT_SMALL);
-                    detLbl.setForeground(new Color(110, 110, 110));
+                    detLbl.setForeground(new Color(140, 140, 140));
+                    detLbl.setToolTipText(detail);
                     left.add(detLbl);
 
                     row.add(left, BorderLayout.CENTER);
@@ -4023,6 +4205,19 @@ public class ClanPanel extends PluginPanel
     private void renderWhitelistBrowser(String searchFilter)
     {
         whitelistBrowserPanel.removeAll();
+
+        // Search-only: the full list stays hidden until the member types something.
+        if (searchFilter == null || searchFilter.isEmpty())
+        {
+            JLabel hint = new JLabel("Type an item or boss name to search the trackable list");
+            hint.setFont(READABLE_FONT_ITALIC);
+            hint.setForeground(new Color(110, 110, 110));
+            hint.setBorder(new EmptyBorder(4, 4, 4, 4));
+            whitelistBrowserPanel.add(hint);
+            whitelistBrowserPanel.revalidate();
+            whitelistBrowserPanel.repaint();
+            return;
+        }
 
         String selectedCategory = (String) whitelistCategoryFilter.getSelectedItem();
         if (selectedCategory == null) selectedCategory = "All Categories";

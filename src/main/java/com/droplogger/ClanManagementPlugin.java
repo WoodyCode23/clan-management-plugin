@@ -172,7 +172,10 @@ public class ClanManagementPlugin extends Plugin
     // In-memory hiscore cache: categoryKey → list of entries
     private final Map<String, List<HiscoreEntry>> hiscoreCacheV2 = Collections.synchronizedMap(new LinkedHashMap<>());
     private volatile boolean hiscoreV2BatchFetched = false; // true once allTopTimes has been called this session
-    private volatile String pbMode = "all"; // speed-times mode: "all" (true PBs across sources) or "clan" (clan-verified live only)
+    // Speed-times mode: "clan" (clan-verified live only — the DEFAULT, so imports stay off the
+    // board) or "all" (each player's best across sources, via the Mode dropdown). The Recent
+    // overview is newest-first in both modes.
+    private volatile String pbMode = "clan";
     private volatile String activityFilter = ""; // activity feed type filter: "" = all, else CSV e.g. "drop,pb"
     private volatile boolean platformIsAdmin = false; // caller's key owner has admin/manage_announcements (from bootstrap permissions)
 
@@ -261,6 +264,7 @@ public class ClanManagementPlugin extends Plugin
         // Newer bosses
         BOSS_GROUP_ICONS.put("hueycoatl", 30152); BOSS_GROUP_ICONS.put("amoxliatl", 30154);
         BOSS_GROUP_ICONS.put("yama", 29622);
+        BOSS_GROUP_ICONS.put("maggot_king", 33634); // Elder venator fang
         // Wilderness
         BOSS_GROUP_ICONS.put("callisto", 13178); BOSS_GROUP_ICONS.put("vetion", 13179);
         BOSS_GROUP_ICONS.put("venenatis", 13177); BOSS_GROUP_ICONS.put("chaos_ele", 11995);
@@ -453,6 +457,7 @@ public class ClanManagementPlugin extends Plugin
         panel = new ClanPanel();
         panel.setItemManager(itemManager); // for local item-icon rendering in the Members clog grid
         panel.setSpriteManager(spriteManager); // for in-game clan-rank icons on the Ranks tab
+        panel.exportRankIcons(new File(pluginDataDir(), "rank-icons")); // inline rank icons beside names
         // Show tabs only if board code is configured
         panel.setConnected(isPlatformConfigured());
         panel.setOnRefresh(() -> executor.submit(this::refreshData));
@@ -460,7 +465,7 @@ public class ClanManagementPlugin extends Plugin
         panel.setOnPbModeChange(mode -> executor.submit(() ->
         {
             pbMode = mode;
-            batchFetchAllHiscores(); // re-fetch in the new mode (updates the recent list)
+            batchFetchAllHiscores(); // re-fetch in the new mode (cache is replaced, not merged)
         }));
         panel.setOnActivityFilterChange(filter -> executor.submit(() ->
         {
@@ -1662,23 +1667,14 @@ public class ClanManagementPlugin extends Plugin
             }
         }
 
-        // Sort party members so all clients agree on who submits
+        // Sort party members for a stable roster string. EVERY plugin-running member submits the
+        // full roster (no designated-submitter election — that silently lost the time whenever the
+        // alphabetically-first member didn't run the plugin). Duplicates are safe: the server
+        // upserts per member keeping the fastest time, and Discord posts fire only when a row
+        // actually improves (isNewRecord), so the first submission to arrive posts and the rest no-op.
         List<String> sortedMembers = new ArrayList<>(partyMembers);
         Collections.sort(sortedMembers, String.CASE_INSENSITIVE_ORDER);
         String rsns = String.join(", ", sortedMembers);
-
-        // Only the alphabetically first party member submits (prevents duplicates
-        // when multiple clan members have the plugin running in the same raid)
-        String localName = client.getLocalPlayer() != null ? client.getLocalPlayer().getName() : "";
-        boolean isSubmitter = sortedMembers.isEmpty()
-            || sortedMembers.get(0).equalsIgnoreCase(localName);
-
-        if (!isSubmitter)
-        {
-            log.debug("Completion detected but {} is the designated submitter, skipping",
-                sortedMembers.get(0));
-            return;
-        }
 
         String date = new SimpleDateFormat("MM/dd").format(new Date());
         String formattedTime = completion.getFormattedTime();
@@ -2012,6 +2008,7 @@ public class ClanManagementPlugin extends Plugin
     // "admin_set" = rank is assigned manually by an admin (no auto-eval).
     private volatile String rankMode = "default";
     private volatile String rankAssigned = null;
+    private volatile java.util.Set<String> rankHeld = new java.util.HashSet<>(); // ranks held via Discord
     private volatile java.util.Map<String, Integer> rankKc = new java.util.HashMap<>(); // WOM boss key -> KC
     private volatile java.util.Set<String> rankCaDone = new java.util.HashSet<>(); // completed CA task names (lowercased)
 
@@ -2038,6 +2035,7 @@ public class ClanManagementPlugin extends Plugin
                 getPlatformUrl(), getPlatformKey(), getPlatformSlug(), rsn);
             rankMode = rm.mode != null ? rm.mode : "default";
             rankAssigned = rm.assignedRank;
+            rankHeld = rm.heldRanks != null ? new java.util.HashSet<>(rm.heldRanks) : new java.util.HashSet<>();
             // Boss KCs from WiseOldMan (via our server) — public hiscore data, drives KC requirements.
             rankKc = platformApiService.fetchPlayerKc(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), rsn);
             // Completed Combat Achievement tasks (we already sync these) — drives named-CA requirements.
@@ -2069,7 +2067,7 @@ public class ClanManagementPlugin extends Plugin
         clientThread.invokeLater(() ->
         {
             RankSystem.PlayerSnapshot snap = buildRankSnapshot(clogOnly);
-            java.util.List<RankSystem.RankStatus> results = RankSystem.evaluateAll(snap);
+            java.util.List<RankSystem.RankStatus> results = RankSystem.evaluateAll(snap, rankHeld);
             panel.showRanks(results, snap.itemIds, rankMode);
         });
     }
@@ -2113,6 +2111,9 @@ public class ClanManagementPlugin extends Plugin
         addUnlock(s, "deadeye", VarbitID.PRAYER_DEADEYE_UNLOCKED);
         addUnlock(s, "mystic vigour", VarbitID.PRAYER_MYSTIC_VIGOUR_UNLOCKED);
 
+        // Collection log slots obtained (varp 2943, server-synced) — drives Log Beast.
+        try { s.clogSlots = Math.max(client.getVarpValue(VARP_CLOG_OBTAINED), clogObtainedCount); }
+        catch (Exception ignored) { s.clogSlots = clogObtainedCount; }
         // Achievement Diary completion (in-game varbits) → count complete per tier.
         s.diaryComplete.put("easy", countDiaries(DIARY_EASY));
         s.diaryComplete.put("medium", countDiaries(DIARY_MEDIUM));
@@ -2144,6 +2145,18 @@ public class ClanManagementPlugin extends Plugin
             cacheContainerItems(InventoryID.BANK);
             s.ownedItems.addAll(rankOwnedCache);
             s.itemIds.putAll(rankOwnedIds);
+            // ALSO count collection-log obtained items (read locally when the clog is opened).
+            // Consumed/combined uniques — Slepey tablet into the necklace, used prayer scrolls,
+            // Cursed phalanx — vanish from the bank but stay logged forever.
+            synchronized (clogSyncItems)
+            {
+                for (ClogItem ci : clogSyncItems.values())
+                {
+                    String key = ci.name.toLowerCase();
+                    s.ownedItems.add(key);
+                    s.itemIds.putIfAbsent(key, ci.itemId);
+                }
+            }
         }
         RankSystem.expandOwned(s.ownedItems); // own Ultor → Berserker ring (i) ticks, etc.
 
@@ -2278,6 +2291,27 @@ public class ClanManagementPlugin extends Plugin
         // Fetch bootstrap config from platform (min drop value, active event)
         fetchBootstrapConfig();
 
+        // Roster ranks (rsn -> Discord-derived LADDER rank id) — the rank ICON shown beside names.
+        // Discord is authoritative: the in-game CC title caps below the Heart-of-Solus tiers
+        // (e.g. a heart_3 member shows only "Beast" in-game).
+        try
+        {
+            java.util.Map<String, String> ranks = new java.util.HashMap<>();
+            for (PlatformApiService.RosterMember m : platformApiService.fetchRoster(
+                getPlatformUrl(), getPlatformKey(), getPlatformSlug()))
+            {
+                if (m.rsn != null && m.ladderRank != null)
+                {
+                    ranks.put(m.rsn.replace(' ', ' ').trim().toLowerCase(), m.ladderRank);
+                }
+            }
+            panel.setRosterRanks(ranks);
+        }
+        catch (Exception e)
+        {
+            log.debug("Roster rank fetch failed", e);
+        }
+
         // Load platform config on first successful connection
         if (!serverConfigLoaded)
         {
@@ -2290,11 +2324,11 @@ public class ClanManagementPlugin extends Plugin
                 // Auto-load drops tab on first config load
                 executor.submit(this::refreshDropsTab);
 
-                // Auto-sync roster on login if admin
-                String adminApiKey = config.adminApiKey();
-                if (!adminApiKey.isEmpty())
+                // Auto-sync roster on login if admin. Role-based: the member's own personal key
+                // carries their admin permission (the shared admin key is gone).
+                if (platformIsAdmin)
                 {
-                    clientThread.invokeLater(() -> hiscoreTracker.onLoginIfAdmin(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), adminApiKey));
+                    clientThread.invokeLater(() -> hiscoreTracker.onLoginIfAdmin(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), getPlatformKey()));
                 }
             }
             catch (Exception e)
@@ -2364,6 +2398,9 @@ public class ClanManagementPlugin extends Plugin
                 getPlatformUrl(), getPlatformKey(), getPlatformSlug(), pbMode);
             if (allTimes != null)
             {
+                // Replace, don't merge — a merge left stale categories behind (e.g. imported lists
+                // lingering after a mode change), and the fetch order carries the Recent sorting.
+                hiscoreCacheV2.clear();
                 hiscoreCacheV2.putAll(allTimes);
                 hiscoreV2BatchFetched = true;
                 saveHiscoreCacheV2ToDisk();
@@ -2728,7 +2765,9 @@ public class ClanManagementPlugin extends Plugin
 
     private File getHiscoreCacheFile()
     {
-        return new File(pluginDataDir(), "hiscore-cache.json");
+        // v2 name retired the old file on purpose: caches written by the "All PBs" era contain
+        // imported lists that must not resurface on the live-only board.
+        return new File(pluginDataDir(), "hiscore-cache-live.json");
     }
 
     private void saveHiscoreCacheV2ToDisk()
@@ -2870,11 +2909,9 @@ public class ClanManagementPlugin extends Plugin
             return; // already shown (e.g. set up once from the legacy key, then again post-bootstrap)
         }
 
-        String adminKey = config.adminApiKey();
-        boolean hasLegacyAdminKey = adminKey != null && !adminKey.isEmpty();
-        // Unlock admin via the personal key owner's Discord role (platformIsAdmin); keep the
-        // legacy shared admin key working as an owner fallback.
-        if (!platformIsAdmin && !hasLegacyAdminKey)
+        // Admin unlocks purely by role: the personal key's Discord user must have an admin
+        // permission (bootstrap `permissions`). The legacy shared admin key is retired.
+        if (!platformIsAdmin)
         {
             return;
         }
@@ -2920,19 +2957,11 @@ public class ClanManagementPlugin extends Plugin
             }
         }));
 
-        // Save shared settings — placeholder for future platform admin API
+        // Shared settings have no plugin-side save — they're edited on the web dashboard. Don't
+        // report a fake "saved"; just refresh the local cache so dashboard edits show up.
         adminPanel.setOnSaveSettings(args -> executor.submit(() -> {
-            try
-            {
-                adminPanel.setStatus("Settings are managed from the web dashboard");
-                adminPanel.setStatus("Settings saved");
-                // Refresh local cached config
-                serverConfigLoaded = false;
-            }
-            catch (Exception e)
-            {
-                adminPanel.setStatus("Error: " + e.getMessage());
-            }
+            adminPanel.setStatus("Settings are managed from the web dashboard");
+            serverConfigLoaded = false;
         }));
 
         // Speed times moderation — managed via web dashboard

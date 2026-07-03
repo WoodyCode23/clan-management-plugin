@@ -113,6 +113,7 @@ public final class RankSystem
     {
         public final Rank rank;
         public boolean eligible;
+        public boolean granted; // held via the member's Discord rank (auto-checked, not evaluated)
         public final List<String> unmetRequires = new ArrayList<>();
         public final List<GroupStatus> groups = new ArrayList<>();
         public RankStatus(Rank r) { this.rank = r; }
@@ -211,7 +212,36 @@ public final class RankSystem
      */
     public static List<RankStatus> evaluateAll(PlayerSnapshot s)
     {
+        return evaluateAll(s, null);
+    }
+
+    /**
+     * Evaluate with a set of ranks the member already holds via their Discord rank. Those (and
+     * everything below them) are marked "granted" — auto-checked without needing their requirements,
+     * and they satisfy the prerequisites of higher ranks so the member only sees what's left to earn.
+     */
+    public static List<RankStatus> evaluateAll(PlayerSnapshot s, Set<String> granted)
+    {
+        // Expand granted ranks through their OWN prerequisite chains (Dragon Comp → Dragon
+        // Sword/Pick → Rune → Adamant; Beast → TzKal + Maxed). Discord role order is not used —
+        // the Sword/Pick paths and the four Beast ranks are parallel, so only the requires DAG
+        // says what a held rank implies.
+        if (granted != null && !granted.isEmpty())
+        {
+            granted = new HashSet<>(granted);
+            boolean grew = true;
+            while (grew)
+            {
+                grew = false;
+                for (Rank r : RANKS)
+                {
+                    if (!granted.contains(r.id)) continue;
+                    for (String req : r.requires) if (granted.add(req)) grew = true;
+                }
+            }
+        }
         s.ranksHeld.clear();
+        if (granted != null) s.ranksHeld.addAll(granted);
         List<RankStatus> out = new ArrayList<>();
         boolean changed = true;
         int guard = 0;
@@ -222,6 +252,12 @@ public final class RankSystem
             for (Rank r : RANKS)
             {
                 RankStatus rs = evaluate(r, s);
+                if (granted != null && granted.contains(r.id))
+                {
+                    rs.granted = true;
+                    rs.eligible = true;
+                    rs.unmetRequires.clear();
+                }
                 out.add(rs);
                 if (rs.eligible && s.ranksHeld.add(r.id)) changed = true;
             }
@@ -247,6 +283,20 @@ public final class RankSystem
         IMPLIES.put("archers ring (i)", new String[]{"archers ring"});
         // Rune pouch
         IMPLIES.put("divine rune pouch", new String[]{"rune pouch"});
+        // Skilling storage bags rename when opened (and some have combined upgrades) — every
+        // variant counts as owning the base bag. Fullness doesn't rename items, so name matching
+        // already covers full/empty.
+        IMPLIES.put("open coal bag", new String[]{"coal bag"});
+        IMPLIES.put("open herb sack", new String[]{"herb sack"});
+        IMPLIES.put("open seed box", new String[]{"seed box"});
+        IMPLIES.put("open fish barrel", new String[]{"fish barrel"});
+        IMPLIES.put("fish sack barrel", new String[]{"fish barrel"});      // fish sack + barrel combo
+        IMPLIES.put("open fish sack barrel", new String[]{"fish barrel"});
+        IMPLIES.put("open log basket", new String[]{"log basket"});
+        IMPLIES.put("forestry basket", new String[]{"log basket"});        // forestry kit + log basket
+        IMPLIES.put("open forestry basket", new String[]{"log basket"});
+        IMPLIES.put("open plank sack", new String[]{"plank sack"});
+        IMPLIES.put("open gem bag", new String[]{"gem bag"});
         // Ava's
         IMPLIES.put("ava's assembler", new String[]{"ava's accumulator"});
         IMPLIES.put("ava's accumulator", new String[]{"ava's attractor"});
@@ -294,13 +344,46 @@ public final class RankSystem
         IMPLIES.put("torva platebody (or)", new String[]{"torva platebody"});
         IMPLIES.put("torva platelegs (or)", new String[]{"torva platelegs"});
         IMPLIES.put("blessed dizana's quiver", new String[]{"dizana's quiver"});
-        IMPLIES.put("amulet of rancour", new String[]{"amulet of torture"}); // rancour counts for torture
-        IMPLIES.put("confliction gauntlets", new String[]{"tormented bracelet"}); // count for "torm" — VERIFY
-        // Infernal / Ava's max-cape variants count for the base
+        IMPLIES.put("amulet of rancour", new String[]{"amulet of torture"});     // rancour = torture upgrade
+        IMPLIES.put("amulet of rancour (s)", new String[]{"amulet of rancour"}); // ornament variant
+        IMPLIES.put("confliction gauntlets", new String[]{"tormented bracelet"}); // tormented upgrade (wiki-confirmed)
+        // Maggot King necklace chain: rupture = anguish + etched fang (proves owning both).
+        IMPLIES.put("necklace of rupture", new String[]{"necklace of anguish", "etched elder venator fang"});
+        IMPLIES.put("etched elder venator fang", new String[]{"elder venator fang"});
+        // Infernal / Fire / Ava's cape variants count for the base
         IMPLIES.put("infernal max cape", new String[]{"infernal cape"});
+        IMPLIES.put("infernal cape", new String[]{"fire cape"}); // a fire cape is sacrificed to enter the Inferno
+        IMPLIES.put("fire max cape", new String[]{"fire cape"});
         IMPLIES.put("assembler max cape", new String[]{"ava's assembler"});
         IMPLIES.put("accumulator max cape", new String[]{"ava's accumulator"});
-        IMPLIES.put("masori assembler max cape", new String[]{"ava's assembler"}); // VERIFY name
+        IMPLIES.put("masori assembler", new String[]{"ava's assembler"}); // assembler + masori body
+        IMPLIES.put("masori assembler max cape", new String[]{"ava's assembler"});
+        // Cerberus boots are made FROM the crystals — owning the boot satisfies the crystal check.
+        IMPLIES.put("primordial boots", new String[]{"primordial crystal"});
+        IMPLIES.put("pegasian boots", new String[]{"pegasian crystal"});
+        IMPLIES.put("eternal boots", new String[]{"eternal crystal"});
+        // Avernic treads upgrades are modular — each variant counts as the base treads PLUS the
+        // boots that were sunk into it (which in turn imply their crystals, transitively).
+        IMPLIES.put("avernic treads (pr)", new String[]{"avernic treads", "primordial boots"});
+        IMPLIES.put("avernic treads (pe)", new String[]{"avernic treads", "pegasian boots"});
+        IMPLIES.put("avernic treads (et)", new String[]{"avernic treads", "eternal boots"});
+        IMPLIES.put("avernic treads (pr)(pe)", new String[]{"avernic treads", "primordial boots", "pegasian boots"});
+        IMPLIES.put("avernic treads (pe)(pr)", new String[]{"avernic treads", "primordial boots", "pegasian boots"});
+        IMPLIES.put("avernic treads (pr)(et)", new String[]{"avernic treads", "primordial boots", "eternal boots"});
+        IMPLIES.put("avernic treads (et)(pr)", new String[]{"avernic treads", "primordial boots", "eternal boots"});
+        IMPLIES.put("avernic treads (pe)(et)", new String[]{"avernic treads", "pegasian boots", "eternal boots"});
+        IMPLIES.put("avernic treads (et)(pe)", new String[]{"avernic treads", "pegasian boots", "eternal boots"});
+        IMPLIES.put("avernic treads (max)", new String[]{"avernic treads", "primordial boots", "pegasian boots", "eternal boots"});
+        // Cosmetic recolour/ornament sets count for the base pieces (TzKal armour group)
+        IMPLIES.put("radiant oathplate helm", new String[]{"oathplate helm"});
+        IMPLIES.put("radiant oathplate chest", new String[]{"oathplate chest"});
+        IMPLIES.put("radiant oathplate legs", new String[]{"oathplate legs"});
+        IMPLIES.put("sanguine torva full helm", new String[]{"torva full helm"});
+        IMPLIES.put("sanguine torva platebody", new String[]{"torva platebody"});
+        IMPLIES.put("sanguine torva platelegs", new String[]{"torva platelegs"});
+        IMPLIES.put("twisted ancestral hat", new String[]{"ancestral hat"});
+        IMPLIES.put("twisted ancestral robe top", new String[]{"ancestral robe top"});
+        IMPLIES.put("twisted ancestral robe bottom", new String[]{"ancestral robe bottom"});
         // Zulrah: serpentine helm + mutagen helms imply the Serpentine visage; blowpipe implies the fang
         IMPLIES.put("serpentine helm", new String[]{"serpentine visage"});
         IMPLIES.put("tanzanite helm", new String[]{"serpentine helm"});
@@ -336,8 +419,9 @@ public final class RankSystem
     // Sourced from solusosrs.com/ranking-system + the user's filled-in item pools. Item names are
     // best-effort in-game names; lines marked VERIFY need confirming. Achieve gates are 6 of 9
     // (user-confirmed, not the website's 5/9). Tiering via `requires` (resolved by evaluateAll).
-    // NOTE: skills/total/total-XP/CA-tiers/items evaluate live; DIARY, BOSS_KC and specific CA_TASK
-    // checks are encoded but not yet read from the game (they currently show unmet) — next wiring step.
+    // Every check kind evaluates live: skills/total/XP/items in-game; diaries via varbits; boss KC
+    // via WiseOldMan (through the clan API); CA tiers via varbits and named CA tasks via the synced
+    // completion list (members must have opened their CA list once for task data to exist).
 
     public static final List<Rank> RANKS = new ArrayList<>();
 
@@ -457,7 +541,9 @@ public final class RankSystem
         Group drSwordZenyte = Group.of("Obtain any 3 of 4 Zenyte jewellery", 1, zenyte("3 of 4 Zenyte jewellery", 3));
         Group drSwordAchieve = Group.of("Achieve 6 of 9", 6,
             Check.any("Corrupted Gauntlet — 400 KC or weapon+armour seeds", 1, Check.kc("Corrupted Gauntlet 400 KC", 400, "the_corrupted_gauntlet"),
-                Check.item("Enhanced crystal weapon seed")),
+                // Spec is enhanced weapon seed + 5 armour seeds; ownership is name-based so the
+                // armour-seed COUNT can't be verified — presence of both is the closest readable check.
+                Check.all("Enhanced weapon seed + armour seed", Check.item("Enhanced crystal weapon seed"), Check.item("Crystal armour seed"))),
             Check.any("God Wars — 1,014 KC or 8 uniques", 1, Check.kc("God Wars 1,014 KC", 1014, "god_wars_dungeon"),
                 Check.items("8 GWD uniques", 8, "Bandos chestplate", "Bandos tassets", "Bandos boots",
                     "Armadyl helmet", "Armadyl chestplate", "Armadyl chainskirt", "Saradomin sword",
@@ -497,7 +583,13 @@ public final class RankSystem
             Check.item("Torva full helm"), Check.item("Torva platebody"), Check.item("Torva platelegs"),
             Check.item("Oathplate helm"), Check.item("Oathplate chest"), Check.item("Oathplate legs"));
         Group tzExtras = Group.of("Approaching Grandmaster — all of", 7,
-            Check.any("TzKal-Zuk — 5 KC or 4/10 Zuk GM tasks", 1, Check.kc("TzKal-Zuk 5 KC", 5, "tzkalzuk"), Check.item("Tzkal-Zuk (pet)")),
+            Check.any("TzKal-Zuk — 5 KC or 4/10 Zuk GM tasks", 1, Check.kc("TzKal-Zuk 5 KC", 5, "tzkalzuk"),
+                Check.any("4 of 10 Inferno GM tasks", 4,
+                    Check.caTask("Budget Setup"), Check.caTask("Facing Jad Head-on II"),
+                    Check.caTask("Inferno Grandmaster"), Check.caTask("Inferno Speed-Runner"),
+                    Check.caTask("Jad? What Are You Doing Here?"), Check.caTask("Nibbler Chaser"),
+                    Check.caTask("No Luck Required"), Check.caTask("Playing with Jads"),
+                    Check.caTask("The Floor Is Lava"), Check.caTask("Wasn't Even Close"))),
             Check.any("Fortis Colosseum — 10 KC or Perfect Footwork", 1, Check.kc("Fortis Colosseum 10 KC", 10, "sol_heredit"), Check.caTask("Perfect Footwork")),
             Check.items("Defeat an Awakened Boss (Awakener's orb / Torva)", 1,
                 "Awakener's orb", "Torva full helm", "Torva platebody", "Torva platelegs"),
@@ -512,12 +604,12 @@ public final class RankSystem
         Check[] skiller8 = {
             Check.item("Coal bag"), Check.item("Fish barrel"), Check.item("Bottomless compost bucket"),
             Check.item("Herb sack"), Check.item("Rune pouch"), Check.item("Plank sack"),
-            Check.item("Log basket"), Check.item("Seed basket"),
+            Check.item("Log basket"), Check.item("Seed box"),
         };
         Check[] skiller12 = {
             Check.item("Coal bag"), Check.item("Fish barrel"), Check.item("Bottomless compost bucket"),
             Check.item("Herb sack"), Check.item("Rune pouch"), Check.item("Plank sack"),
-            Check.item("Log basket"), Check.item("Seed basket"),
+            Check.item("Log basket"), Check.item("Seed box"),
             Check.item("Colossal pouch"), Check.item("Smouldering stone"),
             Check.item("Crystal tool seed"), Check.item("Pharaoh's sceptre"),
         };

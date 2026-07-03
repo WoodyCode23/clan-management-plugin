@@ -600,6 +600,7 @@ public class PlatformApiService
         if (response == null || !response.has("leaderboard")) return null;
 
         Map<String, List<HiscoreEntry>> result = new java.util.LinkedHashMap<>();
+        Map<String, Long> newestByBoss = new HashMap<>(); // bossKey -> newest createdAt (for Recent ordering)
         com.google.gson.JsonArray leaderboard = response.getAsJsonArray("leaderboard");
 
         // Team content submits one row per member (same time + roster). Collapse those into a
@@ -636,9 +637,30 @@ public class PlatformApiService
             double sec = timeSeconds - (min * 60);
             String formattedTime = String.format("%d:%05.2f", min, sec);
 
+            // When the time was set — display date + drives newest-first ordering of the
+            // "Recent" overview so fresh times (new bosses) surface at the top.
+            long createdMs = 0;
+            String dateStr = "";
+            if (pb.has("createdAt") && !pb.get("createdAt").isJsonNull())
+            {
+                try
+                {
+                    // Accept ISO ("…T…Z") and Postgres ("YYYY-MM-DD HH:MM:SS.ffffff+00") formats.
+                    String raw = pb.get("createdAt").getAsString().trim()
+                        .replace(' ', 'T').replaceAll("\\+00(:00)?$", "Z");
+                    java.time.Instant inst = java.time.OffsetDateTime.parse(
+                        raw.endsWith("Z") || raw.contains("+") ? raw : raw + "Z",
+                        java.time.format.DateTimeFormatter.ISO_OFFSET_DATE_TIME).toInstant();
+                    createdMs = inst.toEpochMilli();
+                    dateStr = new java.text.SimpleDateFormat("MM/dd").format(new java.util.Date(createdMs));
+                }
+                catch (Exception ignored) { /* unexpected format — no date shown */ }
+            }
+            newestByBoss.merge(bossKey, createdMs, Math::max);
+
             // Use bossKey directly as the category key (matches BossCategory.getKey())
             result.computeIfAbsent(bossKey, k -> new java.util.ArrayList<>())
-                .add(new HiscoreEntry(0, timeSeconds, formattedTime, display, "", bossKey, teamSize));
+                .add(new HiscoreEntry(0, timeSeconds, formattedTime, display, dateStr, bossKey, teamSize));
         }
 
         // Sort each category by time and assign 1-based ranks. HiscoreEntry.rank is final, so
@@ -657,7 +679,14 @@ public class PlatformApiService
             e.setValue(ranked);
         }
 
-        return result;
+        // Order categories by their newest time (desc) so the "Recent" overview shows what the
+        // clan just set — a brand-new boss's first times land at the top instead of alphabetically.
+        Map<String, List<HiscoreEntry>> ordered = new java.util.LinkedHashMap<>();
+        result.entrySet().stream()
+            .sorted((a, b) -> Long.compare(
+                newestByBoss.getOrDefault(b.getKey(), 0L), newestByBoss.getOrDefault(a.getKey(), 0L)))
+            .forEach(e -> ordered.put(e.getKey(), e.getValue()));
+        return ordered;
     }
 
     /**
@@ -722,8 +751,10 @@ public class PlatformApiService
     public static class RosterMember
     {
         public final String rsn;
-        public final String rank;
-        public RosterMember(String rsn, String rank) { this.rsn = rsn; this.rank = rank; }
+        public final String rank;       // in-game CC title (Senator, Xerician…)
+        public final String ladderRank; // Discord-derived ladder rank id (heart_3, maxed…) — null if unlinked
+        public RosterMember(String rsn, String rank, String ladderRank)
+        { this.rsn = rsn; this.rank = rank; this.ladderRank = ladderRank; }
     }
 
     /** Fetch the clan roster (names + ranks) for the Members tab. */
@@ -737,27 +768,35 @@ public class PlatformApiService
             JsonObject o = el.getAsJsonObject();
             out.add(new RosterMember(
                 o.has("rsn") ? o.get("rsn").getAsString() : "",
-                o.has("rank") && !o.get("rank").isJsonNull() ? o.get("rank").getAsString() : null));
+                o.has("rank") && !o.get("rank").isJsonNull() ? o.get("rank").getAsString() : null,
+                o.has("ladderRank") && !o.get("ladderRank").isJsonNull() ? o.get("ladderRank").getAsString() : null));
         }
         return out;
     }
 
     public static class RankMode
     {
-        public final String mode;         // "default" | "clog_only" | "admin_set"
-        public final String assignedRank; // set only for admin_set
-        public RankMode(String mode, String assignedRank) { this.mode = mode; this.assignedRank = assignedRank; }
+        public final String mode;                    // "default" | "clog_only" | "admin_set"
+        public final String assignedRank;            // set only for admin_set
+        public final java.util.List<String> heldRanks; // ranks held via Discord (current + everything below)
+        public RankMode(String mode, String assignedRank, java.util.List<String> heldRanks)
+        { this.mode = mode; this.assignedRank = assignedRank; this.heldRanks = heldRanks; }
     }
 
-    /** How a member's ranks should be evaluated: default auto, collection-log-only, or admin-set. */
+    /** How a member's ranks should be evaluated + which ranks they already hold via their Discord rank. */
     public RankMode fetchRankMode(String baseUrl, String apiKey, String clanSlug, String rsn)
     {
         JsonObject root = getSync(baseUrl + "/clans/" + clanSlug + "/rank-mode/" + encodePath(rsn), apiKey);
-        if (root == null) return new RankMode("default", null);
+        if (root == null) return new RankMode("default", null, new ArrayList<>());
         String mode = root.has("mode") && !root.get("mode").isJsonNull() ? root.get("mode").getAsString() : "default";
         String assigned = root.has("assignedRank") && !root.get("assignedRank").isJsonNull()
             ? root.get("assignedRank").getAsString() : null;
-        return new RankMode(mode, assigned);
+        java.util.List<String> held = new ArrayList<>();
+        if (root.has("heldRanks") && root.get("heldRanks").isJsonArray())
+        {
+            for (JsonElement el : root.getAsJsonArray("heldRanks")) held.add(el.getAsString());
+        }
+        return new RankMode(mode, assigned, held);
     }
 
     /** Boss kill counts (WiseOldMan, via our server) keyed by WOM metric name → KC. Public hiscore data. */

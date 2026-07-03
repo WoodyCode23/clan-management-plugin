@@ -371,7 +371,38 @@ public class BossCategory
                 }
             }
         }
-        return best;
+        if (best != null)
+        {
+            return best;
+        }
+
+        // No category covers this size. Masses (6+) get the group's "6+" category — created on
+        // demand for bosses that only register small sizes — so a 12-man all-clan mass lands in
+        // a proper "6+" bucket instead of being dropped or mislabeled. The actual team size is
+        // still recorded on the submission. Sizes 2–5 with no bucket clamp to the nearest one.
+        BossCategory largest = null, smallest = null;
+        for (BossCategory cat : ALL)
+        {
+            if (!cat.group.equals(group)) continue;
+            if (largest == null || cat.maxPlayers > largest.maxPlayers) largest = cat;
+            if (smallest == null || cat.minPlayers < smallest.minPlayers) smallest = cat;
+        }
+        if (smallest == null) return null; // unknown group
+        if (partySize >= 6)
+        {
+            return massCategory(group, smallest.displayName, smallest.displayGroup);
+        }
+        if (partySize > largest.maxPlayers) return largest;
+        return smallest; // size below every min
+    }
+
+    /** The group's "6+" mass category, registered on first use for bosses that only list small sizes. */
+    private static synchronized BossCategory massCategory(String group, String displayName, String displayGroup)
+    {
+        String key = group + "_mass";
+        BossCategory existing = getByKey(key);
+        if (existing != null) return existing;
+        return register(key, group, displayName, displayGroup, 6, 100, true);
     }
 
     /**

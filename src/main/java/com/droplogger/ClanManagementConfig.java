@@ -81,22 +81,6 @@ public interface ClanManagementConfig extends Config
     )
     default boolean chatConfirmation() { return true; }
 
-    // ── Admin ──
-
-    @ConfigSection(
-        name = "Admin",
-        description = "Admin tools (requires admin API key from your clan dashboard)",
-        position = 2
-    )
-    String adminSection = "admin";
-
-    @ConfigItem(
-        keyName = "adminApiKey",
-        name = "Admin API Key",
-        description = "Admin key from the clan dashboard — leave blank if you are not an admin",
-        section = adminSection,
-        position = 0,
-        secret = true
-    )
-    default String adminApiKey() { return ""; }
+    // Admin access is role-based: a personal API key whose Discord user has an admin role
+    // unlocks the Admin tab (bootstrap `permissions`). The old shared "Admin API Key" is gone.
 }
