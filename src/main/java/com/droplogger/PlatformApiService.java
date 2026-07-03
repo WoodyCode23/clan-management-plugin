@@ -814,7 +814,7 @@ public class PlatformApiService
         return out;
     }
 
-    /** One collection-log slot + whether the viewed player owns it. */
+    /** One collection-log slot + whether the viewed player owns it (and how many they've logged). */
     public static class ClogCatalogItem
     {
         public final int itemId;
@@ -822,9 +822,11 @@ public class PlatformApiService
         public final String tab;
         public final String category;
         public final boolean owned;
-        public ClogCatalogItem(int itemId, String name, String tab, String category, boolean owned)
+        public final int quantity; // obtained count from the collection log (0 if not owned)
+        public ClogCatalogItem(int itemId, String name, String tab, String category, boolean owned, int quantity)
         {
-            this.itemId = itemId; this.name = name; this.tab = tab; this.category = category; this.owned = owned;
+            this.itemId = itemId; this.name = name; this.tab = tab; this.category = category;
+            this.owned = owned; this.quantity = quantity;
         }
     }
 
@@ -846,13 +848,18 @@ public class PlatformApiService
         JsonObject root = getSync(baseUrl + "/clans/" + clanSlug + "/collection-log/" + encodePath(rsn), apiKey);
         if (root == null) return null;
 
-        Set<Integer> owned = new HashSet<>();
+        // itemId -> obtained quantity (owned = present in the map)
+        Map<Integer, Integer> owned = new HashMap<>();
         if (root.has("entries"))
         {
             for (JsonElement el : root.getAsJsonArray("entries"))
             {
                 JsonObject o = el.getAsJsonObject();
-                if (o.has("itemId") && !o.get("itemId").isJsonNull()) owned.add(o.get("itemId").getAsInt());
+                if (o.has("itemId") && !o.get("itemId").isJsonNull())
+                {
+                    int qty = o.has("quantity") && !o.get("quantity").isJsonNull() ? o.get("quantity").getAsInt() : 1;
+                    owned.put(o.get("itemId").getAsInt(), Math.max(qty, 1));
+                }
             }
         }
 
@@ -863,12 +870,14 @@ public class PlatformApiService
             {
                 JsonObject o = el.getAsJsonObject();
                 int itemId = o.has("itemId") ? o.get("itemId").getAsInt() : -1;
+                Integer qty = owned.get(itemId);
                 items.add(new ClogCatalogItem(
                     itemId,
                     o.has("itemName") && !o.get("itemName").isJsonNull() ? o.get("itemName").getAsString() : "",
                     o.has("tab") && !o.get("tab").isJsonNull() ? o.get("tab").getAsString() : "Other",
                     o.has("category") && !o.get("category").isJsonNull() ? o.get("category").getAsString() : "Other",
-                    owned.contains(itemId)));
+                    qty != null,
+                    qty != null ? qty : 0));
             }
         }
 
@@ -904,9 +913,12 @@ public class PlatformApiService
         public final int itemId;
         public final long value;
         public final String monsterName;
-        public PlayerDrop(String itemName, int itemId, long value, String monsterName)
+        public final int killCount;
+        public final int points;
+        public PlayerDrop(String itemName, int itemId, long value, String monsterName, int killCount, int points)
         {
             this.itemName = itemName; this.itemId = itemId; this.value = value; this.monsterName = monsterName;
+            this.killCount = killCount; this.points = points;
         }
     }
 
@@ -958,7 +970,9 @@ public class PlatformApiService
                     o.has("itemName") ? o.get("itemName").getAsString() : "",
                     o.has("itemId") && !o.get("itemId").isJsonNull() ? o.get("itemId").getAsInt() : 0,
                     o.has("value") && !o.get("value").isJsonNull() ? o.get("value").getAsLong() : 0,
-                    o.has("monsterName") && !o.get("monsterName").isJsonNull() ? o.get("monsterName").getAsString() : ""));
+                    o.has("monsterName") && !o.get("monsterName").isJsonNull() ? o.get("monsterName").getAsString() : "",
+                    o.has("killCount") && !o.get("killCount").isJsonNull() ? o.get("killCount").getAsInt() : 0,
+                    o.has("points") && !o.get("points").isJsonNull() ? o.get("points").getAsInt() : 0));
             }
         }
 

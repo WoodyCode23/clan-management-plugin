@@ -271,7 +271,9 @@ public class ClanManagementPlugin extends Plugin
         BOSS_GROUP_ICONS.put("scorpia", 13181);  BOSS_GROUP_ICONS.put("crazy_arch", 11990);
         // Low/other
         BOSS_GROUP_ICONS.put("barrows", 4708);   BOSS_GROUP_ICONS.put("bryophyta", 22372);
-        BOSS_GROUP_ICONS.put("obor", 20756);     BOSS_GROUP_ICONS.put("hespori", 22875);
+        BOSS_GROUP_ICONS.put("obor", 20756);
+        BOSS_GROUP_ICONS.put("hespori", 22997);  // filled bottomless compost bucket — its signature unique (no item depicts the boss)
+        BOSS_GROUP_ICONS.put("titans", 30638);   // Giantsoul amulet (Royal Titans)
         BOSS_GROUP_ICONS.put("sep", 20659);      BOSS_GROUP_ICONS.put("ba", 12703);
     }
     // Built from enum 3721 on clog open: maps a slot's "bad" item id to its canonical id.
@@ -1629,6 +1631,15 @@ public class ClanManagementPlugin extends Plugin
             return;
         }
 
+        // Sanity floor: no real boss/raid completion is under 15 seconds. Sub-floor times are
+        // phase/split lines from other plugins that slipped past the message filter.
+        if (completion.getTimeSeconds() < 15)
+        {
+            log.info("Ignoring implausible completion time {}s for {} (phase/split line?)",
+                completion.getTimeSeconds(), group);
+            return;
+        }
+
         // Gather party members — use fight tracker for instanced bosses, fallback to snapshot
         List<String> partyMembers;
         if (fightTracker != null && fightTracker.getTrackedPartySize() > 0)
@@ -2300,9 +2311,22 @@ public class ClanManagementPlugin extends Plugin
             for (PlatformApiService.RosterMember m : platformApiService.fetchRoster(
                 getPlatformUrl(), getPlatformKey(), getPlatformSlug()))
             {
-                if (m.rsn != null && m.ladderRank != null)
+                // Discord ladder rank first; members without one (staff, unlinked) fall back to
+                // their in-game STAR title (Master/Major/Proselyte) so they still get an icon.
+                String rankKey = m.ladderRank;
+                if (rankKey == null && m.rank != null)
                 {
-                    ranks.put(m.rsn.replace(' ', ' ').trim().toLowerCase(), m.ladderRank);
+                    switch (m.rank.toLowerCase())
+                    {
+                        case "master": rankKey = "title_master"; break;
+                        case "major": rankKey = "title_major"; break;
+                        case "proselyte": rankKey = "title_proselyte"; break;
+                        default: break;
+                    }
+                }
+                if (m.rsn != null && rankKey != null)
+                {
+                    ranks.put(m.rsn.replace(' ', ' ').trim().toLowerCase(), rankKey);
                 }
             }
             panel.setRosterRanks(ranks);
@@ -2772,6 +2796,10 @@ public class ClanManagementPlugin extends Plugin
 
     private void saveHiscoreCacheV2ToDisk()
     {
+        // Only persist the default (clan-verified) view. Persisting whatever mode was last
+        // browsed meant an "All PBs" session wrote imports to disk, and the next startup loaded
+        // them straight into the Clan Only recent view.
+        if (!"clan".equals(pbMode)) return;
         try
         {
             Map<String, List<Map<String, Object>>> toSave = new LinkedHashMap<>();

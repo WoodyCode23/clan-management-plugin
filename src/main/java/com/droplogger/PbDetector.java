@@ -110,6 +110,15 @@ public class PbDetector
      */
     public CompletionResult detectCompletion(String cleanedMessage)
     {
+        // Third-party timer plugins print per-phase/split lines that also say "Duration:" —
+        // e.g. a Nightmare phase timer produced an impossible 6s "kill". Only whole-kill
+        // messages count; anything mentioning a phase/split/section is not a completion.
+        String lowerAll = cleanedMessage.toLowerCase();
+        if (lowerAll.contains("phase") || lowerAll.contains("split") || lowerAll.contains("section"))
+        {
+            return null;
+        }
+
         boolean isPb = cleanedMessage.contains("(new personal best)");
         Matcher matcher;
 

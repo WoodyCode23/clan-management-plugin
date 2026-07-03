@@ -117,6 +117,11 @@ public class ClanPanel extends PluginPanel
         RANK_ICON_SPRITE.put("heart_2", 3109);
         RANK_ICON_SPRITE.put("heart_3", 3110);
         RANK_ICON_SPRITE.put("heart_4", 3111);
+        // In-game STAR titles (staff designations) — the fallback icon for members without a
+        // Discord ladder rank (e.g. the owner's Proselyte, Boomerclicks' Master).
+        RANK_ICON_SPRITE.put("title_master", 3105);
+        RANK_ICON_SPRITE.put("title_major", 3103);
+        RANK_ICON_SPRITE.put("title_proselyte", 3101);
     }
 
     /** A BoxLayout column that fills the scroll viewport's WIDTH (so children fit beside the scrollbar). */
@@ -1009,27 +1014,97 @@ public class ClanPanel extends PluginPanel
                 return ni != 0 ? ni : Integer.compare(a.teamSize, b.teamSize);
             });
 
-            String lastGroup = null;
+            // Bucket into collapsible sections. Raids each get their OWN section (CoX, CM CoX,
+            // ToB, ToB: Hard Mode, ToA: Expert Mode…) instead of one merged "Raids" pile;
+            // everything else sections by display group (GWD, Slayer, Wilderness…).
+            java.util.Map<String, java.util.List<PlatformApiService.PlayerPb>> sections = new java.util.LinkedHashMap<>();
+            java.util.Map<String, Color> sectionColors = new java.util.HashMap<>();
             for (PlatformApiService.PlayerPb pb : sorted)
             {
                 BossCategory cat = BossCategory.fromKey(pb.bossKey);
                 String group = cat != null ? cat.getDisplayGroup() : "Other";
-                if (!group.equals(lastGroup))
-                {
-                    lastGroup = group;
-                    JLabel header = new JLabel(group);
-                    header.setFont(READABLE_FONT_SMALL.deriveFont(Font.BOLD));
-                    header.setForeground(DISPLAY_GROUP_COLORS.getOrDefault(group, new Color(150, 150, 150)));
-                    header.setAlignmentX(Component.LEFT_ALIGNMENT);
-                    header.setBorder(new EmptyBorder(6, 2, 2, 0));
-                    membersContent.add(header);
-                }
-                membersContent.add(buildPbRow(pb, cat));
-                membersContent.add(Box.createVerticalStrut(2));
+                String section = "Raids".equals(group) && cat != null ? cat.getDisplayName() : group;
+                sections.computeIfAbsent(section, k -> new java.util.ArrayList<>()).add(pb);
+                sectionColors.putIfAbsent(section, DISPLAY_GROUP_COLORS.getOrDefault(group, new Color(150, 150, 150)));
+            }
+
+            for (java.util.Map.Entry<String, java.util.List<PlatformApiService.PlayerPb>> e : sections.entrySet())
+            {
+                membersContent.add(buildCollapsiblePbSection(e.getKey(), sectionColors.get(e.getKey()), e.getValue()));
+                membersContent.add(Box.createVerticalStrut(4));
             }
         }
         membersContent.revalidate();
         membersContent.repaint();
+    }
+
+    /** A collapsible section of PB rows: caret + colored title + count header, rows toggle below. */
+    private JPanel buildCollapsiblePbSection(String title, Color accent, java.util.List<PlatformApiService.PlayerPb> pbs)
+    {
+        JPanel card = new JPanel()
+        {
+            @Override public Dimension getMaximumSize() { return new Dimension(Integer.MAX_VALUE, getPreferredSize().height); }
+        };
+        card.setLayout(new BoxLayout(card, BoxLayout.Y_AXIS));
+        card.setBackground(new Color(35, 35, 35));
+        card.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createMatteBorder(0, 3, 0, 0, accent != null ? accent : new Color(110, 110, 110)),
+            new EmptyBorder(3, 6, 3, 6)));
+        card.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        JPanel header = new JPanel(new BorderLayout(6, 0));
+        header.setBackground(card.getBackground());
+        header.setAlignmentX(Component.LEFT_ALIGNMENT);
+        header.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
+        header.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+
+        final JLabel caret = new JLabel("+");
+        caret.setFont(READABLE_FONT.deriveFont(Font.BOLD, 14f));
+        caret.setForeground(new Color(150, 150, 150));
+        caret.setPreferredSize(new Dimension(11, 16));
+        JPanel left = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 5, 1));
+        left.setBackground(card.getBackground());
+        left.add(caret);
+        JLabel name = new JLabel(title);
+        name.setFont(READABLE_FONT.deriveFont(Font.BOLD, 12f));
+        name.setForeground(accent != null ? accent : Color.WHITE);
+        left.add(name);
+        header.add(left, BorderLayout.WEST);
+
+        JLabel count = new JLabel(pbs.size() + (pbs.size() == 1 ? " time" : " times"));
+        count.setFont(READABLE_FONT_SMALL);
+        count.setForeground(new Color(130, 130, 130));
+        count.setBorder(new EmptyBorder(0, 0, 0, 4));
+        header.add(count, BorderLayout.EAST);
+        card.add(header);
+
+        JPanel body = new JPanel();
+        body.setLayout(new BoxLayout(body, BoxLayout.Y_AXIS));
+        body.setBackground(card.getBackground());
+        body.setAlignmentX(Component.LEFT_ALIGNMENT);
+        body.setVisible(false);
+        for (PlatformApiService.PlayerPb pb : pbs)
+        {
+            body.add(buildPbRow(pb, BossCategory.fromKey(pb.bossKey)));
+            body.add(Box.createVerticalStrut(2));
+        }
+        card.add(body);
+
+        java.awt.event.MouseAdapter toggle = new java.awt.event.MouseAdapter()
+        {
+            @Override public void mousePressed(java.awt.event.MouseEvent ev)
+            {
+                boolean show = !body.isVisible();
+                body.setVisible(show);
+                caret.setText(show ? "-" : "+");
+                card.revalidate(); card.repaint();
+                membersContent.revalidate(); membersContent.repaint();
+            }
+        };
+        header.addMouseListener(toggle);
+        left.addMouseListener(toggle);
+        name.addMouseListener(toggle);
+        return card;
     }
 
     /** Rank a boss's display group against the canonical group order (unknown groups sort last). */
@@ -1151,7 +1226,8 @@ public class ClanPanel extends PluginPanel
         left.add(item);
         if (d.monsterName != null && !d.monsterName.isEmpty())
         {
-            JLabel from = new JLabel("from " + d.monsterName);
+            JLabel from = new JLabel("from " + d.monsterName
+                + (d.killCount > 0 ? " (" + String.format("%,d", d.killCount) + " KC)" : ""));
             from.setFont(READABLE_FONT_SMALL);
             from.setForeground(new Color(140, 140, 140));
             from.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -1159,13 +1235,26 @@ public class ClanPanel extends PluginPanel
         }
         row.add(left, BorderLayout.CENTER);
 
+        JPanel right = new JPanel();
+        right.setLayout(new BoxLayout(right, BoxLayout.Y_AXIS));
+        right.setBackground(row.getBackground());
         if (d.value > 0)
         {
             JLabel val = new JLabel(formatXp(d.value));
             val.setFont(READABLE_FONT_SMALL);
             val.setForeground(ACCENT_GOLD);
-            row.add(val, BorderLayout.EAST);
+            val.setAlignmentX(Component.RIGHT_ALIGNMENT);
+            right.add(val);
         }
+        if (d.points > 0)
+        {
+            JLabel pts = new JLabel("+" + d.points + " pts");
+            pts.setFont(READABLE_FONT_SMALL);
+            pts.setForeground(new Color(76, 175, 80));
+            pts.setAlignmentX(Component.RIGHT_ALIGNMENT);
+            right.add(pts);
+        }
+        row.add(right, BorderLayout.EAST);
         return row;
     }
 
@@ -1868,10 +1957,14 @@ public class ClanPanel extends PluginPanel
         };
         label.setHorizontalAlignment(SwingConstants.CENTER);
         label.setPreferredSize(new Dimension(36, 32));
-        label.setToolTipText(it.name + (it.owned ? "" : " — missing"));
+        label.setToolTipText(it.name + (it.owned
+            ? (it.quantity > 1 ? " ×" + it.quantity : "")
+            : " — missing"));
         if (itemManager != null && it.itemId > 0)
         {
-            AsyncBufferedImage img = itemManager.getImage(it.itemId);
+            // Render the obtained COUNT on the icon (in-game stack-number style) when > 1,
+            // so "10 abyssal whips" reads straight off the grid like the real collection log.
+            AsyncBufferedImage img = itemManager.getImage(it.itemId, it.quantity, it.quantity > 1);
             label.setIcon(new ImageIcon(img));
             img.onLoaded(() -> { label.setIcon(new ImageIcon(img)); label.revalidate(); label.repaint(); });
         }
@@ -2764,6 +2857,7 @@ public class ClanPanel extends PluginPanel
             // Cache the full leaderboard so the player filter can re-render it without a re-fetch.
             lastTimesEntries = entries != null ? entries : new java.util.ArrayList<>();
             lastTimesAccent = accentColor;
+            hiscoreTimesPage = 0; // new boss selection starts at page 1
             renderTimesFiltered();
         });
     }
@@ -2776,30 +2870,78 @@ public class ClanPanel extends PluginPanel
         return t.trim().toLowerCase();
     }
 
-    /** Re-render the cached boss leaderboard into the times panel, filtered by the player query. */
+    private int hiscoreTimesPage = 0;
+    private static final int TIMES_PAGE_SIZE = 10;
+
+    /** Re-render the cached boss leaderboard, filtered by the player query, in pages of 10 —
+     *  so members can flip through and find where they place. */
     private void renderTimesFiltered()
     {
         if (lastTimesEntries == null) return; // not a boss-leaderboard view (e.g. recent overview)
 
         hiscoreTimesPanel.removeAll();
         String q = playerQuery();
-        boolean any = false;
+        List<HiscoreEntry> filtered = new java.util.ArrayList<>();
         for (HiscoreEntry entry : lastTimesEntries)
         {
             if (!q.isEmpty() && (entry.getRsns() == null || !entry.getRsns().toLowerCase().contains(q)))
             {
                 continue;
             }
-            hiscoreTimesPanel.add(createTimeEntry(entry, lastTimesAccent));
-            any = true;
+            filtered.add(entry);
         }
-        if (!any)
+
+        if (filtered.isEmpty())
         {
             JLabel none = new JLabel(q.isEmpty() ? "No times recorded" : "No players match");
             none.setFont(READABLE_FONT_ITALIC);
             none.setForeground(new Color(80, 80, 80));
             none.setBorder(new EmptyBorder(6, 36, 6, 10));
             hiscoreTimesPanel.add(none);
+        }
+        else
+        {
+            int pages = (filtered.size() + TIMES_PAGE_SIZE - 1) / TIMES_PAGE_SIZE;
+            if (hiscoreTimesPage >= pages) hiscoreTimesPage = pages - 1;
+            if (hiscoreTimesPage < 0) hiscoreTimesPage = 0;
+            int from = hiscoreTimesPage * TIMES_PAGE_SIZE;
+            int to = Math.min(from + TIMES_PAGE_SIZE, filtered.size());
+            for (int i = from; i < to; i++)
+            {
+                hiscoreTimesPanel.add(createTimeEntry(filtered.get(i), lastTimesAccent));
+            }
+
+            if (pages > 1)
+            {
+                JPanel nav = new JPanel(new BorderLayout());
+                nav.setBackground(ColorScheme.DARK_GRAY_COLOR);
+                nav.setAlignmentX(Component.LEFT_ALIGNMENT);
+                nav.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
+                nav.setBorder(new EmptyBorder(4, 8, 2, 8));
+
+                JButton prev = new JButton("< Prev");
+                prev.setFont(READABLE_FONT_SMALL);
+                prev.setFocusPainted(false);
+                prev.setMargin(new Insets(1, 6, 1, 6));
+                prev.setEnabled(hiscoreTimesPage > 0);
+                prev.addActionListener(e -> { hiscoreTimesPage--; renderTimesFiltered(); });
+                nav.add(prev, BorderLayout.WEST);
+
+                JLabel pageLbl = new JLabel("Page " + (hiscoreTimesPage + 1) + " / " + pages, SwingConstants.CENTER);
+                pageLbl.setFont(READABLE_FONT_SMALL);
+                pageLbl.setForeground(new Color(150, 150, 150));
+                nav.add(pageLbl, BorderLayout.CENTER);
+
+                JButton next = new JButton("Next >");
+                next.setFont(READABLE_FONT_SMALL);
+                next.setFocusPainted(false);
+                next.setMargin(new Insets(1, 6, 1, 6));
+                next.setEnabled(hiscoreTimesPage < pages - 1);
+                next.addActionListener(e -> { hiscoreTimesPage++; renderTimesFiltered(); });
+                nav.add(next, BorderLayout.EAST);
+
+                hiscoreTimesPanel.add(nav);
+            }
         }
         hiscoreTimesPanel.revalidate();
         hiscoreTimesPanel.repaint();
@@ -3703,9 +3845,26 @@ public class ClanPanel extends PluginPanel
         return scroll;
     }
 
+    private java.util.List<Map<String, Object>> lastDropsLbPlayers;
+    private String lastDropsLbLocalName;
+    private int dropsLbPage = 0;
+    private static final int DROPS_LB_PAGE_SIZE = 10;
+
     public void updateDropsLeaderboard(List<Map<String, Object>> players, String localPlayerName)
     {
         SwingUtilities.invokeLater(() ->
+        {
+            // Cache for the page nav; keep the current page across periodic refreshes (clamped).
+            lastDropsLbPlayers = players;
+            lastDropsLbLocalName = localPlayerName;
+            renderDropsLeaderboard();
+        });
+    }
+
+    private void renderDropsLeaderboard()
+    {
+        List<Map<String, Object>> players = lastDropsLbPlayers;
+        String localPlayerName = lastDropsLbLocalName;
         {
             dropsLeaderboardPanel.removeAll();
 
@@ -3730,14 +3889,16 @@ public class ClanPanel extends PluginPanel
                 hdrName.setForeground(new Color(170, 170, 170));
                 headerRow.add(hdrName, BorderLayout.WEST);
 
-                JLabel hdrRight = new JLabel("Pts  Drops  GP");
-                hdrRight.setFont(new Font("Segoe UI", Font.BOLD, 11));
-                hdrRight.setForeground(new Color(170, 170, 170));
-                headerRow.add(hdrRight, BorderLayout.EAST);
+                headerRow.add(dropsStatsColumns("Pts", "Drops", "GP",
+                    new Color(170, 170, 170), true, headerRow.getBackground()), BorderLayout.EAST);
                 dropsLeaderboardPanel.add(headerRow);
 
-                int limit = Math.min(players.size(), 15);
-                for (int i = 0; i < limit; i++)
+                int pages = (players.size() + DROPS_LB_PAGE_SIZE - 1) / DROPS_LB_PAGE_SIZE;
+                if (dropsLbPage >= pages) dropsLbPage = pages - 1;
+                if (dropsLbPage < 0) dropsLbPage = 0;
+                int from = dropsLbPage * DROPS_LB_PAGE_SIZE;
+                int limit = Math.min(from + DROPS_LB_PAGE_SIZE, players.size());
+                for (int i = from; i < limit; i++)
                 {
                     Map<String, Object> p = players.get(i);
                     int rank = ((Number) p.getOrDefault("rank", i + 1)).intValue();
@@ -3797,21 +3958,79 @@ public class ClanPanel extends PluginPanel
                             ? String.format("%.0fK", value / 1_000.0)
                             : String.valueOf(value);
 
-                    JLabel statsLabel = new JLabel(
-                        String.format("%d   %d   %s", points, drops, gpStr));
-                    statsLabel.setFont(READABLE_FONT_SMALL);
-                    statsLabel.setForeground(isMe
-                        ? new Color(76, 175, 80)
-                        : new Color(150, 150, 150));
-                    row.add(statsLabel, BorderLayout.EAST);
+                    // Fixed-width columns so Pts/Drops/GP line up on every row — a 0 in any
+                    // column must not shift its neighbours.
+                    row.add(dropsStatsColumns(String.valueOf(points), String.valueOf(drops), gpStr,
+                        isMe ? new Color(76, 175, 80) : new Color(150, 150, 150), false,
+                        row.getBackground()), BorderLayout.EAST);
 
                     dropsLeaderboardPanel.add(row);
+                }
+
+                int totalPages = (players.size() + DROPS_LB_PAGE_SIZE - 1) / DROPS_LB_PAGE_SIZE;
+                if (totalPages > 1)
+                {
+                    JPanel nav = new JPanel(new BorderLayout());
+                    nav.setBackground(ColorScheme.DARK_GRAY_COLOR);
+                    nav.setAlignmentX(Component.LEFT_ALIGNMENT);
+                    nav.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
+                    nav.setBorder(new EmptyBorder(3, 4, 1, 4));
+
+                    JButton prev = new JButton("< Prev");
+                    prev.setFont(READABLE_FONT_SMALL);
+                    prev.setFocusPainted(false);
+                    prev.setMargin(new Insets(1, 6, 1, 6));
+                    prev.setEnabled(dropsLbPage > 0);
+                    prev.addActionListener(e -> { dropsLbPage--; renderDropsLeaderboard(); });
+                    nav.add(prev, BorderLayout.WEST);
+
+                    JLabel pageLbl = new JLabel("Page " + (dropsLbPage + 1) + " / " + totalPages, SwingConstants.CENTER);
+                    pageLbl.setFont(READABLE_FONT_SMALL);
+                    pageLbl.setForeground(new Color(150, 150, 150));
+                    nav.add(pageLbl, BorderLayout.CENTER);
+
+                    JButton next = new JButton("Next >");
+                    next.setFont(READABLE_FONT_SMALL);
+                    next.setFocusPainted(false);
+                    next.setMargin(new Insets(1, 6, 1, 6));
+                    next.setEnabled(dropsLbPage < totalPages - 1);
+                    next.addActionListener(e -> { dropsLbPage++; renderDropsLeaderboard(); });
+                    nav.add(next, BorderLayout.EAST);
+
+                    dropsLeaderboardPanel.add(nav);
                 }
             }
 
             dropsLeaderboardPanel.revalidate();
             dropsLeaderboardPanel.repaint();
-        });
+        }
+    }
+
+    /**
+     * Three fixed-width right-aligned columns (Pts / Drops / GP) for the monthly drops
+     * leaderboard. The SAME widths are used for the header and every row, so values always
+     * line up regardless of digit count (a 0 must not collapse its column).
+     */
+    private JPanel dropsStatsColumns(String pts, String drops, String gp, Color fg, boolean bold, Color bg)
+    {
+        JPanel cols = new JPanel(new java.awt.GridBagLayout());
+        cols.setBackground(bg);
+        int[] widths = {32, 40, 46};
+        String[] vals = {pts, drops, gp};
+        java.awt.GridBagConstraints gc = new java.awt.GridBagConstraints();
+        gc.gridy = 0;
+        for (int c = 0; c < 3; c++)
+        {
+            JLabel l = new JLabel(vals[c], SwingConstants.RIGHT);
+            l.setFont(bold ? new Font("Segoe UI", Font.BOLD, 11) : READABLE_FONT_SMALL);
+            l.setForeground(fg);
+            java.awt.Dimension d = new java.awt.Dimension(widths[c], 14);
+            l.setPreferredSize(d);
+            l.setMinimumSize(d);
+            gc.gridx = c;
+            cols.add(l, gc);
+        }
+        return cols;
     }
 
     public void updateRecentDrops(List<Map<String, Object>> drops)
@@ -3877,8 +4096,11 @@ public class ClanPanel extends PluginPanel
                             : new Color(220, 220, 220));
                     itemLabel.setToolTipText(item);
 
+                    int kc = ((Number) drop.getOrDefault("kc", 0)).intValue();
                     JLabel detailLabel = new JLabel("<html>" + nameWithRankHtml(player)
-                        + (monster.isEmpty() ? "" : " — " + escapeHtml(monster)) + "</html>");
+                        + (monster.isEmpty() ? "" : " — " + escapeHtml(monster))
+                        + (kc > 0 ? " <font color='#8a8a8a'>(" + String.format("%,d", kc) + " KC)</font>" : "")
+                        + "</html>");
                     detailLabel.setFont(READABLE_FONT_SMALL);
                     detailLabel.setForeground(new Color(120, 120, 120));
 
@@ -3886,19 +4108,10 @@ public class ClanPanel extends PluginPanel
                     leftPanel.add(detailLabel);
                     row.add(leftPanel, BorderLayout.CENTER);
 
-                    // Right: points + value
+                    // Right: gp value on top, clan points under it
                     JPanel rightPanel = new JPanel();
                     rightPanel.setLayout(new BoxLayout(rightPanel, BoxLayout.Y_AXIS));
                     rightPanel.setBackground(row.getBackground());
-
-                    if (points > 0)
-                    {
-                        JLabel ptLabel = new JLabel("+" + points + " pts");
-                        ptLabel.setFont(READABLE_FONT_SMALL);
-                        ptLabel.setForeground(new Color(76, 175, 80));
-                        ptLabel.setAlignmentX(Component.RIGHT_ALIGNMENT);
-                        rightPanel.add(ptLabel);
-                    }
 
                     if (value > 0)
                     {
@@ -3912,6 +4125,15 @@ public class ClanPanel extends PluginPanel
                         gpLabel.setForeground(new Color(255, 215, 0));
                         gpLabel.setAlignmentX(Component.RIGHT_ALIGNMENT);
                         rightPanel.add(gpLabel);
+                    }
+
+                    if (points > 0)
+                    {
+                        JLabel ptLabel = new JLabel("+" + points + " pts");
+                        ptLabel.setFont(READABLE_FONT_SMALL);
+                        ptLabel.setForeground(new Color(76, 175, 80));
+                        ptLabel.setAlignmentX(Component.RIGHT_ALIGNMENT);
+                        rightPanel.add(ptLabel);
                     }
 
                     row.add(rightPanel, BorderLayout.EAST);
