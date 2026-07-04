@@ -1752,20 +1752,19 @@ public class ClanManagementPlugin extends Plugin
                 int timeMs = (int) (timeSeconds * 1000);
                 String source = finalAllClan ? "live" : "unverified";
 
-                // Only record actual PBs or clan PBs — skip ordinary (non-PB) completions so we
-                // don't spam the API/chat. A non-personal-best still counts if it beats (or is the
-                // first of) the clan's verified time for this boss + team size = a new clan PB.
-                if (!isNewPb)
+                // Build everyone's PBs NATURALLY: the first completion each session sets a
+                // baseline and only improvements submit after that (the server keeps the fastest
+                // per player/boss/size, and Discord posts fire only on genuine records). This
+                // matters for bosses the adventure log cannot import - without it, a member whose
+                // real PB predates the plugin never gets a time on the board at all.
+                String sessionKey = categoryKey + "|" + finalPartySize;
+                Integer sessionBest = sessionBestTimes.get(sessionKey);
+                if (!isNewPb && sessionBest != null && timeMs >= sessionBest)
                 {
-                    int clanBest = platformApiService.fetchClanBestTimeMs(
-                        getPlatformUrl(), getPlatformKey(), getPlatformSlug(), categoryKey, finalPartySize);
-                    boolean isClanPb = clanBest <= 0 || timeMs < clanBest;
-                    if (!isClanPb)
-                    {
-                        log.debug("{} {} is neither a PB nor a clan PB — skipping submit", categoryKey, formattedTime);
-                        return;
-                    }
+                    log.debug("{} {} is not an improvement this session - skipping submit", categoryKey, formattedTime);
+                    return;
                 }
+                sessionBestTimes.merge(sessionKey, timeMs, Math::min);
 
                 // Submit each party member's time. The first submit is synchronous so we learn
                 // the clan placement (clanRank 1 = new clan record); the rest are fire-and-forget.
@@ -1781,13 +1780,13 @@ public class ClanManagementPlugin extends Plugin
                     if (firstMember)
                     {
                         clanRank = platformApiService.submitPbSync(getPlatformUrl(), getPlatformKey(), getPlatformSlug(),
-                            member.trim(), categoryKey, finalPartySize, timeMs, source, teamMembers, screenshot);
+                            member.trim(), categoryKey, finalPartySize, timeMs, source, teamMembers, screenshot, isNewPb);
                         firstMember = false;
                     }
                     else
                     {
                         platformApiService.submitPb(getPlatformUrl(), getPlatformKey(), getPlatformSlug(),
-                            member.trim(), categoryKey, finalPartySize, timeMs, source, teamMembers);
+                            member.trim(), categoryKey, finalPartySize, timeMs, source, teamMembers, isNewPb);
                     }
                 }
                 log.debug("Speed time submitted for {}: {} (clanRank {})", categoryKey, formattedTime, clanRank);
@@ -2062,6 +2061,9 @@ public class ClanManagementPlugin extends Plugin
     // "default" = bank/equipment auto-eval; "clog_only" = evaluate from the local collection log;
     // "admin_set" = rank is assigned manually by an admin (no auto-eval).
     private volatile long lastAuthWarnAt = 0; // debounce for the key-rejected chat warning
+    // Fastest time seen THIS session per "categoryKey|partySize" - gates natural PB submissions.
+    private final java.util.Map<String, Integer> sessionBestTimes = new java.util.concurrent.ConcurrentHashMap<>();
+
     private volatile String rankMode = "default";
     private volatile String rankAssigned = null;
     private volatile java.util.Set<String> rankHeld = new java.util.HashSet<>(); // ranks held via Discord

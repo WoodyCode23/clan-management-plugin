@@ -107,6 +107,17 @@ public class PlatformApiService
     public void submitPb(String baseUrl, String apiKey, String clanSlug,
                          String rsn, String bossKey, int teamSize, int timeMs, String source, String teamMembers)
     {
+        submitPb(baseUrl, apiKey, clanSlug, rsn, bossKey, teamSize, timeMs, source, teamMembers, true);
+    }
+
+    /**
+     * announce=false marks a NATURAL baseline (a completion that was not "(new personal best)")
+     * so the server records the time quietly - no activity feed entry, no Discord posts.
+     */
+    public void submitPb(String baseUrl, String apiKey, String clanSlug,
+                         String rsn, String bossKey, int teamSize, int timeMs, String source, String teamMembers,
+                         boolean announce)
+    {
         JsonObject payload = new JsonObject();
         payload.addProperty("rsn", rsn);
         addAccountHash(payload);
@@ -114,6 +125,7 @@ public class PlatformApiService
         payload.addProperty("teamSize", teamSize);
         payload.addProperty("timeMs", timeMs);
         payload.addProperty("source", source);
+        payload.addProperty("announce", announce);
         if (teamMembers != null && !teamMembers.isEmpty())
         {
             payload.addProperty("teamMembers", teamMembers);
@@ -128,7 +140,7 @@ public class PlatformApiService
      */
     public int submitPbSync(String baseUrl, String apiKey, String clanSlug,
                             String rsn, String bossKey, int teamSize, int timeMs, String source,
-                            String teamMembers, String screenshotB64)
+                            String teamMembers, String screenshotB64, boolean announce)
     {
         JsonObject payload = new JsonObject();
         payload.addProperty("rsn", rsn);
@@ -137,6 +149,7 @@ public class PlatformApiService
         payload.addProperty("teamSize", teamSize);
         payload.addProperty("timeMs", timeMs);
         payload.addProperty("source", source);
+        payload.addProperty("announce", announce);
         if (teamMembers != null && !teamMembers.isEmpty())
         {
             payload.addProperty("teamMembers", teamMembers);

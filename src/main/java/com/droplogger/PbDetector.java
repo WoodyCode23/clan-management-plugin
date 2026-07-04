@@ -140,11 +140,16 @@ public class PbDetector
      */
     public CompletionResult detectCompletion(String cleanedMessage)
     {
-        // Third-party timer plugins print per-phase/split lines that also say "Duration:" —
-        // e.g. a Nightmare phase timer produced an impossible 6s "kill". Only whole-kill
-        // messages count; anything mentioning a phase/split/section is not a completion.
+        // Intermediate progress lines also say "Duration:" but are NOT completions:
+        //  - third-party phase timers ("phase"/"split"/"section") — produced a 6s "Phosani kill"
+        //  - vanilla CoX floor times ("Upper/Middle/Lower level complete! Duration: 4:31")
+        //  - Olm phase lines ("Olm duration: 5:20") — produced a 36s "CoX solo"
+        //  - ToB room times ("Wave 'The Maiden of Sugadinti' complete! Duration: 2:45")
+        // Only the whole-kill / whole-raid message may count.
         String lowerAll = cleanedMessage.toLowerCase();
-        if (lowerAll.contains("phase") || lowerAll.contains("split") || lowerAll.contains("section"))
+        if (lowerAll.contains("phase") || lowerAll.contains("split") || lowerAll.contains("section")
+            || lowerAll.contains("level complete") || lowerAll.contains("olm duration")
+            || lowerAll.contains("wave '"))
         {
             return null;
         }
