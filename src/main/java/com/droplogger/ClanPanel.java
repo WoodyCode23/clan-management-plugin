@@ -168,8 +168,71 @@ public class ClanPanel extends PluginPanel
     private final JPanel womLeaderboardPanel = new JPanel();
     private final JComboBox<String> womMetricCombo = new JComboBox<>();
     private final JComboBox<String> womPeriodCombo = new JComboBox<>(new String[]{"Day", "Week", "Month", "Year", "All-Time"});
-    private final JComboBox<String> womModeCombo = new JComboBox<>(new String[]{"XP Gained"});
+    private final JComboBox<String> womModeCombo = new JComboBox<>(new String[]{"Skills", "Boss KC"});
     private java.util.function.BiConsumer<String, String> onFetchWomData;
+
+    // Boss label -> our snapshot-style key for Boss KC leaderboards (the clan API resolves these
+    // against WiseOldMan bulk group data - one cached call serves every board).
+    private static final java.util.LinkedHashMap<String, String> WOM_BOSS_METRICS = new java.util.LinkedHashMap<>();
+    static
+    {
+        WOM_BOSS_METRICS.put("Chambers of Xeric", "chambers_of_xeric");
+        WOM_BOSS_METRICS.put("CM Chambers of Xeric", "chambers_of_xeric:_challenge_mode");
+        WOM_BOSS_METRICS.put("Theatre of Blood", "theatre_of_blood");
+        WOM_BOSS_METRICS.put("ToB Hard Mode", "theatre_of_blood:_hard_mode");
+        WOM_BOSS_METRICS.put("Tombs of Amascut", "tombs_of_amascut");
+        WOM_BOSS_METRICS.put("ToA Expert", "tombs_of_amascut:_expert_mode");
+        WOM_BOSS_METRICS.put("Zulrah", "zulrah");
+        WOM_BOSS_METRICS.put("Vorkath", "vorkath");
+        WOM_BOSS_METRICS.put("Araxxor", "araxxor");
+        WOM_BOSS_METRICS.put("Cerberus", "cerberus");
+        WOM_BOSS_METRICS.put("Alchemical Hydra", "alchemical_hydra");
+        WOM_BOSS_METRICS.put("Abyssal Sire", "abyssal_sire");
+        WOM_BOSS_METRICS.put("Phantom Muspah", "phantom_muspah");
+        WOM_BOSS_METRICS.put("General Graardor", "general_graardor");
+        WOM_BOSS_METRICS.put("Commander Zilyana", "commander_zilyana");
+        WOM_BOSS_METRICS.put("Kree'arra", "kreearra");
+        WOM_BOSS_METRICS.put("K'ril Tsutsaroth", "kril_tsutsaroth");
+        WOM_BOSS_METRICS.put("Nex", "nex");
+        WOM_BOSS_METRICS.put("Corporeal Beast", "corporeal_beast");
+        WOM_BOSS_METRICS.put("The Gauntlet", "the_gauntlet");
+        WOM_BOSS_METRICS.put("Corrupted Gauntlet", "the_corrupted_gauntlet");
+        WOM_BOSS_METRICS.put("The Nightmare", "nightmare");
+        WOM_BOSS_METRICS.put("Phosani's Nightmare", "phosanis_nightmare");
+        WOM_BOSS_METRICS.put("TzKal-Zuk", "tzkalzuk");
+        WOM_BOSS_METRICS.put("TzTok-Jad", "tztokjad");
+        WOM_BOSS_METRICS.put("Sol Heredit", "sol_heredit");
+        WOM_BOSS_METRICS.put("Vardorvis", "vardorvis");
+        WOM_BOSS_METRICS.put("Duke Sucellus", "duke_sucellus");
+        WOM_BOSS_METRICS.put("The Leviathan", "the_leviathan");
+        WOM_BOSS_METRICS.put("The Whisperer", "the_whisperer");
+        WOM_BOSS_METRICS.put("Callisto", "callisto");
+        WOM_BOSS_METRICS.put("Vet'ion", "vetion");
+        WOM_BOSS_METRICS.put("Venenatis", "venenatis");
+        WOM_BOSS_METRICS.put("Wintertodt", "wintertodt");
+        WOM_BOSS_METRICS.put("Tempoross", "tempoross");
+        WOM_BOSS_METRICS.put("Zalcano", "zalcano");
+    }
+
+    /** Repopulate the metric combo for the selected mode (Skills or Boss KC). */
+    private void populateWomMetricCombo()
+    {
+        womMetricCombo.removeAllItems();
+        if ("Boss KC".equals(womModeCombo.getSelectedItem()))
+        {
+            for (String label : WOM_BOSS_METRICS.keySet()) womMetricCombo.addItem(label);
+        }
+        else
+        {
+            womMetricCombo.addItem("Overall");
+            for (Skill skill : Skill.values())
+            {
+                if (skill == Skill.OVERALL) continue;
+                womMetricCombo.addItem(skill.getName());
+            }
+        }
+    }
+
 
     // Status indicators (bottom of home tab)
     private JLabel statusClogLabel;
@@ -952,13 +1015,15 @@ public class ClanPanel extends PluginPanel
 
     private JPanel buildSectionCard(String title, String subtitle, Color accent, Runnable action)
     {
-        JPanel card = new JPanel(new BorderLayout(8, 0));
+        JPanel card = new JPanel(new BorderLayout(8, 0))
+        {
+            @Override public Dimension getMaximumSize() { return new Dimension(Integer.MAX_VALUE, getPreferredSize().height); }
+        };
         card.setBackground(new Color(40, 40, 40));
         card.setBorder(BorderFactory.createCompoundBorder(
             BorderFactory.createMatteBorder(0, 3, 0, 0, accent),
             new EmptyBorder(8, 10, 8, 10)));
         card.setAlignmentX(Component.LEFT_ALIGNMENT);
-        card.setMaximumSize(new Dimension(Integer.MAX_VALUE, 50));
 
         JPanel txt = new JPanel();
         txt.setLayout(new BoxLayout(txt, BoxLayout.Y_AXIS));
@@ -967,7 +1032,7 @@ public class ClanPanel extends PluginPanel
         t.setFont(READABLE_FONT.deriveFont(Font.BOLD));
         t.setForeground(Color.WHITE);
         t.setAlignmentX(Component.LEFT_ALIGNMENT);
-        JLabel s = new JLabel(subtitle);
+        JLabel s = new JLabel("<html>" + escapeHtml(subtitle) + "</html>");
         s.setFont(READABLE_FONT_SMALL);
         s.setForeground(new Color(160, 160, 160));
         s.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -1117,7 +1182,11 @@ public class ClanPanel extends PluginPanel
 
     private JPanel buildPbRow(PlatformApiService.PlayerPb pb, BossCategory cat)
     {
-        JPanel row = new JPanel(new BorderLayout(6, 0));
+        // Height tracks content - the team-roster line wraps and must never clip.
+        JPanel row = new JPanel(new BorderLayout(6, 0))
+        {
+            @Override public Dimension getMaximumSize() { return new Dimension(Integer.MAX_VALUE, getPreferredSize().height); }
+        };
         row.setBackground(new Color(35, 35, 35));
         row.setBorder(new EmptyBorder(6, 8, 6, 8));
         row.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -1154,18 +1223,16 @@ public class ClanPanel extends PluginPanel
             stacked.setLayout(new BoxLayout(stacked, BoxLayout.Y_AXIS));
             stacked.setOpaque(false);
             name.setAlignmentX(Component.LEFT_ALIGNMENT);
-            JLabel team = new JLabel(pb.teamMembers);
+            JLabel team = new JLabel("<html>" + escapeHtml(pb.teamMembers) + "</html>");
             team.setFont(READABLE_FONT_SMALL.deriveFont(Font.ITALIC));
             team.setForeground(new Color(140, 140, 140));
             team.setAlignmentX(Component.LEFT_ALIGNMENT);
             stacked.add(name);
             stacked.add(team);
-            row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 42));
             row.add(stacked, BorderLayout.CENTER);
         }
         else
         {
-            row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
             row.add(name, BorderLayout.CENTER);
         }
         return row;
@@ -1197,11 +1264,13 @@ public class ClanPanel extends PluginPanel
 
     private JPanel buildMemberDropRow(PlatformApiService.PlayerDrop d)
     {
-        JPanel row = new JPanel(new BorderLayout(6, 0));
+        JPanel row = new JPanel(new BorderLayout(6, 0))
+        {
+            @Override public Dimension getMaximumSize() { return new Dimension(Integer.MAX_VALUE, getPreferredSize().height); }
+        };
         row.setBackground(new Color(35, 35, 35));
         row.setBorder(new EmptyBorder(5, 8, 5, 8));
         row.setAlignmentX(Component.LEFT_ALIGNMENT);
-        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 40));
 
         // Item icon (by id from the server, or resolved from the name).
         int iconId = d.itemId > 0 ? d.itemId : resolveItemId(d.itemName);
@@ -1339,7 +1408,7 @@ public class ClanPanel extends PluginPanel
                 note.setFont(READABLE_FONT_SMALL);
                 note.setForeground(clogOnly ? new Color(190, 175, 130) : new Color(130, 130, 130));
                 note.setAlignmentX(Component.LEFT_ALIGNMENT);
-                note.setMaximumSize(new Dimension(Integer.MAX_VALUE, 48));
+                note.setMaximumSize(new Dimension(Integer.MAX_VALUE, 64));
                 note.setBorder(new EmptyBorder(0, 0, 6, 0));
                 ranksContent.add(note);
 
@@ -1510,7 +1579,7 @@ public class ClanPanel extends PluginPanel
 
         for (RankSystem.GroupStatus gs : rs.groups)
         {
-            JLabel g = new JLabel(gs.group.label + "   " + gs.met + " / " + gs.group.need);
+            JLabel g = new JLabel("<html>" + escapeHtml(gs.group.label) + "   <b>" + gs.met + " / " + gs.group.need + "</b></html>");
             g.setFont(READABLE_FONT_SMALL.deriveFont(Font.BOLD));
             g.setForeground(gs.satisfied() ? new Color(90, 200, 90) : new Color(210, 180, 90));
             g.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -1548,11 +1617,13 @@ public class ClanPanel extends PluginPanel
      *  BorderLayout (not FlowLayout) so long labels ellipsize on one line instead of wrapping + clipping. */
     private JPanel buildRankCheckRow(RankSystem.Result r)
     {
-        JPanel row = new JPanel(new BorderLayout(5, 0));
+        JPanel row = new JPanel(new BorderLayout(5, 0))
+        {
+            @Override public Dimension getMaximumSize() { return new Dimension(Integer.MAX_VALUE, getPreferredSize().height); }
+        };
         row.setBackground(new Color(35, 35, 35));
         row.setAlignmentX(Component.LEFT_ALIGNMENT);
         row.setBorder(new EmptyBorder(1, 2, 1, 2));
-        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
 
         JPanel left = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 4, 0));
         left.setBackground(row.getBackground());
@@ -1572,10 +1643,10 @@ public class ClanPanel extends PluginPanel
         }
         row.add(left, BorderLayout.WEST);
 
-        JLabel l = new JLabel(r.label);
+        JLabel l = new JLabel("<html>" + escapeHtml(r.label) + "</html>");
         l.setFont(READABLE_FONT_SMALL);
         l.setForeground(r.met ? new Color(200, 210, 200) : new Color(140, 140, 140));
-        l.setToolTipText(r.label); // full text on hover, since the row may ellipsize
+        l.setToolTipText(r.label);
         row.add(l, BorderLayout.CENTER);
         return row;
     }
@@ -2029,14 +2100,16 @@ public class ClanPanel extends PluginPanel
 
     private JPanel createNavCard(String name, String description, Color accentColor, String tabName)
     {
-        JPanel card = new JPanel(new BorderLayout(8, 0));
+        JPanel card = new JPanel(new BorderLayout(8, 0))
+        {
+            @Override public Dimension getMaximumSize() { return new Dimension(Integer.MAX_VALUE, getPreferredSize().height); }
+        };
         card.setBackground(new Color(40, 40, 40));
         card.setBorder(BorderFactory.createCompoundBorder(
             BorderFactory.createLineBorder(new Color(60, 60, 60), 1),
             new EmptyBorder(10, 12, 10, 12)
         ));
         card.setAlignmentX(Component.CENTER_ALIGNMENT);
-        card.setMaximumSize(new Dimension(Integer.MAX_VALUE, 62));
         card.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 
         // Accent bar
@@ -2121,14 +2194,16 @@ public class ClanPanel extends PluginPanel
             {
                 for (PlatformApiService.Announcement a : items)
                 {
-                    JPanel card = new JPanel(new BorderLayout(8, 0));
+                    JPanel card = new JPanel(new BorderLayout(8, 0))
+                    {
+                        @Override public Dimension getMaximumSize() { return new Dimension(Integer.MAX_VALUE, getPreferredSize().height); }
+                    };
                     card.setBackground(new Color(30, 28, 15));
                     card.setBorder(BorderFactory.createCompoundBorder(
                         BorderFactory.createMatteBorder(0, 3, 0, 0, ACCENT_GOLD_DIM),
                         new EmptyBorder(8, 10, 8, 10)
                     ));
                     card.setAlignmentX(Component.CENTER_ALIGNMENT);
-                    card.setMaximumSize(new Dimension(Integer.MAX_VALUE, 80));
 
                     String pin = a.pinned ? "📌 " : ""; // pushpin
                     String author = a.author != null && !a.author.isEmpty()
@@ -2490,12 +2565,8 @@ public class ClanPanel extends PluginPanel
         row1.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
 
         womModeCombo.setFont(READABLE_FONT_SMALL);
-        womMetricCombo.addItem("Overall");
-        for (Skill skill : Skill.values())
-        {
-            if (skill == Skill.OVERALL) continue;
-            womMetricCombo.addItem(skill.getName());
-        }
+        womModeCombo.addActionListener(e -> populateWomMetricCombo());
+        populateWomMetricCombo();
         womMetricCombo.setFont(READABLE_FONT_SMALL);
         womMetricCombo.setRenderer(new SkillComboRenderer());
 
@@ -2547,7 +2618,11 @@ public class ClanPanel extends PluginPanel
             womLeaderboardPanel.repaint();
         });
 
-        String metric = ((String) womMetricCombo.getSelectedItem()).toLowerCase();
+        String selected = (String) womMetricCombo.getSelectedItem();
+        if (selected == null) return;
+        String metric = "Boss KC".equals(womModeCombo.getSelectedItem())
+            ? "boss:" + WOM_BOSS_METRICS.getOrDefault(selected, selected.toLowerCase())
+            : selected.toLowerCase();
         String period = ((String) womPeriodCombo.getSelectedItem()).toLowerCase();
         onFetchWomData.accept(metric, period);
     }
@@ -2787,7 +2862,16 @@ public class ClanPanel extends PluginPanel
 
     // Rank icon sprites exported to small PNGs so they can render INLINE beside names in html
     // labels (<img> needs a URL; Swing html can't reference in-memory images).
-    private final java.util.Map<String, String> rankIconUrls = new java.util.concurrent.ConcurrentHashMap<>();
+    private final java.util.Map<String, java.io.File> rankIconFiles = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** file: URL for a rank's exported icon, or null — re-checked so a deleted file can never
+     *  render as Swing's broken-image placeholder. */
+    private String rankIconUrl(String rankId)
+    {
+        if (rankId == null) return null;
+        java.io.File f = rankIconFiles.get(rankId);
+        return f != null && f.exists() ? f.toURI().toString() : null;
+    }
 
     /** Export every mapped clan-rank icon sprite to dir once and remember the file URLs. */
     public void exportRankIcons(java.io.File dir)
@@ -2799,14 +2883,14 @@ public class ClanPanel extends PluginPanel
         {
             String rankId = e.getKey();
             java.io.File f = new java.io.File(dir, rankId + ".png");
-            if (f.exists()) { rankIconUrls.put(rankId, f.toURI().toString()); continue; }
+            if (f.exists()) { rankIconFiles.put(rankId, f); continue; }
             spriteManager.getSpriteAsync(e.getValue(), 0, img ->
             {
                 try
                 {
                     if (img != null && javax.imageio.ImageIO.write(img, "png", f))
                     {
-                        rankIconUrls.put(rankId, f.toURI().toString());
+                        rankIconFiles.put(rankId, f);
                     }
                 }
                 catch (Exception ignored) { /* icon just won't show */ }
@@ -2819,7 +2903,7 @@ public class ClanPanel extends PluginPanel
     {
         String esc = escapeHtml(rsn);
         String rank = rankOf(rsn);
-        String url = rank != null ? rankIconUrls.get(rank) : null;
+        String url = rankIconUrl(rank);
         return url == null ? esc : esc + " <img src='" + url + "'>";
     }
 
@@ -3920,7 +4004,7 @@ public class ClanPanel extends PluginPanel
 
                     String prefix = "#" + rank + " ";
 
-                    String rankUrl = rankOf(rsn) != null ? rankIconUrls.get(rankOf(rsn)) : null;
+                    String rankUrl = rankIconUrl(rankOf(rsn));
                     JLabel nameLabel = new JLabel("<html>" + escapeHtml(prefix + truncate(rsn, 13))
                         + (rankUrl != null ? " <img src='" + rankUrl + "'>" : "") + "</html>");
                     nameLabel.setFont(new Font("Segoe UI",

@@ -452,6 +452,18 @@ public class ClanManagementPlugin extends Plugin
         return "Solus";
     }
 
+    /**
+     * True only when the LOGGED-IN account is actually a member of the clan. A member's API key
+     * configured on a non-clan alt must not submit that alt's drops/times to the clan feed —
+     * the key authenticates the Discord user, not the account being played.
+     */
+    private boolean localPlayerInClan()
+    {
+        ClanChannel clan = client.getClanChannel();
+        return clan != null && clan.getName() != null
+            && clan.getName().equalsIgnoreCase(getClanName());
+    }
+
     @Override
     protected void startUp()
     {
@@ -495,6 +507,19 @@ public class ClanManagementPlugin extends Plugin
             if (!isPlatformConfigured()) return;
             panel.showPlayerCa(rsn, platformApiService.fetchPlayerCa(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), rsn));
         }));
+        // Loud auth-failure warning: a bad/mispasted API key otherwise fails silently while the
+        // panel looks fine (e.g. a member's kills never syncing). At most one warning per 5 min.
+        platformApiService.setOnAuthFailure(() ->
+        {
+            long now = System.currentTimeMillis();
+            if (now - lastAuthWarnAt < 5 * 60_000) return;
+            lastAuthWarnAt = now;
+            clientThread.invokeLater(() ->
+                client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+                    "[" + getClanName() + "] Your API key was REJECTED — drops/times are NOT syncing. "
+                        + "Run /getkey in Discord and paste the new key into the plugin settings.", ""));
+        });
+
         panel.setOnLoadRanks(this::loadRanksWithMode);
         panel.setOnRequestRank(args ->
         {
@@ -1545,6 +1570,7 @@ public class ClanManagementPlugin extends Plugin
 
     private void handleCollectionLogEntry(String cleanedMessage)
     {
+        if (!localPlayerInClan()) return; // non-clan alt on a member client - do not post
         Matcher matcher = COLLECTION_LOG_PATTERN.matcher(cleanedMessage);
         if (!matcher.find())
         {
@@ -1581,7 +1607,20 @@ public class ClanManagementPlugin extends Plugin
             // unlock (no associated kill) — avoid mislabeling it with a stale boss name.
             boolean recentKill = System.currentTimeMillis() - lastKillTime < 60_000
                 && lastKilledNpc != null && !lastKilledNpc.isEmpty();
-            String unlockSource = recentKill ? lastKilledNpc : "Skilling";
+            String unlockSource = recentKill ? lastKilledNpc : null;
+            // No recent kill: the item's collection-log CATEGORY names its boss (Eternal
+            // crystal -> "Cerberus", Crimson kisten -> "Maggot King") - far better than
+            // defaulting to "Skilling" on stale kill context.
+            if (unlockSource == null && unlockItemId > 0 && clogItemCategoryMap != null)
+            {
+                String[] meta = clogItemCategoryMap.get(unlockItemId);
+                if (meta != null && meta[1] != null && !meta[1].isEmpty())
+                {
+                    unlockSource = meta[1];
+                }
+            }
+            if (unlockSource == null) unlockSource = "Skilling";
+
             int unlockValue = unlockItemId > 0 ? itemManager.getItemPrice(unlockItemId) : 0;
 
             // Only post NOTABLE unlocks: pets, clan-whitelisted items, or anything worth at least
@@ -1618,6 +1657,7 @@ public class ClanManagementPlugin extends Plugin
      */
     private void handleCompletionTime(String cleanedMessage)
     {
+        if (!localPlayerInClan()) return; // non-clan alt on a member client - do not submit times
         PbDetector.CompletionResult completion = pbDetector.detectCompletion(cleanedMessage);
         if (completion == null)
         {
@@ -1914,13 +1954,17 @@ public class ClanManagementPlugin extends Plugin
     {
         if (isNonStandardWorld()) return;
         if (!config.enableDrops() || !isPlatformConfigured()) return;
+        if (!localPlayerInClan()) return; // this account isn't in the clan — don't post its drops
         if (event.getItems() == null || event.getItems().isEmpty()) return;
 
         String source = event.getName();
         // Only attach a KC when the loot source is the boss/counter the KC actually belongs to.
         // Otherwise a stale "last boss" KC gets stamped onto unrelated NPC drops (clue NPCs, etc.).
         // Non-counter sources post with no KC at all.
-        int killCount = (event.getType() == LootRecordType.NPC && kcAppliesTo(source, pbDetector.getLastBossName()))
+        // NPC kills AND event loot (raid chests, Barrows) can carry a KC — but only when the loot
+        // source matches the boss/counter the latest count message belongs to.
+        boolean kcCapable = event.getType() == LootRecordType.NPC || event.getType() == LootRecordType.EVENT;
+        int killCount = (kcCapable && kcAppliesTo(source, pbDetector.getLastBossName()))
             ? pbDetector.getLastKillCount() : 0;
         String playerName = client.getLocalPlayer() != null ? client.getLocalPlayer().getName() : "Unknown";
         WorldPoint wp = client.getLocalPlayer() != null
@@ -2017,6 +2061,7 @@ public class ClanManagementPlugin extends Plugin
     // Admin-controlled eval mode for THIS player, fetched from the server (sticky override).
     // "default" = bank/equipment auto-eval; "clog_only" = evaluate from the local collection log;
     // "admin_set" = rank is assigned manually by an admin (no auto-eval).
+    private volatile long lastAuthWarnAt = 0; // debounce for the key-rejected chat warning
     private volatile String rankMode = "default";
     private volatile String rankAssigned = null;
     private volatile java.util.Set<String> rankHeld = new java.util.HashSet<>(); // ranks held via Discord
@@ -2695,8 +2740,11 @@ public class ClanManagementPlugin extends Plugin
             // All-Time ranks by current total XP (no "+"); other periods rank by gain.
             String apiPeriod = "all-time".equals(period) ? "all" : period;
             boolean isGained = !"all".equals(apiPeriod);
-            List<LeaderboardEntry> entries = platformApiService.fetchXpLeaderboard(
-                getPlatformUrl(), getPlatformKey(), getPlatformSlug(), metric, apiPeriod);
+            List<LeaderboardEntry> entries = metric.startsWith("boss:")
+                ? platformApiService.fetchKcLeaderboard(
+                    getPlatformUrl(), getPlatformKey(), getPlatformSlug(), metric.substring(5), apiPeriod)
+                : platformApiService.fetchXpLeaderboard(
+                    getPlatformUrl(), getPlatformKey(), getPlatformSlug(), metric, apiPeriod);
             panel.updateWomLeaderboard(entries, isGained);
         }
         catch (Exception e)

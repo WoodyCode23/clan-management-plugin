@@ -654,8 +654,9 @@ public final class RankSystem
             req("rune_pick"), Arrays.asList(drPickReq, drPickItems, drPickAchieve)));
 
         // — Maxed — Skiller completion.
-        Group maxedReq = Group.of("2,277 total level + All Achievement Diaries", 2,
-            Check.total(2277), Check.diary("Elite", 12));
+        // 2,376 = 24 skills x 99 since Sailing (2026). Bump again if Jagex adds another skill.
+        Group maxedReq = Group.of("2,376 total level + All Achievement Diaries", 2,
+            Check.total(2376), Check.diary("Elite", 12));
         RANKS.add(new Rank("maxed", "Maxed", "Skiller", "Skiller completion",
             new ArrayList<>(), Arrays.asList(maxedReq)));
 

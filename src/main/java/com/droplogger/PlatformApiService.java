@@ -153,6 +153,7 @@ public class PlatformApiService
             .build();
         try (Response response = httpClient.newCall(request).execute())
         {
+            checkAuth(response.code());
             if (!response.isSuccessful() || response.body() == null) return 0;
             JsonObject root = gson.fromJson(response.body().string(), JsonObject.class);
             return root != null && root.has("clanRank") && !root.get("clanRank").isJsonNull()
@@ -469,6 +470,42 @@ public class PlatformApiService
         return entries;
     }
 
+    /** Boss-KC clan leaderboard (current standings or gained-over-period), served by our API
+     *  from WiseOldMan bulk group data. */
+    public List<LeaderboardEntry> fetchKcLeaderboard(String baseUrl, String apiKey, String clanSlug,
+                                                     String boss, String period)
+    {
+        HttpUrl.Builder ub = HttpUrl.parse(baseUrl + "/clans/" + clanSlug + "/leaderboard").newBuilder()
+            .addQueryParameter("board", "kc")
+            .addQueryParameter("period", period)
+            .addQueryParameter("limit", "20");
+        if (boss != null && !boss.isEmpty()) ub.addQueryParameter("boss", boss);
+
+        Request request = new Request.Builder().url(ub.build())
+            .header("Authorization", "Bearer " + apiKey).get().build();
+        List<LeaderboardEntry> entries = new ArrayList<>();
+        try (Response response = httpClient.newCall(request).execute())
+        {
+            checkAuth(response.code());
+            if (!response.isSuccessful() || response.body() == null) return entries;
+            JsonObject root = gson.fromJson(response.body().string(), JsonObject.class);
+            if (root == null || !root.has("entries")) return entries;
+            for (JsonElement el : root.getAsJsonArray("entries"))
+            {
+                JsonObject o = el.getAsJsonObject();
+                int rank = o.has("rank") ? o.get("rank").getAsInt() : entries.size() + 1;
+                String rsn = o.has("rsn") ? o.get("rsn").getAsString() : "";
+                long value = o.has("value") && !o.get("value").isJsonNull() ? o.get("value").getAsLong() : 0;
+                entries.add(new LeaderboardEntry(rank, rsn, "member", value, 0, value));
+            }
+        }
+        catch (Exception ex)
+        {
+            log.warn("fetchKcLeaderboard failed", ex);
+        }
+        return entries;
+    }
+
     /** A clan activity feed item from the backend (joins, leaves, drops, PBs, clog unlocks). */
     public static class ActivityItem
     {
@@ -692,6 +729,19 @@ public class PlatformApiService
     /**
      * Synchronous GET — returns parsed JSON or null on error.
      */
+    // Fired whenever the server rejects our key (401/403) so the plugin can WARN the member —
+    // otherwise a bad/mispasted key silently drops every submission while the UI looks fine.
+    private volatile Runnable onAuthFailure;
+    public void setOnAuthFailure(Runnable cb) { this.onAuthFailure = cb; }
+
+    private void checkAuth(int statusCode)
+    {
+        if ((statusCode == 401 || statusCode == 403) && onAuthFailure != null)
+        {
+            onAuthFailure.run();
+        }
+    }
+
     public JsonObject getSync(String url, String apiKey)
     {
         Request request = new Request.Builder()
@@ -702,6 +752,7 @@ public class PlatformApiService
 
         try (Response response = httpClient.newCall(request).execute())
         {
+            checkAuth(response.code());
             if (!response.isSuccessful() || response.body() == null) return null;
             return gson.fromJson(response.body().string(), JsonObject.class);
         }
@@ -1043,6 +1094,7 @@ public class PlatformApiService
             @Override
             public void onResponse(Call call, Response response)
             {
+                checkAuth(response.code());
                 response.close();
                 if (response.isSuccessful())
                 {
@@ -1074,6 +1126,7 @@ public class PlatformApiService
             @Override public void onResponse(Call call, Response response)
             {
                 int code = response.code();
+                checkAuth(code);
                 response.close();
                 if (code >= 200 && code < 300) { log.debug("{} ok", label); }
                 else { log.error("{} failed with status {}", label, code); }

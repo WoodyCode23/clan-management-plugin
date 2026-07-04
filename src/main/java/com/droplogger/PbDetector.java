@@ -48,6 +48,15 @@ public class PbDetector
     private static final Pattern KC_PATTERN = Pattern.compile(
         "Your (.+?) kill count is: ([\\d,]+)", Pattern.CASE_INSENSITIVE);
 
+    // "Your completed Chambers of Xeric count is: 470." / "…Theatre of Blood count is: 12." —
+    // raids use "completed … count", not "kill count", so KC_PATTERN misses them.
+    private static final Pattern RAID_COUNT_PATTERN = Pattern.compile(
+        "Your completed (.+?) count is: ([\\d,]+)", Pattern.CASE_INSENSITIVE);
+
+    // "Your Barrows chest count is: 120."
+    private static final Pattern CHEST_COUNT_PATTERN = Pattern.compile(
+        "Your (.+?) chest count is: ([\\d,]+)", Pattern.CASE_INSENSITIVE);
+
     // "Your Chambers of Xeric challenge/raid completion count is: 50."
     private static final Pattern COX_COMPLETION = Pattern.compile(
         "Chambers of Xeric", Pattern.CASE_INSENSITIVE);
@@ -84,6 +93,27 @@ public class PbDetector
             lastKillCount = Integer.parseInt(kcMatcher.group(2).replace(",", ""));
             lastActivity = mapBossToGroup(lastBossName);
             log.debug("Activity context set: {} ({}) KC={}", lastBossName, lastActivity, lastKillCount);
+            return;
+        }
+
+        // Raid completion counts ("Your completed Chambers of Xeric count is: 470") and chest
+        // counts ("Your Barrows chest count is: 120") — set the counter context so raid/chest
+        // DROPS get the right KC attached, exactly like boss kill counts.
+        Matcher raidCount = RAID_COUNT_PATTERN.matcher(cleanedMessage);
+        if (raidCount.find())
+        {
+            lastBossName = raidCount.group(1).trim();
+            lastKillCount = Integer.parseInt(raidCount.group(2).replace(",", ""));
+            lastActivity = mapBossToGroup(lastBossName);
+            log.debug("Raid count context set: {} ({}) KC={}", lastBossName, lastActivity, lastKillCount);
+            return;
+        }
+        Matcher chestCount = CHEST_COUNT_PATTERN.matcher(cleanedMessage);
+        if (chestCount.find())
+        {
+            lastBossName = chestCount.group(1).trim();
+            lastKillCount = Integer.parseInt(chestCount.group(2).replace(",", ""));
+            lastActivity = mapBossToGroup(lastBossName);
             return;
         }
 
