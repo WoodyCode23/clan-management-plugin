@@ -347,6 +347,7 @@ public final class RankSystem
         IMPLIES.put("amulet of rancour", new String[]{"amulet of torture"});     // rancour = torture upgrade
         IMPLIES.put("amulet of rancour (s)", new String[]{"amulet of rancour"}); // ornament variant
         IMPLIES.put("confliction gauntlets", new String[]{"tormented bracelet"}); // tormented upgrade (wiki-confirmed)
+        IMPLIES.put("ferocious gloves", new String[]{"hydra leather"}); // made FROM the leather
         // Maggot King necklace chain: rupture = anguish + etched fang (proves owning both).
         IMPLIES.put("necklace of rupture", new String[]{"necklace of anguish", "etched elder venator fang"});
         IMPLIES.put("etched elder venator fang", new String[]{"elder venator fang"});

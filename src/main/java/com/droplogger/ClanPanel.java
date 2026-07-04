@@ -99,7 +99,7 @@ public class ClanPanel extends PluginPanel
     static
     {
         // Mapped by the user against the live in-game clan-rank icons (cache sprite IDs).
-        RANK_ICON_SPRITE.put("adamant_sword", 3150);
+        RANK_ICON_SPRITE.put("adamant_sword", 3142);
         RANK_ICON_SPRITE.put("rune_sword", 3143);
         RANK_ICON_SPRITE.put("dragon_sword", 3144);
         RANK_ICON_SPRITE.put("tzkal", 3246);
@@ -2482,6 +2482,8 @@ public class ClanPanel extends PluginPanel
         int paren = base.lastIndexOf(" (");
         if (paren > 0) base = base.substring(0, paren);
         base = base.toLowerCase().replaceFirst("^the ", "").trim();
+        // Older activity rows carry an unstripped size suffix ("Maggot King Solo") - drop it.
+        base = base.replaceFirst(" (solo|duo|trio|group|mass)$", "").trim();
         String alias = LABEL_GROUP_ALIASES.get(base);
         if (alias != null)
         {
