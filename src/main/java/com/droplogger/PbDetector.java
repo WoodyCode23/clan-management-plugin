@@ -19,27 +19,27 @@ public class PbDetector
 
     // "Challenge duration: 22:15.00" or "Challenge duration: 22:15.00 (new personal best)" — CoX or Gauntlet
     private static final Pattern CHALLENGE_TIME = Pattern.compile(
-        "Challenge duration: ((\\d+:)?\\d+:\\d+\\.\\d+)", Pattern.CASE_INSENSITIVE);
+        "Challenge duration: ((\\d+:)?\\d+:\\d+(?:\\.\\d+)?)", Pattern.CASE_INSENSITIVE);
 
     // "Theatre of Blood completion time: 23:45.60"
     private static final Pattern TOB_TIME = Pattern.compile(
-        "Theatre of Blood.*?completion time: ((\\d+:)?\\d+:\\d+\\.\\d+)", Pattern.CASE_INSENSITIVE);
+        "Theatre of Blood.*?completion time: ((\\d+:)?\\d+:\\d+(?:\\.\\d+)?)", Pattern.CASE_INSENSITIVE);
 
     // "Tombs of Amascut...completion time: 23:45.60"
     private static final Pattern TOA_TIME = Pattern.compile(
-        "Tombs of Amascut.*?completion time: ((\\d+:)?\\d+:\\d+\\.\\d+)", Pattern.CASE_INSENSITIVE);
+        "Tombs of Amascut.*?completion time: ((\\d+:)?\\d+:\\d+(?:\\.\\d+)?)", Pattern.CASE_INSENSITIVE);
 
     // "Hallowed Sepulchre completion time: 5:30.00"
     private static final Pattern SEP_TIME = Pattern.compile(
-        "Hallowed Sepulchre.*?completion time: ((\\d+:)?\\d+:\\d+\\.\\d+)", Pattern.CASE_INSENSITIVE);
+        "Hallowed Sepulchre.*?completion time: ((\\d+:)?\\d+:\\d+(?:\\.\\d+)?)", Pattern.CASE_INSENSITIVE);
 
     // "Fight duration: 1:23.40" — boss kills
     private static final Pattern FIGHT_TIME = Pattern.compile(
-        "Fight duration: ((\\d+:)?\\d+:\\d+\\.\\d+)", Pattern.CASE_INSENSITIVE);
+        "Fight duration: ((\\d+:)?\\d+:\\d+(?:\\.\\d+)?)", Pattern.CASE_INSENSITIVE);
 
     // "Duration: 32:15.60" — wave content (Jad, Zuk, Colo) and general
     private static final Pattern DURATION_TIME = Pattern.compile(
-        "Duration: ((\\d+:)?\\d+:\\d+\\.\\d+)", Pattern.CASE_INSENSITIVE);
+        "Duration: ((\\d+:)?\\d+:\\d+(?:\\.\\d+)?)", Pattern.CASE_INSENSITIVE);
 
     // ── Activity identification patterns ──
     // Kill count messages identify which boss was just killed
@@ -149,7 +149,7 @@ public class PbDetector
         String lowerAll = cleanedMessage.toLowerCase();
         if (lowerAll.contains("phase") || lowerAll.contains("split") || lowerAll.contains("section")
             || lowerAll.contains("level complete") || lowerAll.contains("olm duration")
-            || lowerAll.contains("wave '"))
+            || lowerAll.contains("wave"))
         {
             return null;
         }
