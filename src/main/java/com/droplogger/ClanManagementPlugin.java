@@ -1661,6 +1661,13 @@ public class ClanManagementPlugin extends Plugin
         PbDetector.CompletionResult completion = pbDetector.detectCompletion(cleanedMessage);
         if (completion == null)
         {
+            // Inferno/Fight Caves/Colosseum: the duration line arrives BEFORE the kill-count
+            // line, so the detector parks it — the KC message that just went through
+            // processMessage() may have claimed it into a full completion.
+            completion = pbDetector.drainPendingCompletion();
+        }
+        if (completion == null)
+        {
             return;
         }
 

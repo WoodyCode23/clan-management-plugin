@@ -78,6 +78,23 @@ public class PbDetector
     private String lastBossName = null;
     private int lastKillCount = 0;
     private boolean isCoxCm = false;
+    private long contextAtMs = 0; // when lastActivity was last set from a KC/count message
+
+    // ── Pending duration (Inferno / Fight Caves / Colosseum ordering) ──
+    // In TzHaar content and the Colosseum the "Duration: x" line arrives BEFORE the
+    // "Your TzKal-Zuk kill count is:" line, so there is no activity context yet when the
+    // time appears. The time is parked here and the KC message that follows claims it.
+    private String pendingTime = null;
+    private boolean pendingPb = false;
+    private long pendingAtMs = 0;
+    private CompletionResult pendingCompletion = null;
+
+    // Context older than this cannot claim a bare "Duration:" line — after an hour in the
+    // Inferno, the last KC message was some unrelated boss (or nothing at all).
+    private static final long CONTEXT_FRESH_MS = 30_000;
+    // A parked duration must be claimed by a KC message within this window (the game sends
+    // both lines in the same tick; the window is generous for lag).
+    private static final long PENDING_CLAIM_MS = 10_000;
 
     /**
      * Process a chat message to update activity context.
@@ -92,6 +109,8 @@ public class PbDetector
             lastBossName = kcMatcher.group(1).trim();
             lastKillCount = Integer.parseInt(kcMatcher.group(2).replace(",", ""));
             lastActivity = mapBossToGroup(lastBossName);
+            contextAtMs = System.currentTimeMillis();
+            claimPendingDuration();
             log.debug("Activity context set: {} ({}) KC={}", lastBossName, lastActivity, lastKillCount);
             return;
         }
@@ -105,6 +124,7 @@ public class PbDetector
             lastBossName = raidCount.group(1).trim();
             lastKillCount = Integer.parseInt(raidCount.group(2).replace(",", ""));
             lastActivity = mapBossToGroup(lastBossName);
+            contextAtMs = System.currentTimeMillis();
             log.debug("Raid count context set: {} ({}) KC={}", lastBossName, lastActivity, lastKillCount);
             return;
         }
@@ -114,6 +134,7 @@ public class PbDetector
             lastBossName = chestCount.group(1).trim();
             lastKillCount = Integer.parseInt(chestCount.group(2).replace(",", ""));
             lastActivity = mapBossToGroup(lastBossName);
+            contextAtMs = System.currentTimeMillis();
             return;
         }
 
@@ -124,12 +145,48 @@ public class PbDetector
             isCoxCm = COX_CM_PATTERN.matcher(cleanedMessage).find();
             lastActivity = isCoxCm ? "cox_cm" : "cox";
             lastBossName = isCoxCm ? "CM Chambers of Xeric" : "Chambers of Xeric";
+            contextAtMs = System.currentTimeMillis();
         }
         else if (TOB_COMPLETE_MSG.matcher(cleanedMessage).find())
         {
             lastActivity = "tob";
             lastBossName = "Theatre of Blood";
+            contextAtMs = System.currentTimeMillis();
         }
+    }
+
+    /**
+     * A KC message just set fresh activity context — if a bare "Duration:" line was parked
+     * moments ago (Inferno/Fight Caves/Colosseum send the time BEFORE the kill count), turn
+     * it into a completion the plugin can drain via {@link #drainPendingCompletion()}.
+     */
+    private void claimPendingDuration()
+    {
+        if (pendingTime == null)
+        {
+            return;
+        }
+        String time = pendingTime;
+        boolean pb = pendingPb;
+        pendingTime = null;
+        if (System.currentTimeMillis() - pendingAtMs > PENDING_CLAIM_MS
+            || lastActivity == null || "unknown".equals(lastActivity))
+        {
+            return;
+        }
+        pendingCompletion = new CompletionResult(lastActivity, time, lastBossName, pb);
+        log.debug("Pending duration claimed by {}: {}", lastActivity, time);
+    }
+
+    /**
+     * Return (and clear) a completion whose duration line arrived before its kill-count
+     * line. Call after {@link #processMessage} on every game message.
+     */
+    public CompletionResult drainPendingCompletion()
+    {
+        CompletionResult result = pendingCompletion;
+        pendingCompletion = null;
+        return result;
     }
 
     /**
@@ -204,12 +261,25 @@ public class PbDetector
             return new CompletionResult(group, matcher.group(1), lastBossName, isPb);
         }
 
-        // Check generic Duration (Jad, Zuk, Colo — use lastActivity)
+        // Check generic Duration (Jad, Zuk, Colo — use lastActivity).
+        // These content types send "Duration:" BEFORE "Your TzKal-Zuk kill count is:", so
+        // fresh context means a same-tick multi-line message ordered KC-first; stale or
+        // missing context means the KC line is still coming — park the time and let
+        // claimPendingDuration() attribute it when the KC message arrives.
         matcher = DURATION_TIME.matcher(cleanedMessage);
         if (matcher.find())
         {
-            String group = lastActivity != null ? lastActivity : "unknown";
-            return new CompletionResult(group, matcher.group(1), lastBossName, isPb);
+            boolean contextFresh = lastActivity != null && !"unknown".equals(lastActivity)
+                && System.currentTimeMillis() - contextAtMs <= CONTEXT_FRESH_MS;
+            if (!contextFresh)
+            {
+                pendingTime = matcher.group(1);
+                pendingPb = isPb;
+                pendingAtMs = System.currentTimeMillis();
+                log.debug("Duration with no fresh context parked: {}", pendingTime);
+                return null;
+            }
+            return new CompletionResult(lastActivity, matcher.group(1), lastBossName, isPb);
         }
 
         return null;
@@ -341,8 +411,13 @@ public class PbDetector
         // TzHaar-Ket-Rak challenges
         if (lower.contains("ket-rak") || lower.contains("ket rak")) return "raks";
 
-        // Raids (usually identified by completion messages, not KC)
-        if (lower.contains("chambers") || lower.contains("xeric")) return "cox";
+        // Raids (usually identified by completion messages, not KC). The CM count message is
+        // "Your completed Chambers of Xeric: Challenge Mode count is: X" — check CM first or
+        // solo/team CM completions land on the regular CoX board.
+        if (lower.contains("chambers") || lower.contains("xeric"))
+        {
+            return lower.contains("challenge mode") ? "cox_cm" : "cox";
+        }
         if (lower.contains("theatre") || lower.contains("verzik")) return "tob";
         if (lower.contains("tombs") || lower.contains("amascut")) return "toa";
 
@@ -370,6 +445,9 @@ public class PbDetector
         lastActivity = null;
         lastBossName = null;
         isCoxCm = false;
+        contextAtMs = 0;
+        pendingTime = null;
+        pendingCompletion = null;
     }
 
     /**
