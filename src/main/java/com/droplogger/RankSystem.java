@@ -583,7 +583,7 @@ public final class RankSystem
             Check.item("Ancestral hat"), Check.item("Ancestral robe top"), Check.item("Ancestral robe bottom"),
             Check.item("Torva full helm"), Check.item("Torva platebody"), Check.item("Torva platelegs"),
             Check.item("Oathplate helm"), Check.item("Oathplate chest"), Check.item("Oathplate legs"));
-        Group tzExtras = Group.of("Approaching Grandmaster — all of", 7,
+        Group tzExtras = Group.of("Approaching Grandmaster — all of", 9,
             Check.any("TzKal-Zuk — 5 KC or 4/10 Zuk GM tasks", 1, Check.kc("TzKal-Zuk 5 KC", 5, "tzkalzuk"),
                 Check.any("4 of 10 Inferno GM tasks", 4,
                     Check.caTask("Budget Setup"), Check.caTask("Facing Jad Head-on II"),
@@ -592,11 +592,16 @@ public final class RankSystem
                     Check.caTask("No Luck Required"), Check.caTask("Playing with Jads"),
                     Check.caTask("The Floor Is Lava"), Check.caTask("Wasn't Even Close"))),
             Check.any("Fortis Colosseum — 10 KC or Perfect Footwork", 1, Check.kc("Fortis Colosseum 10 KC", 10, "sol_heredit"), Check.caTask("Perfect Footwork")),
-            Check.items("Defeat an Awakened Boss (Awakener's orb / Torva)", 1,
-                "Awakener's orb", "Torva full helm", "Torva platebody", "Torva platelegs"),
+            // Owning Torva/an Awakener's orb proves nothing (Torva comes from Nex; the orb just
+            // STARTS the fight) — the awakened-kill GM tasks are the real proof of a kill.
+            Check.any("Defeat an Awakened Boss", 1,
+                Check.caTask("Duke Sucellus Sleeper"), Check.caTask("Leviathan Sleeper"),
+                Check.caTask("Vardorvis Sleeper"), Check.caTask("Whispered")),
             Check.caTask("Perfect Phosani's Nightmare"),
             Check.caTask("Corrupted Gauntlet Speed-Runner"),
-            Check.kc("200 KC across CoX/ToB/ToA", 200, "raids_combined"),
+            Check.kc("Chambers of Xeric — 200 KC", 200, "cox_total"),
+            Check.kc("Theatre of Blood — 200 KC", 200, "tob_total"),
+            Check.kc("Tombs of Amascut — 200 KC", 200, "toa_total"),
             Check.caTier("Master"));
         RANKS.add(new Rank("tzkal", "TzKal", "PvM", "Late-game PvM (approaching GM)",
             req("dragon_sword"), Arrays.asList(tzUniques, tzArmour, tzExtras)));

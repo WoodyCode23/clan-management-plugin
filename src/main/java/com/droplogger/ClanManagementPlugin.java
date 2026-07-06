@@ -756,6 +756,7 @@ public class ClanManagementPlugin extends Plugin
             platformApiService.setAccountHash(null);
             rankOwnedCache.clear();   // don't carry one account's items to the next login
             rankOwnedIds.clear();
+            rankBankRefreshed = false; // next login's first bank open refreshes ranks again
         }
     }
 
@@ -1593,6 +1594,10 @@ public class ClanManagementPlugin extends Plugin
             getPlatformUrl(), getPlatformKey(), getPlatformSlug(), pRsn, pItem
         ));
 
+        // A new unique can flip a rank requirement — this is one of the few moments the
+        // Ranks tab re-renders (with tab open/manual refresh and first bank open).
+        if (panel != null && panel.isRanksActive()) evaluateAndShowRanks();
+
         // A new collection-log unlock is a one-time notable event, so post it to the drop feed
         // exactly once here. Repeat drops of the same item never re-fire this message, which is
         // how we avoid per-kill spam (e.g. araxyte sacks). This also covers pets, which arrive
@@ -1735,8 +1740,15 @@ public class ClanManagementPlugin extends Plugin
         String rsns = String.join(", ", sortedMembers);
 
         String date = new SimpleDateFormat("MM/dd").format(new Date());
-        String formattedTime = completion.getFormattedTime();
-        double timeSeconds = completion.getTimeSeconds();
+
+        // On a non-PB kill the game prints the player's TRUE personal best right in the message
+        // ("Fight duration: 2:41.40. Personal best: 2:02.40") — submit THAT as the quiet baseline,
+        // not the slower kill time. Solo only: for team content the historical PB was set with a
+        // different roster, so the current party names would be stored against a time they didn't do.
+        final boolean useGamePb = !completion.isPersonalBest()
+            && completion.getPersonalBestSeconds() > 0 && partySize == 1;
+        final String formattedTime = useGamePb ? completion.getPersonalBestTime() : completion.getFormattedTime();
+        final double timeSeconds = useGamePb ? completion.getPersonalBestSeconds() : completion.getTimeSeconds();
         String categoryKey = bossCategory.getKey();
         String sizeLabel = bossCategory.getSizeLabel();
 
@@ -1803,8 +1815,10 @@ public class ClanManagementPlugin extends Plugin
                 saveHiscoreCacheV2ToDisk();
 
                 // Chat notification — highlight when it's a clan-verified placement (top 3),
-                // and especially a new clan record (#1).
-                if (config.chatConfirmation())
+                // and especially a new clan record (#1). Quiet natural baselines stay silent:
+                // "Speed time recorded" on an ordinary kill reads like a bogus PB submission,
+                // and the server no-ops anything that isn't actually faster anyway.
+                if (config.chatConfirmation() && isNewPb)
                 {
                     final int rank = clanRank;
                     String msg;
@@ -2137,6 +2151,10 @@ public class ClanManagementPlugin extends Plugin
         });
     }
 
+    // The first bank open each session is the one container event worth a re-render: the bank
+    // flooding the item cache is the big accuracy jump for item requirements.
+    private boolean rankBankRefreshed = false;
+
     /** Cache items from worn/inventory/bank as they change so checks stay accurate after the bank closes. */
     @Subscribe
     public void onItemContainerChanged(ItemContainerChanged event)
@@ -2144,7 +2162,15 @@ public class ClanManagementPlugin extends Plugin
         int id = event.getContainerId();
         if (id != InventoryID.BANK && id != InventoryID.INV && id != InventoryID.WORN) return;
         cacheContainerItems(id);
-        if (panel != null && panel.isRanksActive()) evaluateAndShowRanks();
+        // Do NOT re-render the Ranks tab here on every event — inventory/equipment events fire
+        // constantly during play and rebuilding the tab per event made it flicker. The cache
+        // above always stays fresh; the tab re-renders on: tab open, the manual ↻ button,
+        // first bank open of the session, or a new collection-log unlock.
+        if (id == InventoryID.BANK && !rankBankRefreshed)
+        {
+            rankBankRefreshed = true;
+            if (panel != null && panel.isRanksActive()) evaluateAndShowRanks();
+        }
     }
 
     /** Build a snapshot of the local player's state for clan-rank validation. Client thread only.

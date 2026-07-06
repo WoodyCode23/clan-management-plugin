@@ -41,6 +41,11 @@ public class PbDetector
     private static final Pattern DURATION_TIME = Pattern.compile(
         "Duration: ((\\d+:)?\\d+:\\d+(?:\\.\\d+)?)", Pattern.CASE_INSENSITIVE);
 
+    // "Fight duration: 2:41.40. Personal best: 2:02.40" — on a non-PB kill the game prints the
+    // player's TRUE personal best alongside the kill time. That value is the correct baseline.
+    private static final Pattern PB_VALUE = Pattern.compile(
+        "Personal best: ((\\d+:)?\\d+:\\d+(?:\\.\\d+)?)", Pattern.CASE_INSENSITIVE);
+
     // ── Activity identification patterns ──
     // Kill count messages identify which boss was just killed
 
@@ -86,6 +91,7 @@ public class PbDetector
     // time appears. The time is parked here and the KC message that follows claims it.
     private String pendingTime = null;
     private boolean pendingPb = false;
+    private String pendingPbTime = null;
     private long pendingAtMs = 0;
     private CompletionResult pendingCompletion = null;
 
@@ -168,13 +174,15 @@ public class PbDetector
         }
         String time = pendingTime;
         boolean pb = pendingPb;
+        String pbTime = pendingPbTime;
         pendingTime = null;
+        pendingPbTime = null;
         if (System.currentTimeMillis() - pendingAtMs > PENDING_CLAIM_MS
             || lastActivity == null || "unknown".equals(lastActivity))
         {
             return;
         }
-        pendingCompletion = new CompletionResult(lastActivity, time, lastBossName, pb);
+        pendingCompletion = new CompletionResult(lastActivity, time, lastBossName, pb, pbTime);
         log.debug("Pending duration claimed by {}: {}", lastActivity, time);
     }
 
@@ -212,6 +220,8 @@ public class PbDetector
         }
 
         boolean isPb = cleanedMessage.contains("(new personal best)");
+        Matcher pbMatcher = PB_VALUE.matcher(cleanedMessage);
+        String pbTime = pbMatcher.find() ? pbMatcher.group(1) : null;
         Matcher matcher;
 
         // Check ToB first (specific pattern) — distinguish entry/normal/hard
@@ -223,7 +233,7 @@ public class PbDetector
             if (lower.contains("entry")) tobGroup = "tob_entry";
             else if (lower.contains("hard")) tobGroup = "tob_hm";
             else tobGroup = "tob";
-            return new CompletionResult(tobGroup, matcher.group(1), null, isPb);
+            return new CompletionResult(tobGroup, matcher.group(1), null, isPb, pbTime);
         }
 
         // Check ToA — entry/normal/expert
@@ -235,14 +245,14 @@ public class PbDetector
             if (lower.contains("entry")) toaGroup = "toa_entry";
             else if (lower.contains("expert")) toaGroup = "toa_expert";
             else toaGroup = "toa";
-            return new CompletionResult(toaGroup, matcher.group(1), null, isPb);
+            return new CompletionResult(toaGroup, matcher.group(1), null, isPb, pbTime);
         }
 
         // Check Sepulchre
         matcher = SEP_TIME.matcher(cleanedMessage);
         if (matcher.find())
         {
-            return new CompletionResult("sep", matcher.group(1), null, isPb);
+            return new CompletionResult("sep", matcher.group(1), null, isPb, pbTime);
         }
 
         // Check Challenge duration (CoX or Gauntlet — disambiguate by context)
@@ -250,7 +260,7 @@ public class PbDetector
         if (matcher.find())
         {
             String group = resolveChallengeDuration();
-            return new CompletionResult(group, matcher.group(1), null, isPb);
+            return new CompletionResult(group, matcher.group(1), null, isPb, pbTime);
         }
 
         // Check Fight duration (bosses — use lastActivity for boss identity)
@@ -258,7 +268,7 @@ public class PbDetector
         if (matcher.find())
         {
             String group = lastActivity != null ? lastActivity : "unknown";
-            return new CompletionResult(group, matcher.group(1), lastBossName, isPb);
+            return new CompletionResult(group, matcher.group(1), lastBossName, isPb, pbTime);
         }
 
         // Check generic Duration (Jad, Zuk, Colo — use lastActivity).
@@ -275,11 +285,12 @@ public class PbDetector
             {
                 pendingTime = matcher.group(1);
                 pendingPb = isPb;
+                pendingPbTime = pbTime;
                 pendingAtMs = System.currentTimeMillis();
                 log.debug("Duration with no fresh context parked: {}", pendingTime);
                 return null;
             }
-            return new CompletionResult(lastActivity, matcher.group(1), lastBossName, isPb);
+            return new CompletionResult(lastActivity, matcher.group(1), lastBossName, isPb, pbTime);
         }
 
         return null;
@@ -447,6 +458,7 @@ public class PbDetector
         isCoxCm = false;
         contextAtMs = 0;
         pendingTime = null;
+        pendingPbTime = null;
         pendingCompletion = null;
     }
 
@@ -461,14 +473,26 @@ public class PbDetector
         private final double timeSeconds;
         private final String bossName;
         private final boolean personalBest;
+        // The "Personal best: x" value the game prints on a non-PB kill (null when absent —
+        // e.g. the kill IS the PB, so the message says "(new personal best)" instead).
+        private final String personalBestTime;
+        private final double personalBestSeconds;
 
         public CompletionResult(String group, String formattedTime, String bossName, boolean personalBest)
+        {
+            this(group, formattedTime, bossName, personalBest, null);
+        }
+
+        public CompletionResult(String group, String formattedTime, String bossName, boolean personalBest,
+                                String personalBestTime)
         {
             this.group = group;
             this.formattedTime = formattedTime;
             this.timeSeconds = parseTimeToSeconds(formattedTime);
             this.bossName = bossName;
             this.personalBest = personalBest;
+            this.personalBestTime = personalBestTime;
+            this.personalBestSeconds = personalBestTime != null ? parseTimeToSeconds(personalBestTime) : 0;
         }
     }
 

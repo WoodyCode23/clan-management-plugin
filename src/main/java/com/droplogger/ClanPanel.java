@@ -248,6 +248,19 @@ public class ClanPanel extends PluginPanel
     private JLabel notConnectedTitleLabel;
     private JLabel homeTitleLabel;
 
+    /**
+     * super(false) opts out of PluginPanel's fixed-width wrapper, so the sidebar takes whatever
+     * width our content computes — long names/rows pushed it past the standard panel width, and
+     * RuneLite's keep-game-size behavior then grew members' client WINDOWS whenever the panel
+     * opened (worst alongside resizable-hybrid). Pin the standard width; height stays computed.
+     */
+    @Override
+    public Dimension getPreferredSize()
+    {
+        Dimension d = super.getPreferredSize();
+        return new Dimension(PluginPanel.PANEL_WIDTH + PluginPanel.SCROLLBAR_WIDTH, d.height);
+    }
+
     public ClanPanel()
     {
         super(false);
