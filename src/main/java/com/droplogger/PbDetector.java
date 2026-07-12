@@ -214,7 +214,9 @@ public class PbDetector
         String lowerAll = cleanedMessage.toLowerCase();
         if (lowerAll.contains("phase") || lowerAll.contains("split") || lowerAll.contains("section")
             || lowerAll.contains("level complete") || lowerAll.contains("olm duration")
-            || lowerAll.contains("wave"))
+            || lowerAll.contains("wave")
+            // Nightmare plugin phase lines: "Phosani's Nightmare P4 boss complete! Duration: 0:08.40"
+            || lowerAll.contains("boss complete"))
         {
             return null;
         }
@@ -263,12 +265,26 @@ public class PbDetector
             return new CompletionResult(group, matcher.group(1), null, isPb, pbTime);
         }
 
-        // Check Fight duration (bosses — use lastActivity for boss identity)
+        // Check Fight duration (bosses — use lastActivity for boss identity). Same freshness
+        // rule as bare "Duration:": some bosses (Grotesque Guardians) print the fight duration
+        // BEFORE the kill-count line, and stale context misattributed the time to whatever boss
+        // was killed earlier in the session (a GG time landed on Phosani's board). Parked times
+        // get claimed by the KC line that follows.
         matcher = FIGHT_TIME.matcher(cleanedMessage);
         if (matcher.find())
         {
-            String group = lastActivity != null ? lastActivity : "unknown";
-            return new CompletionResult(group, matcher.group(1), lastBossName, isPb, pbTime);
+            boolean fightContextFresh = lastActivity != null && !"unknown".equals(lastActivity)
+                && System.currentTimeMillis() - contextAtMs <= CONTEXT_FRESH_MS;
+            if (!fightContextFresh)
+            {
+                pendingTime = matcher.group(1);
+                pendingPb = isPb;
+                pendingPbTime = pbTime;
+                pendingAtMs = System.currentTimeMillis();
+                log.debug("Fight duration with no fresh context parked: {}", pendingTime);
+                return null;
+            }
+            return new CompletionResult(lastActivity, matcher.group(1), lastBossName, isPb, pbTime);
         }
 
         // Check generic Duration (Jad, Zuk, Colo — use lastActivity).

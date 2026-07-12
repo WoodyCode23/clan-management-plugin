@@ -978,7 +978,10 @@ public class ClanManagementPlugin extends Plugin
                     for (int rawItemId : itemIds)
                     {
                         int itemId = remapClogId(rawItemId);
-                        map.put(itemId, new String[]{tabName, categoryName});
+                        // Items can appear in MULTIPLE clog categories (Nexling is in "Nex" AND
+                        // "All Pets"). Tabs iterate Bosses-first, so keep the FIRST category seen -
+                        // the boss page - instead of letting Other/"All Pets" overwrite it.
+                        map.putIfAbsent(itemId, new String[]{tabName, categoryName});
 
                         String catItemName = itemManager.getItemComposition(itemId).getName();
                         if (catItemName == null || catItemName.equals("null")) continue;
@@ -1642,8 +1645,17 @@ public class ClanManagementPlugin extends Plugin
             else
             {
                 // Only stamp a KC if this unlock came from the boss the KC counter belongs to.
-                int unlockKc = (recentKill && kcAppliesTo(unlockSource, pbDetector.getLastBossName()))
-                    ? lastKillCount : 0;
+                // Pets often arrive with NO loot event (recentKill=false, e.g. Nexling) — fall
+                // back to the chat KC counter when its boss matches the resolved source.
+                int unlockKc = 0;
+                if (recentKill && kcAppliesTo(unlockSource, pbDetector.getLastBossName()))
+                {
+                    unlockKc = lastKillCount;
+                }
+                else if (kcAppliesTo(unlockSource, pbDetector.getLastBossName()))
+                {
+                    unlockKc = pbDetector.getLastKillCount();
+                }
                 DropEntry unlockDrop = new DropEntry(
                     itemName, unlockValue, unlockSource, unlockKc,
                     wp.getX(), wp.getY(), wp.getPlane(), playerName, unlockItemId
@@ -1993,11 +2005,15 @@ public class ClanManagementPlugin extends Plugin
         for (ItemStack stack : event.getItems())
         {
             int itemId = stack.getId();
-            if (!isPostableDrop(itemId)) continue;
-
             String itemName = itemManager.getItemComposition(itemId).getName();
             long total = (long) itemManager.getItemPrice(itemId) * Math.max(1, stack.getQuantity());
             int value = (int) Math.min(total, Integer.MAX_VALUE);
+
+            // Post when whitelisted OR notable by value. Value matters for REPEAT uniques the
+            // member already has clogged (a second Nightmare staff fires no clog message, and
+            // if the item isn't whitelisted it used to vanish entirely). The server still
+            // applies its own notability/exclusion gates.
+            if (!isPostableDrop(itemId) && value < fetchedMinDropValue) continue;
 
             DropEntry drop = new DropEntry(itemName, value, source, killCount,
                 wp.getX(), wp.getY(), wp.getPlane(), playerName, itemId);
@@ -2342,7 +2358,10 @@ public class ClanManagementPlugin extends Plugin
                     for (int rawItemId : itemsEnum.getIntVals())
                     {
                         int itemId = remapClogId(rawItemId);
-                        map.put(itemId, new String[]{tabName, categoryName});
+                        // Items can appear in MULTIPLE clog categories (Nexling is in "Nex" AND
+                        // "All Pets"). Tabs iterate Bosses-first, so keep the FIRST category seen -
+                        // the boss page - instead of letting Other/"All Pets" overwrite it.
+                        map.putIfAbsent(itemId, new String[]{tabName, categoryName});
                         String nm = itemManager.getItemComposition(itemId).getName();
                         if (nm != null && !nm.equals("null")) nameToId.put(nm.toLowerCase(), itemId);
                     }

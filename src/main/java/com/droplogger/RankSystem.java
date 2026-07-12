@@ -325,6 +325,25 @@ public final class RankSystem
         IMPLIES.put("ring of suffering (i)", new String[]{"ring of suffering"});
         // Osmumten's fang ornament (Cursed phalanx) → base fang
         IMPLIES.put("osmumten's fang (or)", new String[]{"osmumten's fang"});
+        // Godsword ornament kits → base (TzKal wants a BGS; the kitted one counts)
+        IMPLIES.put("bandos godsword (or)", new String[]{"bandos godsword"});
+        IMPLIES.put("armadyl godsword (or)", new String[]{"armadyl godsword"});
+        IMPLIES.put("saradomin godsword (or)", new String[]{"saradomin godsword"});
+        IMPLIES.put("zamorak godsword (or)", new String[]{"zamorak godsword"});
+        // Dragon pickaxe cosmetic variants → base (kit, Zalcano, Trailblazer)
+        IMPLIES.put("dragon pickaxe (or)", new String[]{"dragon pickaxe"});
+        IMPLIES.put("dragon pickaxe (upgraded)", new String[]{"dragon pickaxe"});
+        IMPLIES.put("dragon pickaxe (or) (zalcano)", new String[]{"dragon pickaxe"});
+        IMPLIES.put("dragon pickaxe (or) (trailblazer)", new String[]{"dragon pickaxe"});
+        // Crystal + infernal pickaxe/axe/harpoon are built FROM the dragon tool
+        IMPLIES.put("crystal pickaxe", new String[]{"dragon pickaxe"});
+        IMPLIES.put("crystal axe", new String[]{"dragon axe"});
+        IMPLIES.put("crystal harpoon", new String[]{"dragon harpoon"});
+        IMPLIES.put("infernal pickaxe", new String[]{"dragon pickaxe"});
+        IMPLIES.put("infernal axe", new String[]{"dragon axe"});
+        IMPLIES.put("infernal harpoon", new String[]{"dragon harpoon"});
+        IMPLIES.put("dragon axe (or)", new String[]{"dragon axe"});
+        IMPLIES.put("dragon harpoon (or)", new String[]{"dragon harpoon"});
         // Weapon upgrades count for the base they're built from
         IMPLIES.put("emberlight", new String[]{"arclight"});                 // Emberlight is the Arclight upgrade
         IMPLIES.put("trident of the swamp", new String[]{"trident of the seas", "magic fang"}); // swamp = seas + magic fang
