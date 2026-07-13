@@ -26,6 +26,7 @@ import net.runelite.api.gameval.InventoryID;
 import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.Skill;
 import net.runelite.api.Item;
+import net.runelite.api.ItemComposition;
 import net.runelite.api.ItemContainer;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.callback.ClientThread;
@@ -2005,15 +2006,21 @@ public class ClanManagementPlugin extends Plugin
         for (ItemStack stack : event.getItems())
         {
             int itemId = stack.getId();
-            String itemName = itemManager.getItemComposition(itemId).getName();
+            ItemComposition comp = itemManager.getItemComposition(itemId);
+            String itemName = comp.getName();
             long total = (long) itemManager.getItemPrice(itemId) * Math.max(1, stack.getQuantity());
             int value = (int) Math.min(total, Integer.MAX_VALUE);
 
             // Post when whitelisted OR notable by value. Value matters for REPEAT uniques the
             // member already has clogged (a second Nightmare staff fires no clog message, and
-            // if the item isn't whitelisted it used to vanish entirely). The server still
-            // applies its own notability/exclusion gates.
-            if (!isPostableDrop(itemId) && value < fetchedMinDropValue) continue;
+            // if the item isn't whitelisted it used to vanish entirely). The value path only
+            // applies to unstackable, unnoted items — a noted pile of ore or a stack of
+            // sweets crosses the gp threshold without being remotely notable.
+            if (!isPostableDrop(itemId))
+            {
+                boolean stackLike = comp.isStackable() || comp.getNote() != -1;
+                if (stackLike || value < fetchedMinDropValue) continue;
+            }
 
             DropEntry drop = new DropEntry(itemName, value, source, killCount,
                 wp.getX(), wp.getY(), wp.getPlane(), playerName, itemId);
