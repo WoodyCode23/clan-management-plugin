@@ -2014,12 +2014,13 @@ public class ClanManagementPlugin extends Plugin
             // Post when whitelisted OR notable by value. Value matters for REPEAT uniques the
             // member already has clogged (a second Nightmare staff fires no clog message, and
             // if the item isn't whitelisted it used to vanish entirely). The value path only
-            // applies to unstackable, unnoted items — a noted pile of ore or a stack of
-            // sweets crosses the gp threshold without being remotely notable.
+            // applies to unstackable, unnoted items, and at 10x the normal drop floor —
+            // 100k-class commons (dragon metal sheets and the like) drop far too often to be
+            // feed-worthy; a true repeat unique clears the higher bar.
             if (!isPostableDrop(itemId))
             {
                 boolean stackLike = comp.isStackable() || comp.getNote() != -1;
-                if (stackLike || value < fetchedMinDropValue) continue;
+                if (stackLike || value < fetchedMinDropValue * 10L) continue;
             }
 
             DropEntry drop = new DropEntry(itemName, value, source, killCount,
