@@ -2,6 +2,7 @@ package com.droplogger;
 
 import net.runelite.api.Skill;
 import net.runelite.client.ui.ColorScheme;
+import net.runelite.client.ui.FontManager;
 import net.runelite.client.ui.PluginPanel;
 import net.runelite.client.game.ItemManager;
 import net.runelite.http.api.item.ItemPrice;
@@ -69,6 +70,9 @@ public class ClanPanel extends PluginPanel
     private final JPanel clogCatListPanel = new JPanel();
     private java.util.List<PlatformApiService.RosterMember> currentMembers = new java.util.ArrayList<>();
     private Runnable onLoadRoster;
+    private Runnable onLoadEvent;
+    private boolean eventLoaded = false;
+    private final JPanel eventContent = new JPanel();
     private java.util.function.Consumer<String> onSelectMember;
     private boolean platformAdmin = false;
     private java.util.function.Consumer<Object[]> onSetRankOverride; // {rsn, mode, assignedRank}
@@ -339,6 +343,9 @@ public class ClanPanel extends PluginPanel
         // Ranks tab (which clan ranks YOU qualify for)
         tabbedPane.addTab("Ranks", buildRanksTab());
 
+        // Event tab (live draft: your team + event state)
+        tabbedPane.addTab("Event", buildEventTab());
+
         // Lazy-load roster on first Members open; (re)evaluate ranks whenever the Ranks tab opens.
         tabbedPane.addChangeListener(e ->
         {
@@ -347,6 +354,11 @@ public class ClanPanel extends PluginPanel
             if ("Members".equals(title) && currentMembers.isEmpty() && onLoadRoster != null)
             {
                 onLoadRoster.run();
+            }
+            if ("Event".equals(title) && !eventLoaded && onLoadEvent != null)
+            {
+                eventLoaded = true;
+                onLoadEvent.run();
             }
             ranksActive = "Ranks".equals(title);
             if (ranksActive && onLoadRanks != null)
@@ -2106,6 +2118,187 @@ public class ClanPanel extends PluginPanel
     }
 
     public void setOnLoadRoster(Runnable cb) { this.onLoadRoster = cb; }
+    public void setOnLoadEvent(Runnable cb) { this.onLoadEvent = cb; }
+
+    // ══════════════════════════════════════════
+    // Event Tab (live draft)
+    // ══════════════════════════════════════════
+
+    private JComponent buildEventTab()
+    {
+        ScrollableColumn wrapper = new ScrollableColumn();
+        wrapper.setLayout(new BoxLayout(wrapper, BoxLayout.Y_AXIS));
+        wrapper.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        wrapper.setBorder(new EmptyBorder(6, 4, 6, 4));
+
+        JPanel titleRow = new JPanel(new BorderLayout());
+        titleRow.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        titleRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+        titleRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 22));
+        JLabel title = new JLabel("Clan Event");
+        title.setFont(FontManager.getRunescapeBoldFont());
+        title.setForeground(Color.WHITE);
+        titleRow.add(title, BorderLayout.WEST);
+        JButton refresh = new JButton("\u21bb");
+        refresh.setMargin(new Insets(0, 6, 0, 6));
+        refresh.setFocusPainted(false);
+        refresh.addActionListener(e -> { if (onLoadEvent != null) onLoadEvent.run(); });
+        titleRow.add(refresh, BorderLayout.EAST);
+        wrapper.add(titleRow);
+        wrapper.add(Box.createVerticalStrut(6));
+
+        eventContent.setLayout(new BoxLayout(eventContent, BoxLayout.Y_AXIS));
+        eventContent.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        eventContent.setAlignmentX(Component.LEFT_ALIGNMENT);
+        eventContent.add(eventNote("Open this tab during a clan event to see your team."));
+        wrapper.add(eventContent);
+
+        JScrollPane scroll = new JScrollPane(wrapper);
+        scroll.setBorder(null);
+        scroll.getVerticalScrollBar().setUnitIncrement(14);
+        return scroll;
+    }
+
+    private JLabel eventNote(String text)
+    {
+        JLabel l = new JLabel("<html><i>" + text + "</i></html>");
+        l.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+        l.setBorder(new EmptyBorder(4, 2, 4, 2));
+        l.setAlignmentX(Component.LEFT_ALIGNMENT);
+        return l;
+    }
+
+    /** Re-render the Event tab from a draft payload (already fetched off-EDT). */
+    public void updateEvent(com.google.gson.JsonObject draft, String localPlayerName)
+    {
+        SwingUtilities.invokeLater(() ->
+        {
+            eventContent.removeAll();
+            if (draft == null)
+            {
+                eventContent.add(eventNote("No clan event draft is set up right now."));
+                eventContent.revalidate();
+                eventContent.repaint();
+                return;
+            }
+
+            com.google.gson.JsonObject event = draft.getAsJsonObject("event");
+            com.google.gson.JsonArray teams = draft.getAsJsonArray("teams");
+            com.google.gson.JsonArray pool = draft.getAsJsonArray("pool");
+            com.google.gson.JsonArray picks = draft.getAsJsonArray("picks");
+
+            java.util.Map<String, String> rsnByPool = new java.util.HashMap<>();
+            for (com.google.gson.JsonElement el : pool)
+            {
+                com.google.gson.JsonObject p = el.getAsJsonObject();
+                rsnByPool.put(p.get("id").getAsString(), p.get("rsn").getAsString());
+            }
+            java.util.Map<String, java.util.List<String>> rosterByTeam = new java.util.LinkedHashMap<>();
+            java.util.Map<String, String> teamOfPlayer = new java.util.HashMap<>();
+            for (com.google.gson.JsonElement el : picks)
+            {
+                com.google.gson.JsonObject pk = el.getAsJsonObject();
+                String rsn = rsnByPool.get(pk.get("poolId").getAsString());
+                if (rsn == null) continue;
+                rosterByTeam.computeIfAbsent(pk.get("teamId").getAsString(), k -> new java.util.ArrayList<>()).add(rsn);
+                teamOfPlayer.put(rsn.toLowerCase(), pk.get("teamId").getAsString());
+            }
+
+            String me = localPlayerName != null ? localPlayerName.toLowerCase() : "";
+            String myTeamId = teamOfPlayer.get(me);
+            // Captains are on a team without being drafted
+            if (myTeamId == null)
+            {
+                for (com.google.gson.JsonElement el : teams)
+                {
+                    com.google.gson.JsonObject t = el.getAsJsonObject();
+                    String c1 = t.get("captain1").getAsString().toLowerCase();
+                    String c2 = t.has("captain2") && !t.get("captain2").isJsonNull() ? t.get("captain2").getAsString().toLowerCase() : "";
+                    if (me.equals(c1) || me.equals(c2)) { myTeamId = t.get("id").getAsString(); break; }
+                }
+            }
+
+            String status = event.get("status").getAsString();
+            JLabel name = new JLabel("<html><b>" + event.get("name").getAsString() + "</b></html>");
+            name.setForeground(Color.WHITE);
+            name.setAlignmentX(Component.LEFT_ALIGNMENT);
+            name.setBorder(new EmptyBorder(0, 2, 2, 2));
+            eventContent.add(name);
+            eventContent.add(eventNote("live".equals(status) ? "Draft in progress \u2014 " + picks.size() + " picks made"
+                : "setup".equals(status) ? "Draft has not started yet" : "Draft complete"));
+            eventContent.add(Box.createVerticalStrut(6));
+
+            for (com.google.gson.JsonElement el : teams)
+            {
+                com.google.gson.JsonObject t = el.getAsJsonObject();
+                String tid = t.get("id").getAsString();
+                boolean mine = tid.equals(myTeamId);
+                // During a live draft show only YOUR team in detail; show all once complete.
+                if (!mine && myTeamId != null && !"complete".equals(status)) continue;
+
+                Color teamColor;
+                try { teamColor = Color.decode(t.get("color").getAsString()); }
+                catch (NumberFormatException ex) { teamColor = ColorScheme.BRAND_ORANGE; }
+
+                JPanel card = new JPanel();
+                card.setLayout(new BoxLayout(card, BoxLayout.Y_AXIS));
+                card.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+                card.setAlignmentX(Component.LEFT_ALIGNMENT);
+                card.setBorder(BorderFactory.createCompoundBorder(
+                    BorderFactory.createMatteBorder(0, 3, 0, 0, teamColor),
+                    new EmptyBorder(6, 8, 6, 8)));
+
+                JLabel tn = new JLabel("<html><b>" + t.get("name").getAsString() + (mine ? " \u2b50" : "") + "</b></html>");
+                tn.setForeground(teamColor);
+                tn.setAlignmentX(Component.LEFT_ALIGNMENT);
+                card.add(tn);
+                String caps = t.get("captain1").getAsString()
+                    + (t.has("captain2") && !t.get("captain2").isJsonNull() ? " \u00b7 " + t.get("captain2").getAsString() : "");
+                JLabel cl = new JLabel("Captains: " + caps);
+                cl.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+                cl.setFont(FontManager.getRunescapeSmallFont());
+                cl.setAlignmentX(Component.LEFT_ALIGNMENT);
+                card.add(cl);
+
+                java.util.List<String> roster = rosterByTeam.getOrDefault(tid, java.util.Collections.emptyList());
+                int i = 1;
+                for (String rsn : roster)
+                {
+                    JLabel r = new JLabel(i++ + ". " + rsn);
+                    r.setForeground(rsn.toLowerCase().equals(me) ? Color.WHITE : ColorScheme.LIGHT_GRAY_COLOR);
+                    if (rsn.toLowerCase().equals(me)) r.setFont(FontManager.getRunescapeBoldFont());
+                    r.setAlignmentX(Component.LEFT_ALIGNMENT);
+                    r.setBorder(new EmptyBorder(1, 6, 0, 0));
+                    card.add(r);
+                }
+                if (roster.isEmpty()) card.add(eventNote("No picks yet."));
+
+                eventContent.add(card);
+                eventContent.add(Box.createVerticalStrut(6));
+            }
+
+            if (myTeamId == null)
+            {
+                int remaining = pool.size() - picks.size();
+                eventContent.add(eventNote(rsnInPool(pool, me)
+                    ? "You haven't been drafted yet \u2014 " + remaining + " players still in the jar."
+                    : "You aren't in this event's player pool."));
+            }
+
+            eventContent.revalidate();
+            eventContent.repaint();
+        });
+    }
+
+    private boolean rsnInPool(com.google.gson.JsonArray pool, String me)
+    {
+        for (com.google.gson.JsonElement el : pool)
+        {
+            if (el.getAsJsonObject().get("rsn").getAsString().toLowerCase().equals(me)) return true;
+        }
+        return false;
+    }
+
     public void setOnSelectMember(java.util.function.Consumer<String> cb) { this.onSelectMember = cb; }
     public void setPlatformAdmin(boolean a) { this.platformAdmin = a; }
     public void setOnSetRankOverride(java.util.function.Consumer<Object[]> cb) { this.onSetRankOverride = cb; }

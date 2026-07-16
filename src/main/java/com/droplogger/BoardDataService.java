@@ -37,6 +37,17 @@ public class BoardDataService
         this.gson = gson;
     }
 
+    /** Live draft state for the Event tab: teams, pool, picks. Null when no draft exists. */
+    public JsonObject fetchDraft(String base, String slug, String key) throws IOException
+    {
+        JsonObject root = get(base, slug, key, "draft", null);
+        if (root == null || !root.has("draft") || root.get("draft").isJsonNull())
+        {
+            return null;
+        }
+        return root.getAsJsonObject("draft");
+    }
+
     /** GET {base}/clans/{slug}/{path}?query with Bearer auth. Returns parsed object, or null on failure. */
     private JsonObject get(String base, String slug, String key, String path, Map<String, String> query) throws IOException
     {
