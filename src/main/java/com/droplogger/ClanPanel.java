@@ -2188,10 +2188,17 @@ public class ClanPanel extends PluginPanel
             com.google.gson.JsonArray picks = draft.getAsJsonArray("picks");
 
             java.util.Map<String, String> rsnByPool = new java.util.HashMap<>();
+            java.util.Map<String, Double> ehbByPool = new java.util.HashMap<>();
             for (com.google.gson.JsonElement el : pool)
             {
                 com.google.gson.JsonObject p = el.getAsJsonObject();
-                rsnByPool.put(p.get("id").getAsString(), p.get("rsn").getAsString());
+                String pid = p.get("id").getAsString();
+                rsnByPool.put(pid, p.get("rsn").getAsString());
+                if (p.has("ehb") && !p.get("ehb").isJsonNull())
+                {
+                    try { ehbByPool.put(pid, Double.parseDouble(p.get("ehb").getAsString())); }
+                    catch (NumberFormatException ignored) { }
+                }
             }
             java.util.Map<String, java.util.List<String>> rosterByTeam = new java.util.LinkedHashMap<>();
             java.util.Map<String, String> teamOfPlayer = new java.util.HashMap<>();
@@ -2226,6 +2233,38 @@ public class ClanPanel extends PluginPanel
             eventContent.add(name);
             eventContent.add(eventNote("live".equals(status) ? "Draft in progress \u2014 " + picks.size() + " picks made"
                 : "setup".equals(status) ? "Draft has not started yet" : "Draft complete"));
+
+            if ("live".equals(status) && teams.size() > 0 && picks.size() < pool.size())
+            {
+                // Snake order: who is on the clock right now
+                int n = teams.size();
+                int round = picks.size() / n;
+                int idx = picks.size() % n;
+                com.google.gson.JsonObject clockTeam = (round % 2 == 0 ? teams.get(idx) : teams.get(n - 1 - idx)).getAsJsonObject();
+                JLabel clock = new JLabel("<html><b>\u23f1 On the clock: " + clockTeam.get("name").getAsString() + "</b></html>");
+                try { clock.setForeground(Color.decode(clockTeam.get("color").getAsString())); }
+                catch (NumberFormatException ex) { clock.setForeground(Color.WHITE); }
+                clock.setAlignmentX(Component.LEFT_ALIGNMENT);
+                clock.setBorder(new EmptyBorder(2, 2, 2, 2));
+                eventContent.add(clock);
+
+                // Last few picks, most recent first
+                java.util.Map<String, String> codeByTeam = new java.util.HashMap<>();
+                for (com.google.gson.JsonElement el : teams)
+                {
+                    com.google.gson.JsonObject t = el.getAsJsonObject();
+                    codeByTeam.put(t.get("id").getAsString(),
+                        t.has("code") && !t.get("code").isJsonNull() ? t.get("code").getAsString() : t.get("name").getAsString());
+                }
+                for (int i = picks.size() - 1; i >= Math.max(0, picks.size() - 3); i--)
+                {
+                    com.google.gson.JsonObject pk = picks.get(i).getAsJsonObject();
+                    String rsn = rsnByPool.get(pk.get("poolId").getAsString());
+                    if (rsn == null) continue;
+                    eventContent.add(eventNote("#" + pk.get("pickNumber").getAsInt() + " " + rsn
+                        + " \u2192 " + codeByTeam.get(pk.get("teamId").getAsString())));
+                }
+            }
             eventContent.add(Box.createVerticalStrut(6));
 
             for (com.google.gson.JsonElement el : teams)
@@ -2259,6 +2298,25 @@ public class ClanPanel extends PluginPanel
                 cl.setFont(FontManager.getRunescapeSmallFont());
                 cl.setAlignmentX(Component.LEFT_ALIGNMENT);
                 card.add(cl);
+
+                double teamEhb = 0;
+                for (com.google.gson.JsonElement pel : picks)
+                {
+                    com.google.gson.JsonObject pk = pel.getAsJsonObject();
+                    if (tid.equals(pk.get("teamId").getAsString()))
+                    {
+                        Double v = ehbByPool.get(pk.get("poolId").getAsString());
+                        if (v != null) teamEhb += v;
+                    }
+                }
+                if (teamEhb > 0)
+                {
+                    JLabel ehbLabel = new JLabel(String.format("Team EHB: %.0f", teamEhb));
+                    ehbLabel.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+                    ehbLabel.setFont(FontManager.getRunescapeSmallFont());
+                    ehbLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+                    card.add(ehbLabel);
+                }
 
                 java.util.List<String> roster = rosterByTeam.getOrDefault(tid, java.util.Collections.emptyList());
                 int i = 1;
