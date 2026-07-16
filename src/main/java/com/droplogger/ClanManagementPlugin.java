@@ -164,7 +164,6 @@ public class ClanManagementPlugin extends Plugin
         BOSS_PET.put("tombs of amascut", "Tumeken's guardian");
     }
 
-    private static final String DUPLICATE_PET_MESSAGE = "you have a funny feeling like you would have been followed";
     private static final Pattern CLUE_COMPLETION_PATTERN =
         Pattern.compile("You have completed (\\d+) (easy|medium|hard|elite|master|beginner) Treasure Trails\\.");
     private static final Pattern CLOG_PB_PATTERN =
@@ -875,7 +874,10 @@ public class ClanManagementPlugin extends Plugin
     // context from the kill-count line is the sole way to know which pet it was.
     private void handleDuplicatePet(String cleanedMessage)
     {
-        if (!cleanedMessage.toLowerCase().startsWith(DUPLICATE_PET_MESSAGE)) return;
+        // First person only — the third-person broadcast ("X has a funny feeling...") is other
+        // players' pets. Prefix + fragment instead of the full sentence to tolerate wording drift.
+        String lower = cleanedMessage.toLowerCase();
+        if (!lower.startsWith("you have a funny feeling") || !lower.contains("would have been followed")) return;
         if (!isPlatformConfigured() || !localPlayerInClan()) return;
 
         String boss = pbDetector.getLastBossName();
