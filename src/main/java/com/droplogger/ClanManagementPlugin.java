@@ -99,8 +99,72 @@ public class ClanManagementPlugin extends Plugin
         "phoenix", "prince black dragon", "quetzin", "rift guardian", "rock golem", "rocky",
         "scorpia's offspring", "scurry", "skotos", "smol heredit", "smolcano", "sraracha",
         "tangleroot", "tiny tempor", "tumeken's guardian", "tzrek-jad", "venenatis spiderling",
-        "vet'ion jr.", "vorki", "wisp", "youngllef"
+        "vet'ion jr.", "vorki", "wisp", "youngllef",
+        // 2025-2026 pets
+        "yami", "bran", "dom", "moxi"
     ));
+
+    // A DUPLICATE pet ("You have a funny feeling like you would have been followed") fires no
+    // clog unlock and no loot event — the only identification is the boss context from the
+    // kill-count line. Keys must match the boss name as it appears in KC chat messages.
+    private static final Map<String, String> BOSS_PET = new HashMap<>();
+    static
+    {
+        BOSS_PET.put("yama", "Yami");
+        BOSS_PET.put("kraken", "Pet kraken");
+        BOSS_PET.put("cerberus", "Hellpuppy");
+        BOSS_PET.put("vorkath", "Vorki");
+        BOSS_PET.put("zulrah", "Pet snakeling");
+        BOSS_PET.put("grotesque guardians", "Noon");
+        BOSS_PET.put("abyssal sire", "Abyssal orphan");
+        BOSS_PET.put("alchemical hydra", "Ikkle hydra");
+        BOSS_PET.put("sarachnis", "Sraracha");
+        BOSS_PET.put("kalphite queen", "Kalphite princess");
+        BOSS_PET.put("general graardor", "Pet general graardor");
+        BOSS_PET.put("k'ril tsutsaroth", "Pet k'ril tsutsaroth");
+        BOSS_PET.put("commander zilyana", "Pet zilyana");
+        BOSS_PET.put("kree'arra", "Pet kree'arra");
+        BOSS_PET.put("nex", "Nexling");
+        BOSS_PET.put("giant mole", "Baby mole");
+        BOSS_PET.put("dagannoth rex", "Pet dagannoth rex");
+        BOSS_PET.put("dagannoth prime", "Pet dagannoth prime");
+        BOSS_PET.put("dagannoth supreme", "Pet dagannoth supreme");
+        BOSS_PET.put("corporeal beast", "Pet dark core");
+        BOSS_PET.put("king black dragon", "Prince black dragon");
+        BOSS_PET.put("thermonuclear smoke devil", "Pet smoke devil");
+        BOSS_PET.put("scorpia", "Scorpia's offspring");
+        BOSS_PET.put("callisto", "Callisto cub");
+        BOSS_PET.put("artio", "Callisto cub");
+        BOSS_PET.put("venenatis", "Venenatis spiderling");
+        BOSS_PET.put("spindel", "Venenatis spiderling");
+        BOSS_PET.put("vet'ion", "Vet'ion jr.");
+        BOSS_PET.put("calvar'ion", "Vet'ion jr.");
+        BOSS_PET.put("chaos elemental", "Pet chaos elemental");
+        BOSS_PET.put("skotizo", "Skotos");
+        BOSS_PET.put("araxxor", "Nid");
+        BOSS_PET.put("phantom muspah", "Muphin");
+        BOSS_PET.put("the nightmare", "Little nightmare");
+        BOSS_PET.put("phosani's nightmare", "Little nightmare");
+        BOSS_PET.put("duke sucellus", "Baron");
+        BOSS_PET.put("vardorvis", "Butch");
+        BOSS_PET.put("the leviathan", "Lil'viathan");
+        BOSS_PET.put("the whisperer", "Wisp");
+        BOSS_PET.put("the hueycoatl", "Huberte");
+        BOSS_PET.put("amoxliatl", "Moxi");
+        BOSS_PET.put("the royal titans", "Bran");
+        BOSS_PET.put("doom of mokhaiotl", "Dom");
+        BOSS_PET.put("sol heredit", "Smol heredit");
+        BOSS_PET.put("zalcano", "Smolcano");
+        BOSS_PET.put("scurrius", "Scurry");
+        BOSS_PET.put("tztok-jad", "Tzrek-jad");
+        BOSS_PET.put("tzkal-zuk", "Jal-nib-rek");
+        BOSS_PET.put("chambers of xeric", "Olmlet");
+        BOSS_PET.put("chambers of xeric challenge mode", "Olmlet");
+        BOSS_PET.put("theatre of blood", "Lil' zik");
+        BOSS_PET.put("tombs of amascut", "Tumeken's guardian");
+    }
+
+    private static final String DUPLICATE_PET_MESSAGE = "you have a funny feeling like you would have been followed";
     private static final Pattern CLUE_COMPLETION_PATTERN =
         Pattern.compile("You have completed (\\d+) (easy|medium|hard|elite|master|beginner) Treasure Trails\\.");
     private static final Pattern CLOG_PB_PATTERN =
@@ -803,7 +867,33 @@ public class ClanManagementPlugin extends Plugin
         if (config.enableDrops())
         {
             handleCollectionLogEntry(cleanedMessage);
+            handleDuplicatePet(cleanedMessage);
         }
+    }
+
+    // Duplicate pets fire ONLY this chat line — no clog unlock, no loot event — so the boss
+    // context from the kill-count line is the sole way to know which pet it was.
+    private void handleDuplicatePet(String cleanedMessage)
+    {
+        if (!cleanedMessage.toLowerCase().startsWith(DUPLICATE_PET_MESSAGE)) return;
+        if (!isPlatformConfigured() || !localPlayerInClan()) return;
+
+        String boss = pbDetector.getLastBossName();
+        String petName = boss != null ? BOSS_PET.get(boss.toLowerCase()) : null;
+        if (petName == null)
+        {
+            log.debug("Duplicate pet with no mapped boss context (boss={})", boss);
+            return;
+        }
+
+        String playerName = client.getLocalPlayer() != null ? client.getLocalPlayer().getName() : "Unknown";
+        WorldPoint wp = client.getLocalPlayer() != null
+            ? client.getLocalPlayer().getWorldLocation() : new WorldPoint(0, 0, 0);
+        DropEntry drop = new DropEntry(petName, 0, boss, pbDetector.getLastKillCount(),
+            wp.getX(), wp.getY(), wp.getPlane(), playerName, -1);
+        withScreenshot(true, screenshot ->
+            platformApiService.submitDrop(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), drop, screenshot));
+        log.debug("Duplicate pet logged: {} from {}", petName, boss);
     }
 
     @Subscribe
