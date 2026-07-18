@@ -71,6 +71,7 @@ public class ClanPanel extends PluginPanel
     private java.util.List<PlatformApiService.RosterMember> currentMembers = new java.util.ArrayList<>();
     private Runnable onLoadRoster;
     private Runnable onLoadEvent;
+    private boolean heldRanksExpanded = false;
     private boolean eventLoaded = false;
     private final JPanel eventContent = new JPanel();
     private java.util.function.Consumer<String> onSelectMember;
@@ -1449,9 +1450,22 @@ public class ClanPanel extends PluginPanel
                     ranksContent.add(Box.createVerticalStrut(6));
                 }
 
+                // Ranks already held (via Discord rank + prerequisite expansion) collapse
+                // into one section so the list leads with what's still earnable.
+                java.util.List<RankSystem.RankStatus> activeRanks = new java.util.ArrayList<>();
+                java.util.List<RankSystem.RankStatus> heldRanks = new java.util.ArrayList<>();
                 for (RankSystem.RankStatus rs : results)
                 {
+                    (rs.granted ? heldRanks : activeRanks).add(rs);
+                }
+                for (RankSystem.RankStatus rs : activeRanks)
+                {
                     ranksContent.add(buildRankCard(rs));
+                    ranksContent.add(Box.createVerticalStrut(6));
+                }
+                if (!heldRanks.isEmpty())
+                {
+                    ranksContent.add(buildHeldSection(heldRanks));
                     ranksContent.add(Box.createVerticalStrut(6));
                 }
             }
@@ -1494,6 +1508,75 @@ public class ClanPanel extends PluginPanel
             ranksContent.revalidate();
             ranksContent.repaint();
         });
+    }
+
+    /** One collapsed card for every rank the member already holds. */
+    private JPanel buildHeldSection(java.util.List<RankSystem.RankStatus> heldRanks)
+    {
+        JPanel card = new JPanel()
+        {
+            @Override public Dimension getMaximumSize() { return new Dimension(Integer.MAX_VALUE, getPreferredSize().height); }
+        };
+        card.setLayout(new BoxLayout(card, BoxLayout.Y_AXIS));
+        card.setBackground(new Color(35, 35, 35));
+        card.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createMatteBorder(0, 3, 0, 0, ACCENT_GOLD),
+            new EmptyBorder(4, 6, 4, 8)));
+        card.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        JPanel header = new JPanel(new BorderLayout(6, 0));
+        header.setBackground(new Color(35, 35, 35));
+        header.setAlignmentX(Component.LEFT_ALIGNMENT);
+        header.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+        header.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+
+        final JLabel caret = new JLabel(heldRanksExpanded ? "-" : "+");
+        caret.setFont(READABLE_FONT.deriveFont(Font.BOLD, 14f));
+        caret.setForeground(new Color(150, 150, 150));
+        caret.setPreferredSize(new Dimension(11, 16));
+        JPanel left = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 5, 3));
+        left.setBackground(new Color(35, 35, 35));
+        left.add(caret);
+        JLabel name = new JLabel("Held ranks (" + heldRanks.size() + ")");
+        name.setFont(READABLE_FONT.deriveFont(Font.BOLD, 13f));
+        name.setForeground(ACCENT_GOLD);
+        left.add(name);
+        header.add(left, BorderLayout.WEST);
+        card.add(header);
+
+        final JPanel body = new JPanel();
+        body.setLayout(new BoxLayout(body, BoxLayout.Y_AXIS));
+        body.setBackground(new Color(35, 35, 35));
+        body.setAlignmentX(Component.LEFT_ALIGNMENT);
+        body.setBorder(new EmptyBorder(2, 16, 2, 0));
+        for (RankSystem.RankStatus rs : heldRanks)
+        {
+            JPanel row = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 5, 1));
+            row.setBackground(new Color(35, 35, 35));
+            row.setAlignmentX(Component.LEFT_ALIGNMENT);
+            row.add(rankSpriteIcon(rs.rank.id));
+            JLabel rn = new JLabel(rs.rank.name);
+            rn.setFont(READABLE_FONT_SMALL);
+            rn.setForeground(new Color(190, 175, 130));
+            row.add(rn);
+            body.add(row);
+        }
+        body.setVisible(heldRanksExpanded);
+        card.add(body);
+
+        header.addMouseListener(new java.awt.event.MouseAdapter()
+        {
+            @Override public void mouseClicked(java.awt.event.MouseEvent e)
+            {
+                heldRanksExpanded = !heldRanksExpanded;
+                caret.setText(heldRanksExpanded ? "-" : "+");
+                body.setVisible(heldRanksExpanded);
+                card.revalidate();
+                ranksContent.revalidate();
+                ranksContent.repaint();
+            }
+        });
+        return card;
     }
 
     private JPanel buildRankCard(RankSystem.RankStatus rs)
