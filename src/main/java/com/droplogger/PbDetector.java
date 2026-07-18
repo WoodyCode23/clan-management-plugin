@@ -21,13 +21,14 @@ public class PbDetector
     private static final Pattern CHALLENGE_TIME = Pattern.compile(
         "Challenge duration: ((\\d+:)?\\d+:\\d+(?:\\.\\d+)?)", Pattern.CASE_INSENSITIVE);
 
-    // "Theatre of Blood completion time: 23:45.60"
+    // "Theatre of Blood completion time: 23:45.60" — the room time. The "total completion
+    // time" line (includes downtime) is NOT board-comparable and must not match.
     private static final Pattern TOB_TIME = Pattern.compile(
-        "Theatre of Blood.*?completion time: ((\\d+:)?\\d+:\\d+(?:\\.\\d+)?)", Pattern.CASE_INSENSITIVE);
+        "Theatre of Blood(?!.*total).*?completion time: ((\\d+:)?\\d+:\\d+(?:\\.\\d+)?)", Pattern.CASE_INSENSITIVE);
 
-    // "Tombs of Amascut...completion time: 23:45.60"
+    // "Tombs of Amascut...completion time: 23:45.60" — same total-time exclusion as ToB.
     private static final Pattern TOA_TIME = Pattern.compile(
-        "Tombs of Amascut.*?completion time: ((\\d+:)?\\d+:\\d+(?:\\.\\d+)?)", Pattern.CASE_INSENSITIVE);
+        "Tombs of Amascut(?!.*total).*?completion time: ((\\d+:)?\\d+:\\d+(?:\\.\\d+)?)", Pattern.CASE_INSENSITIVE);
 
     // "Hallowed Sepulchre completion time: 5:30.00"
     private static final Pattern SEP_TIME = Pattern.compile(
