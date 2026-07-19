@@ -1087,6 +1087,50 @@ public class PlatformApiService
         }
     }
 
+    /** Item ids of every collection-log item (server catalog). Sync; empty set on failure. */
+    public java.util.Set<Integer> fetchClogCatalogIds(String baseUrl, String apiKey, String clanSlug)
+    {
+        java.util.Set<Integer> ids = new java.util.HashSet<>();
+        try
+        {
+            JsonObject root = getSync(baseUrl + "/clans/" + clanSlug + "/collection-log/catalog-ids", apiKey);
+            if (root != null && root.has("itemIds"))
+            {
+                for (com.google.gson.JsonElement el : root.getAsJsonArray("itemIds"))
+                {
+                    ids.add(el.getAsInt());
+                }
+            }
+        }
+        catch (Exception e)
+        {
+            log.debug("clog catalog ids fetch failed", e);
+        }
+        return ids;
+    }
+
+    /**
+     * Live clog quantity bumps from loot events (already-unlocked items only, server-side).
+     * items: itemId -> quantity looted this kill.
+     */
+    public void submitClogIncrements(String baseUrl, String apiKey, String clanSlug,
+                                     String rsn, java.util.Map<Integer, Integer> items)
+    {
+        if (items.isEmpty()) return;
+        JsonObject payload = new JsonObject();
+        payload.addProperty("rsn", rsn);
+        com.google.gson.JsonArray arr = new com.google.gson.JsonArray();
+        for (java.util.Map.Entry<Integer, Integer> e : items.entrySet())
+        {
+            JsonObject item = new JsonObject();
+            item.addProperty("itemId", e.getKey());
+            item.addProperty("quantity", e.getValue());
+            arr.add(item);
+        }
+        payload.add("items", arr);
+        postAsync(baseUrl + "/clans/" + clanSlug + "/collection-log/increment", apiKey, payload, "Clog increment");
+    }
+
     private void postAsync(String url, String apiKey, JsonObject payload, String label)
     {
         RequestBody body = RequestBody.create(JSON, gson.toJson(payload));

@@ -423,6 +423,8 @@ public class ClanManagementPlugin extends Plugin
 
         String url = getPlatformUrl() + "/clans/" + getPlatformSlug() + "/bootstrap";
         JsonObject response = platformApiService.getSync(url, getPlatformKey());
+        clogCatalogIds = platformApiService.fetchClogCatalogIds(getPlatformUrl(), getPlatformKey(), getPlatformSlug());
+        log.debug("clog catalog ids loaded: {}", clogCatalogIds.size());
         if (response == null)
         {
             log.warn("Failed to fetch bootstrap config from platform");
@@ -2112,6 +2114,22 @@ public class ClanManagementPlugin extends Plugin
         WorldPoint wp = client.getLocalPlayer() != null
             ? client.getLocalPlayer().getWorldLocation() : new WorldPoint(0, 0, 0);
 
+        // Live clog quantities: any looted clog-catalog item bumps its count server-side
+        // immediately (already-unlocked rows only; the clog-open bulk sync stays authoritative).
+        java.util.Map<Integer, Integer> clogBumps = new java.util.HashMap<>();
+        for (ItemStack stack : event.getItems())
+        {
+            if (clogCatalogIds.contains(stack.getId()))
+            {
+                clogBumps.merge(stack.getId(), Math.max(1, stack.getQuantity()), Integer::sum);
+            }
+        }
+        if (!clogBumps.isEmpty())
+        {
+            platformApiService.submitClogIncrements(getPlatformUrl(), getPlatformKey(), getPlatformSlug(),
+                playerName, clogBumps);
+        }
+
         for (ItemStack stack : event.getItems())
         {
             int itemId = stack.getId();
@@ -2221,6 +2239,8 @@ public class ClanManagementPlugin extends Plugin
     private volatile String rankMode = "default";
     private volatile String rankAssigned = null;
     private volatile java.util.Set<String> rankHeld = new java.util.HashSet<>(); // ranks held via Discord
+    // Clog item ids from the server catalog — filters loot events for live quantity bumps.
+    private volatile java.util.Set<Integer> clogCatalogIds = java.util.Collections.emptySet();
     private volatile java.util.Map<String, Integer> rankKc = new java.util.HashMap<>(); // WOM boss key -> KC
     private volatile java.util.Set<String> rankCaDone = new java.util.HashSet<>(); // completed CA task names (lowercased)
 
