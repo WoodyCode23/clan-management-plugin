@@ -39,3 +39,9 @@ task runClient(type: JavaExec) {
     ]
     args = ['--insecure-skip-tls-verification', '--developer-mode']
 }
+
+// Parsing sweep: real chat sequences through PbDetector. Run: gradlew sweep
+task sweep(type: JavaExec) {
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.droplogger.PbSweep'
+}

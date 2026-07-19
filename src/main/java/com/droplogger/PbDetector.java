@@ -63,6 +63,12 @@ public class PbDetector
     private static final Pattern CHEST_COUNT_PATTERN = Pattern.compile(
         "Your (.+?) chest count is: ([\\d,]+)", Pattern.CASE_INSENSITIVE);
 
+    // "Your Corrupted Gauntlet completion count is: 44." — the Gauntlet uses "completion
+    // count", which none of the other count patterns match; without this the Challenge
+    // duration line has no context and CG times mis-filed as CoX.
+    private static final Pattern COMPLETION_COUNT_PATTERN = Pattern.compile(
+        "Your (.+?) completion count is: ([\\d,]+)", Pattern.CASE_INSENSITIVE);
+
     // "Your Chambers of Xeric challenge/raid completion count is: 50."
     private static final Pattern COX_COMPLETION = Pattern.compile(
         "Chambers of Xeric", Pattern.CASE_INSENSITIVE);
@@ -132,6 +138,7 @@ public class PbDetector
             lastKillCount = Integer.parseInt(raidCount.group(2).replace(",", ""));
             lastActivity = mapBossToGroup(lastBossName);
             contextAtMs = System.currentTimeMillis();
+            claimPendingDuration();
             log.debug("Raid count context set: {} ({}) KC={}", lastBossName, lastActivity, lastKillCount);
             return;
         }
@@ -142,6 +149,18 @@ public class PbDetector
             lastKillCount = Integer.parseInt(chestCount.group(2).replace(",", ""));
             lastActivity = mapBossToGroup(lastBossName);
             contextAtMs = System.currentTimeMillis();
+            claimPendingDuration();
+            return;
+        }
+        Matcher completionCount = COMPLETION_COUNT_PATTERN.matcher(cleanedMessage);
+        if (completionCount.find())
+        {
+            lastBossName = completionCount.group(1).trim();
+            lastKillCount = Integer.parseInt(completionCount.group(2).replace(",", ""));
+            lastActivity = mapBossToGroup(lastBossName);
+            contextAtMs = System.currentTimeMillis();
+            claimPendingDuration();
+            log.debug("Completion count context set: {} ({}) KC={}", lastBossName, lastActivity, lastKillCount);
             return;
         }
 
@@ -258,11 +277,23 @@ public class PbDetector
             return new CompletionResult("sep", matcher.group(1), null, isPb, pbTime);
         }
 
-        // Check Challenge duration (CoX or Gauntlet — disambiguate by context)
+        // Check Challenge duration (CoX or Gauntlet — disambiguate by context). With no
+        // FRESH context, park it and let the following count message claim it — guessing
+        // here is how a Corrupted Gauntlet PB ended up on the Chambers board.
         matcher = CHALLENGE_TIME.matcher(cleanedMessage);
         if (matcher.find())
         {
-            String group = resolveChallengeDuration();
+            boolean challengeContextFresh = System.currentTimeMillis() - contextAtMs <= CONTEXT_FRESH_MS;
+            String group = challengeContextFresh ? resolveChallengeDuration() : null;
+            if (group == null)
+            {
+                pendingTime = matcher.group(1);
+                pendingPb = isPb;
+                pendingPbTime = pbTime;
+                pendingAtMs = System.currentTimeMillis();
+                log.debug("Challenge duration with no fresh context parked: {}", pendingTime);
+                return null;
+            }
             return new CompletionResult(group, matcher.group(1), null, isPb, pbTime);
         }
 
@@ -334,7 +365,7 @@ public class PbDetector
         if (lastBossName != null)
         {
             String lower = lastBossName.toLowerCase();
-            if (lower.contains("hunllef"))
+            if (lower.contains("hunllef") || lower.contains("corrupted gauntlet"))
             {
                 return "gaunt_corrupted";
             }
@@ -343,8 +374,9 @@ public class PbDetector
                 return "gaunt";
             }
         }
-        // Default to cox if ambiguous (more common)
-        return "cox";
+        // Ambiguous — caller parks the time for the count message to claim. Never guess:
+        // a wrong guess files the time on another boss's board.
+        return null;
     }
 
     /**
@@ -374,9 +406,13 @@ public class PbDetector
         // Maggot King (Blood Moon Rises, 2026)
         if (lower.contains("maggot king")) return "maggot_king";
 
-        // Gauntlet (hunllef = corrupted, crystalline = normal)
-        if (lower.contains("hunllef")) return "gaunt_corrupted";
-        if (lower.contains("crystalline")) return "gaunt";
+        // Gauntlet: by boss (hunllef/crystalline) or by completion-count name — corrupted
+        // must match before plain "gauntlet".
+        if (lower.contains("hunllef") || lower.contains("corrupted gauntlet")) return "gaunt_corrupted";
+        if (lower.contains("crystalline") || lower.contains("gauntlet")) return "gaunt";
+
+        // Doom of Mokhaiotl (delve boss, 2025)
+        if (lower.contains("mokhaiotl")) return "doom";
 
         // Wave content
         if (lower.contains("tztok-jad") || lower.contains("jad")) return "jad";
