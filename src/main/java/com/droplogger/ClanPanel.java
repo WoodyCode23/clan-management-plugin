@@ -2385,7 +2385,11 @@ public class ClanPanel extends PluginPanel
             {
                 renderRace(race, localPlayerName);
             }
-            if (draft == null)
+            // A COMPLETED draft is history, not an event — hide it entirely. The section
+            // comes back on its own the moment a new draft is created (setup/live).
+            boolean draftDone = draft != null
+                && "complete".equals(draft.getAsJsonObject("event").get("status").getAsString());
+            if (draft == null || draftDone)
             {
                 if (race == null)
                 {
