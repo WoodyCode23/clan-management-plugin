@@ -72,6 +72,8 @@ public class ClanPanel extends PluginPanel
     private Runnable onLoadRoster;
     private Runnable onLoadEvent;
     private boolean heldRanksExpanded = false;
+    private boolean eventTabAutoShown = false;
+    private javax.swing.Timer eventRefreshTimer = null;
     private boolean eventLoaded = false;
     private final JPanel eventContent = new JPanel();
     private java.util.function.Consumer<String> onSelectMember;
@@ -360,6 +362,24 @@ public class ClanPanel extends PluginPanel
             {
                 eventLoaded = true;
                 onLoadEvent.run();
+            }
+            // Refresh the race every 5 min, but ONLY while the Event tab is being looked at
+            // (matches the server's WOM sync cadence; anything faster is wasted requests).
+            if ("Event".equals(title))
+            {
+                if (eventRefreshTimer == null)
+                {
+                    eventRefreshTimer = new javax.swing.Timer(5 * 60 * 1000, ev ->
+                    {
+                        if (onLoadEvent != null) onLoadEvent.run();
+                    });
+                    eventRefreshTimer.setRepeats(true);
+                }
+                eventRefreshTimer.restart();
+            }
+            else if (eventRefreshTimer != null)
+            {
+                eventRefreshTimer.stop();
             }
             ranksActive = "Ranks".equals(title);
             if (ranksActive && onLoadRanks != null)
@@ -2242,6 +2262,92 @@ public class ClanPanel extends PluginPanel
         return scroll;
     }
 
+    /** Boss/Skill-of-the-Week race card: standings with the local player highlighted. */
+    private void renderRace(com.google.gson.JsonObject root, String localPlayerName)
+    {
+        com.google.gson.JsonObject event = root.getAsJsonObject("event");
+        com.google.gson.JsonArray board = root.getAsJsonArray("leaderboard");
+        String type = event.get("type").getAsString();
+        String me = localPlayerName != null ? localPlayerName.toLowerCase() : "";
+
+        JPanel card = new JPanel();
+        card.setLayout(new BoxLayout(card, BoxLayout.Y_AXIS));
+        card.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+        card.setAlignmentX(Component.LEFT_ALIGNMENT);
+        card.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createMatteBorder(0, 3, 0, 0, ACCENT_GOLD),
+            new EmptyBorder(6, 8, 6, 8)));
+
+        JLabel title = new JLabel("<html><b>\ud83c\udfc1 " + event.get("displayName").getAsString() + "</b></html>");
+        title.setForeground(ACCENT_GOLD);
+        title.setAlignmentX(Component.LEFT_ALIGNMENT);
+        card.add(title);
+
+        try
+        {
+            long endMs = java.time.Instant.parse(event.get("endTime").getAsString()).toEpochMilli();
+            long left = endMs - System.currentTimeMillis();
+            String when = left <= 0 ? "Ended"
+                : left > 86_400_000L ? "Ends in " + (left / 86_400_000L) + "d " + (left % 86_400_000L) / 3_600_000L + "h"
+                : "Ends in " + (left / 3_600_000L) + "h " + (left % 3_600_000L) / 60_000L + "m";
+            JLabel ends = new JLabel(when);
+            ends.setFont(READABLE_FONT_SMALL);
+            ends.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+            ends.setAlignmentX(Component.LEFT_ALIGNMENT);
+            card.add(ends);
+        }
+        catch (Exception ignored) { }
+        card.add(Box.createVerticalStrut(4));
+
+        int shown = 0;
+        int myRank = -1;
+        String myScore = null;
+        for (int i = 0; i < board.size(); i++)
+        {
+            com.google.gson.JsonObject row = board.get(i).getAsJsonObject();
+            String rsn = row.get("rsn").getAsString();
+            long score = row.get("score").getAsLong();
+            boolean isMe = rsn.toLowerCase().equals(me);
+            if (isMe) { myRank = i + 1; myScore = raceScore(type, score); }
+            if (i < 10)
+            {
+                JLabel line = new JLabel((i + 1) + ". " + rsn + " \u2014 " + raceScore(type, score));
+                line.setFont(isMe ? READABLE_FONT.deriveFont(Font.BOLD, 12f) : READABLE_FONT_SMALL);
+                line.setForeground(isMe ? Color.WHITE : ColorScheme.LIGHT_GRAY_COLOR);
+                line.setAlignmentX(Component.LEFT_ALIGNMENT);
+                line.setBorder(new EmptyBorder(1, 4, 0, 0));
+                card.add(line);
+                shown++;
+            }
+        }
+        if (shown == 0)
+        {
+            card.add(eventNote("No scores yet \u2014 get out there!"));
+        }
+        if (myRank > 10)
+        {
+            JLabel mine = new JLabel("\u2026 " + myRank + ". " + localPlayerName + " \u2014 " + myScore);
+            mine.setFont(READABLE_FONT.deriveFont(Font.BOLD, 12f));
+            mine.setForeground(Color.WHITE);
+            mine.setAlignmentX(Component.LEFT_ALIGNMENT);
+            mine.setBorder(new EmptyBorder(1, 4, 0, 0));
+            card.add(mine);
+        }
+
+        eventContent.add(card);
+        eventContent.add(Box.createVerticalStrut(8));
+    }
+
+    private String raceScore(String type, long score)
+    {
+        if ("skill".equals(type))
+        {
+            return score >= 1_000_000 ? String.format("%.1fM xp", score / 1_000_000.0)
+                : String.format("%,dk xp", score / 1000);
+        }
+        return String.format("%,d kc", score);
+    }
+
     private JLabel eventNote(String text)
     {
         JLabel l = new JLabel("<html><i>" + text + "</i></html>");
@@ -2251,15 +2357,40 @@ public class ClanPanel extends PluginPanel
         return l;
     }
 
-    /** Re-render the Event tab from a draft payload (already fetched off-EDT). */
-    public void updateEvent(com.google.gson.JsonObject draft, String localPlayerName)
+    /** Select the Event tab once per session (active race auto-show on login). */
+    public void showEventTabOnce()
+    {
+        SwingUtilities.invokeLater(() ->
+        {
+            if (eventTabAutoShown) return;
+            eventTabAutoShown = true;
+            for (int i = 0; i < tabbedPane.getTabCount(); i++)
+            {
+                if ("Event".equals(tabbedPane.getTitleAt(i)))
+                {
+                    tabbedPane.setSelectedIndex(i);
+                    break;
+                }
+            }
+        });
+    }
+
+    /** Re-render the Event tab: active race first (if any), then draft state. */
+    public void updateEvent(com.google.gson.JsonObject draft, com.google.gson.JsonObject race, String localPlayerName)
     {
         SwingUtilities.invokeLater(() ->
         {
             eventContent.removeAll();
+            if (race != null)
+            {
+                renderRace(race, localPlayerName);
+            }
             if (draft == null)
             {
-                eventContent.add(eventNote("No clan event draft is set up right now."));
+                if (race == null)
+                {
+                    eventContent.add(eventNote("No clan event is running right now."));
+                }
                 eventContent.revalidate();
                 eventContent.repaint();
                 return;

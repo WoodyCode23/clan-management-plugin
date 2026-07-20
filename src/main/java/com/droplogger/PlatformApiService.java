@@ -1087,6 +1087,24 @@ public class PlatformApiService
         }
     }
 
+    /** Active Boss/Skill-of-the-Week race (event + leaderboard). Null when none. */
+    public JsonObject fetchActiveEvent(String baseUrl, String apiKey, String clanSlug)
+    {
+        try
+        {
+            JsonObject root = getSync(baseUrl + "/clans/" + clanSlug + "/events/active", apiKey);
+            if (root != null && root.has("event") && !root.get("event").isJsonNull())
+            {
+                return root;
+            }
+        }
+        catch (Exception e)
+        {
+            log.debug("active event fetch failed", e);
+        }
+        return null;
+    }
+
     /** Item ids of every collection-log item (server catalog). Sync; empty set on failure. */
     public java.util.Set<Integer> fetchClogCatalogIds(String baseUrl, String apiKey, String clanSlug)
     {

@@ -425,6 +425,12 @@ public class ClanManagementPlugin extends Plugin
         JsonObject response = platformApiService.getSync(url, getPlatformKey());
         clogCatalogIds = platformApiService.fetchClogCatalogIds(getPlatformUrl(), getPlatformKey(), getPlatformSlug());
         log.debug("clog catalog ids loaded: {}", clogCatalogIds.size());
+
+        // Active Boss/Skill-of-the-Week? Pop the Event tab once so members see the race.
+        if (platformApiService.fetchActiveEvent(getPlatformUrl(), getPlatformKey(), getPlatformSlug()) != null)
+        {
+            panel.showEventTabOnce();
+        }
         if (response == null)
         {
             log.warn("Failed to fetch bootstrap config from platform");
@@ -567,12 +573,13 @@ public class ClanManagementPlugin extends Plugin
                 String localName = client.getLocalPlayer() != null ? client.getLocalPlayer().getName() : null;
                 panel.updateEvent(
                     boardDataService.fetchDraft(getPlatformUrl(), getPlatformSlug(), getPlatformKey()),
+                    platformApiService.fetchActiveEvent(getPlatformUrl(), getPlatformKey(), getPlatformSlug()),
                     localName);
             }
             catch (Exception ex)
             {
                 log.debug("event tab load failed", ex);
-                panel.updateEvent(null, null);
+                panel.updateEvent(null, null, null);
             }
         }));
         panel.setOnSelectMember(rsn -> executor.submit(() ->
