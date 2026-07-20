@@ -74,6 +74,7 @@ public class ClanPanel extends PluginPanel
     private boolean heldRanksExpanded = false;
     private boolean eventTabAutoShown = false;
     private javax.swing.Timer eventRefreshTimer = null;
+    private javax.swing.Timer countdownTicker = null;
     private boolean eventLoaded = false;
     private final JPanel eventContent = new JPanel();
     private java.util.function.Consumer<String> onSelectMember;
@@ -2262,6 +2263,70 @@ public class ClanPanel extends PluginPanel
         return scroll;
     }
 
+    /** Countdown to a scheduled event — a live ticking timer, shown from 7 days out. */
+    private void renderCountdown(com.google.gson.JsonObject upcoming)
+    {
+        long startMs;
+        try
+        {
+            startMs = java.time.Instant.parse(upcoming.get("startTime").getAsString()).toEpochMilli();
+        }
+        catch (Exception ex)
+        {
+            return;
+        }
+        // Only surface the countdown inside the final 7 days.
+        if (startMs - System.currentTimeMillis() > 7L * 24 * 3600 * 1000)
+        {
+            return;
+        }
+
+        JPanel card = new JPanel();
+        card.setLayout(new BoxLayout(card, BoxLayout.Y_AXIS));
+        card.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+        card.setAlignmentX(Component.LEFT_ALIGNMENT);
+        card.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createMatteBorder(0, 3, 0, 0, new Color(100, 149, 237)),
+            new EmptyBorder(8, 8, 8, 8)));
+
+        JLabel title = new JLabel("<html><b>\ud83d\udcc5 " + upcoming.get("displayName").getAsString() + "</b></html>");
+        title.setForeground(new Color(100, 149, 237));
+        title.setAlignmentX(Component.LEFT_ALIGNMENT);
+        card.add(title);
+
+        JLabel timer = new JLabel();
+        timer.setFont(READABLE_FONT.deriveFont(Font.BOLD, 15f));
+        timer.setForeground(Color.WHITE);
+        timer.setAlignmentX(Component.LEFT_ALIGNMENT);
+        timer.setBorder(new EmptyBorder(4, 2, 0, 0));
+        card.add(timer);
+
+        Runnable tick = () ->
+        {
+            long left = startMs - System.currentTimeMillis();
+            if (left <= 0)
+            {
+                timer.setText("Starting\u2026");
+                if (countdownTicker != null) countdownTicker.stop();
+                if (onLoadEvent != null) onLoadEvent.run(); // flip to the live race view
+                return;
+            }
+            long d = left / 86_400_000L;
+            long h = (left % 86_400_000L) / 3_600_000L;
+            long m = (left % 3_600_000L) / 60_000L;
+            long sec = (left % 60_000L) / 1000L;
+            timer.setText(d > 0
+                ? String.format("Starts in %dd %02d:%02d:%02d", d, h, m, sec)
+                : String.format("Starts in %02d:%02d:%02d", h, m, sec));
+        };
+        tick.run();
+        countdownTicker = new javax.swing.Timer(1000, ev -> tick.run());
+        countdownTicker.start();
+
+        eventContent.add(card);
+        eventContent.add(Box.createVerticalStrut(8));
+    }
+
     /** Boss/Skill-of-the-Week race card: standings with the local player highlighted. */
     private void renderRace(com.google.gson.JsonObject root, String localPlayerName)
     {
@@ -2381,9 +2446,24 @@ public class ClanPanel extends PluginPanel
         SwingUtilities.invokeLater(() ->
         {
             eventContent.removeAll();
+            if (countdownTicker != null)
+            {
+                countdownTicker.stop();
+                countdownTicker = null;
+            }
+            boolean renderedRace = false;
             if (race != null)
             {
-                renderRace(race, localPlayerName);
+                if (race.has("event") && !race.get("event").isJsonNull())
+                {
+                    renderRace(race, localPlayerName);
+                    renderedRace = true;
+                }
+                if (race.has("upcoming") && !race.get("upcoming").isJsonNull())
+                {
+                    renderCountdown(race.getAsJsonObject("upcoming"));
+                    renderedRace = true;
+                }
             }
             // A COMPLETED draft is history, not an event — hide it entirely. The section
             // comes back on its own the moment a new draft is created (setup/live).
@@ -2391,7 +2471,7 @@ public class ClanPanel extends PluginPanel
                 && "complete".equals(draft.getAsJsonObject("event").get("status").getAsString());
             if (draft == null || draftDone)
             {
-                if (race == null)
+                if (!renderedRace)
                 {
                     eventContent.add(eventNote("No clan event is running right now."));
                 }

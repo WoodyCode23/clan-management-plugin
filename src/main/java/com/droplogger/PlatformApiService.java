@@ -1093,7 +1093,9 @@ public class PlatformApiService
         try
         {
             JsonObject root = getSync(baseUrl + "/clans/" + clanSlug + "/events/active", apiKey);
-            if (root != null && root.has("event") && !root.get("event").isJsonNull())
+            boolean hasActive = root != null && root.has("event") && !root.get("event").isJsonNull();
+            boolean hasUpcoming = root != null && root.has("upcoming") && !root.get("upcoming").isJsonNull();
+            if (hasActive || hasUpcoming)
             {
                 return root;
             }

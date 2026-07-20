@@ -426,10 +426,26 @@ public class ClanManagementPlugin extends Plugin
         clogCatalogIds = platformApiService.fetchClogCatalogIds(getPlatformUrl(), getPlatformKey(), getPlatformSlug());
         log.debug("clog catalog ids loaded: {}", clogCatalogIds.size());
 
-        // Active Boss/Skill-of-the-Week? Pop the Event tab once so members see the race.
-        if (platformApiService.fetchActiveEvent(getPlatformUrl(), getPlatformKey(), getPlatformSlug()) != null)
+        // Pop the Event tab once when a race is live, or a scheduled one starts within 7 days.
+        JsonObject activeEvent = platformApiService.fetchActiveEvent(getPlatformUrl(), getPlatformKey(), getPlatformSlug());
+        if (activeEvent != null)
         {
-            panel.showEventTabOnce();
+            boolean live = activeEvent.has("event") && !activeEvent.get("event").isJsonNull();
+            boolean soon = false;
+            if (activeEvent.has("upcoming") && !activeEvent.get("upcoming").isJsonNull())
+            {
+                try
+                {
+                    long startMs = java.time.Instant.parse(
+                        activeEvent.getAsJsonObject("upcoming").get("startTime").getAsString()).toEpochMilli();
+                    soon = startMs - System.currentTimeMillis() <= 7L * 24 * 3600 * 1000;
+                }
+                catch (Exception ignored) { }
+            }
+            if (live || soon)
+            {
+                panel.showEventTabOnce();
+            }
         }
         if (response == null)
         {
