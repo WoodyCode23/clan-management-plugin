@@ -57,7 +57,15 @@ public class AdminService
         {
             if (!response.isSuccessful())
             {
-                throw new IOException("Platform API returned status: " + response.code());
+                // Surface the server's reason (e.g. the event-overlap rejection) instead of a bare code.
+                String detail = null;
+                try
+                {
+                    JsonObject err = gson.fromJson(response.body() != null ? response.body().string() : null, JsonObject.class);
+                    if (err != null && err.has("error")) detail = err.get("error").getAsString();
+                }
+                catch (Exception ignored) { }
+                throw new IOException(detail != null ? detail : "Platform API returned status: " + response.code());
             }
             return "Event started";
         }
