@@ -1863,8 +1863,10 @@ public class ClanManagementPlugin extends Plugin
         boolean isGroupContent = bossCategory.isGroupContent();
         String categoryName = bossCategory.getDisplayName();
 
-        // Validate clan membership for group content
-        boolean allClanMembers = !isGroupContent || validateClanMembership(partyMembers);
+        // Validate clan membership for group content. Solo is ALWAYS clan-verified — the
+        // only participant is this clan member; requiring them to idle in clan chat made
+        // solo times land as "unverified" and drop off the Clan Only boards.
+        boolean allClanMembers = partySize == 1 || !isGroupContent || validateClanMembership(partyMembers);
         if (!allClanMembers)
         {
             log.info("Not all party members in clan chat — PB will be submitted as unverified");
