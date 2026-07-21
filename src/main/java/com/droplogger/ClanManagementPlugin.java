@@ -3192,6 +3192,43 @@ public class ClanManagementPlugin extends Plugin
         }
     }
 
+    /** Fetch running + scheduled events and hand formatted rows to the admin calendar. */
+    private void loadAdminEventsList()
+    {
+        if (adminPanel == null || !isPlatformConfigured()) return;
+        try
+        {
+            java.util.List<String[]> rows = new java.util.ArrayList<>();
+            java.time.format.DateTimeFormatter fmt = java.time.format.DateTimeFormatter.ofPattern("MMM d");
+            for (com.google.gson.JsonObject ev : adminService.fetchEventsList(getPlatformUrl(), getPlatformKey(), getPlatformSlug()))
+            {
+                String status = ev.get("status").getAsString();
+                if (!"active".equals(status) && !"scheduled".equals(status)) continue;
+                String window;
+                try
+                {
+                    java.time.ZonedDateTime st = java.time.Instant.parse(ev.get("startTime").getAsString())
+                        .atZone(java.time.ZoneId.of("America/New_York"));
+                    java.time.ZonedDateTime en = java.time.Instant.parse(ev.get("endTime").getAsString())
+                        .atZone(java.time.ZoneId.of("America/New_York"));
+                    long daysUntil = java.time.Duration.between(java.time.ZonedDateTime.now(st.getZone()), st).toDays();
+                    window = st.format(fmt) + " \u2192 " + en.format(fmt)
+                        + ("scheduled".equals(status) && daysUntil >= 0 ? " (in " + (daysUntil + 1) + "d)" : "");
+                }
+                catch (Exception ex)
+                {
+                    window = "";
+                }
+                rows.add(new String[]{ev.get("id").getAsString(), status, ev.get("displayName").getAsString(), window});
+            }
+            adminPanel.setEventsList(rows);
+        }
+        catch (Exception e)
+        {
+            log.debug("admin events list load failed", e);
+        }
+    }
+
     private void setupAdminPanel()
     {
         if (adminPanel != null)
@@ -3272,9 +3309,13 @@ public class ClanManagementPlugin extends Plugin
                 String type = args[0];
                 String metric = args[1];
                 String displayName = args[2];
-                adminPanel.setStatus("Starting event...");
-                adminService.startEventPlatform(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), type, metric, displayName);
-                adminPanel.setStatus("Event started: " + displayName);
+                int days = Integer.parseInt(args[3]);
+                int startsIn = Integer.parseInt(args[4]);
+                adminPanel.setStatus(startsIn == 0 ? "Starting event..." : "Scheduling event...");
+                adminService.startEventPlatform(getPlatformUrl(), getPlatformKey(), getPlatformSlug(),
+                    type, metric, displayName, days, startsIn);
+                adminPanel.setStatus((startsIn == 0 ? "Event started: " : "Event scheduled: ") + displayName);
+                loadAdminEventsList();
 
                 // Update local state
                 activeEventType = type;
@@ -3297,30 +3338,25 @@ public class ClanManagementPlugin extends Plugin
             }
         }));
 
-        // End weekly event
-        adminPanel.setOnEndEvent(() -> executor.submit(() -> {
+        // End a live event / cancel a scheduled one (from the calendar rows)
+        adminPanel.setOnCancelEvent(eventId -> executor.submit(() -> {
             try
             {
                 adminPanel.setStatus("Ending event...");
-
-                adminService.endEventPlatform(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), activeEventId);
+                adminService.endEventPlatform(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), eventId);
                 adminPanel.setStatus("Event ended");
-
-                // Clear local state
-                activeEventType = "";
-                activeEventMetric = "";
-                activeEventDisplayName = "";
-                activeEventEndTime = "";
-                activeEventId = "";
                 serverConfigLoaded = false;
-
                 refreshEventLeaderboard();
+                loadAdminEventsList();
             }
             catch (Exception e)
             {
                 adminPanel.setStatus("Error: " + e.getMessage());
             }
         }));
+
+        adminPanel.setOnLoadEvents(() -> executor.submit(this::loadAdminEventsList));
+        executor.submit(this::loadAdminEventsList);
 
         adminPanel.setOnSyncRoster(() -> {
             int count = hiscoreTracker.syncRoster(getPlatformUrl(), getPlatformKey(), getPlatformSlug());

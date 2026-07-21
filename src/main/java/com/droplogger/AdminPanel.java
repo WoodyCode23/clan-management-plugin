@@ -9,8 +9,16 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
 
-public class AdminPanel extends JPanel
+public class AdminPanel extends JPanel implements Scrollable
 {
+    // The admin tab's scroll pane forbids horizontal scrolling; without tracking the
+    // viewport width, any component wider than the sidebar is silently CLIPPED.
+    @Override public Dimension getPreferredScrollableViewportSize() { return getPreferredSize(); }
+    @Override public int getScrollableUnitIncrement(Rectangle r, int o, int d) { return 14; }
+    @Override public int getScrollableBlockIncrement(Rectangle r, int o, int d) { return 100; }
+    @Override public boolean getScrollableTracksViewportWidth() { return true; }
+    @Override public boolean getScrollableTracksViewportHeight() { return false; }
+
     private static final Font SECTION_FONT = new Font("Segoe UI", Font.BOLD, 12);
     private static final Font LABEL_FONT = new Font("Segoe UI", Font.PLAIN, 11);
     private static final Font SMALL_FONT = new Font("Segoe UI", Font.PLAIN, 11);
@@ -23,7 +31,12 @@ public class AdminPanel extends JPanel
     // ── Weekly Events ──
     private final JComboBox<String> eventTypeBox = new JComboBox<>(new String[]{"Boss of the Week", "Skill of the Week", "Gamer of the Week", "Clue Hunter of the Week"});
     private final JComboBox<String> eventMetricBox = new JComboBox<>();
-    private final JLabel activeEventLabel = new JLabel("No active event");
+    private final JTextField eventNameField = new JTextField();
+    private final JSpinner eventDaysSpinner = new JSpinner(new SpinnerNumberModel(7, 1, 30, 1));
+    private final JSpinner eventStartInSpinner = new JSpinner(new SpinnerNumberModel(0, 0, 60, 1));
+    private final JPanel eventsListPanel = new JPanel();
+    private Runnable onLoadEvents;
+    private Consumer<String> onCancelEvent;
 
     // ── Rotate API Key ──
     private final JTextField newApiKeyField = new JTextField();
@@ -43,8 +56,7 @@ public class AdminPanel extends JPanel
     private Runnable onLoadSettings;
     private Consumer<String[]> onRemoveHiscore;
     private Consumer<String> onRotateApiKey;
-    private Consumer<String[]> onStartEvent;
-    private Runnable onEndEvent;
+    private Consumer<String[]> onStartEvent; // {type, metric, name, days, startsInDays}
     private Runnable onSyncRoster;
 
     public AdminPanel()
@@ -113,10 +125,11 @@ public class AdminPanel extends JPanel
         add(createSectionTitle("Weekly Events"));
         add(Box.createVerticalStrut(4));
 
-        activeEventLabel.setFont(SMALL_ITALIC);
-        activeEventLabel.setForeground(new Color(150, 150, 150));
-        activeEventLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
-        add(activeEventLabel);
+        // Upcoming + running events, refreshed from the platform
+        eventsListPanel.setLayout(new BoxLayout(eventsListPanel, BoxLayout.Y_AXIS));
+        eventsListPanel.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        eventsListPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        add(eventsListPanel);
         add(Box.createVerticalStrut(6));
 
         add(createFieldLabel("Event Type"));
@@ -137,37 +150,67 @@ public class AdminPanel extends JPanel
         populateMetricBox();
         eventTypeBox.addActionListener(e -> populateMetricBox());
 
+        add(createFieldLabel("Custom name (optional)"));
+        eventNameField.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
+        eventNameField.setFont(SMALL_FONT);
+        eventNameField.setAlignmentX(Component.LEFT_ALIGNMENT);
+        add(eventNameField);
+        add(Box.createVerticalStrut(4));
+
+        JPanel timingRow = new JPanel(new GridLayout(1, 2, 6, 0));
+        timingRow.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        timingRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+        timingRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 40));
+        JPanel durCol = new JPanel(new BorderLayout());
+        durCol.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        durCol.add(createFieldLabel("Duration (days)"), BorderLayout.NORTH);
+        durCol.add(eventDaysSpinner, BorderLayout.CENTER);
+        JPanel startCol = new JPanel(new BorderLayout());
+        startCol.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        startCol.add(createFieldLabel("Starts in (days)"), BorderLayout.NORTH);
+        startCol.add(eventStartInSpinner, BorderLayout.CENTER);
+        timingRow.add(durCol);
+        timingRow.add(startCol);
+        add(timingRow);
+        add(Box.createVerticalStrut(6));
+
         JPanel eventButtons = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
         eventButtons.setBackground(ColorScheme.DARK_GRAY_COLOR);
         eventButtons.setAlignmentX(Component.LEFT_ALIGNMENT);
         eventButtons.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
 
-        JButton startEventBtn = createButton("Start Event");
+        JButton startEventBtn = createButton("Start / Schedule");
         startEventBtn.addActionListener(e -> {
             String typeLabel = (String) eventTypeBox.getSelectedItem();
-            String displayName = (String) eventMetricBox.getSelectedItem();
-            if (typeLabel == null || displayName == null) return;
+            String metricLabel = (String) eventMetricBox.getSelectedItem();
+            if (typeLabel == null || metricLabel == null) return;
 
             String type = EventMetrics.typeFromLabel(typeLabel);
-            String metric = EventMetrics.metricFromDisplayName(displayName);
+            String metric = EventMetrics.metricFromDisplayName(metricLabel);
             if (metric == null) return;
 
-            if (confirmAction("Start " + typeLabel + ": " + displayName + "?\nThis will run for 7 days."))
+            int days = (Integer) eventDaysSpinner.getValue();
+            int startsIn = (Integer) eventStartInSpinner.getValue();
+            String custom = eventNameField.getText().trim();
+            String displayName = custom.isEmpty() ? typeLabel + ": " + metricLabel : custom;
+
+            String when = startsIn == 0 ? "starting NOW" : "starting in " + startsIn + " day" + (startsIn == 1 ? "" : "s");
+            if (confirmAction("Schedule \"" + displayName + "\"?\n" + when + ", running " + days + " days."))
             {
-                if (onStartEvent != null) onStartEvent.accept(new String[]{type, metric, displayName});
+                if (onStartEvent != null)
+                {
+                    onStartEvent.accept(new String[]{type, metric, displayName,
+                        String.valueOf(days), String.valueOf(startsIn)});
+                    eventNameField.setText("");
+                }
             }
         });
 
-        JButton endEventBtn = createButton("End Event");
-        endEventBtn.addActionListener(e -> {
-            if (confirmAction("End the current event?"))
-            {
-                if (onEndEvent != null) onEndEvent.run();
-            }
-        });
+        JButton refreshEventsBtn = createButton("Refresh");
+        refreshEventsBtn.addActionListener(e -> { if (onLoadEvents != null) onLoadEvents.run(); });
 
         eventButtons.add(startEventBtn);
-        eventButtons.add(endEventBtn);
+        eventButtons.add(refreshEventsBtn);
         add(eventButtons);
 
         add(Box.createVerticalStrut(8));
@@ -180,7 +223,7 @@ public class AdminPanel extends JPanel
         add(createSectionTitle("Clan Roster"));
         add(Box.createVerticalStrut(4));
 
-        JLabel rosterDesc = new JLabel("Sync full member list & ranks to the platform");
+        JLabel rosterDesc = new JLabel("<html>Sync full member list &amp; ranks to the platform</html>");
         rosterDesc.setFont(SMALL_FONT);
         rosterDesc.setForeground(new Color(150, 150, 150));
         rosterDesc.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -364,7 +407,72 @@ public class AdminPanel extends JPanel
     public void setOnRemoveHiscore(Consumer<String[]> cb) { this.onRemoveHiscore = cb; }
     public void setOnRotateApiKey(Consumer<String> cb) { this.onRotateApiKey = cb; }
     public void setOnStartEvent(Consumer<String[]> cb) { this.onStartEvent = cb; }
-    public void setOnEndEvent(Runnable cb) { this.onEndEvent = cb; }
+    public void setOnCancelEvent(Consumer<String> cb) { this.onCancelEvent = cb; }
+    public void setOnLoadEvents(Runnable cb) { this.onLoadEvents = cb; }
+
+    /**
+     * Render the event calendar. Rows: {id, status, displayName, windowText}.
+     * Active rows get an End button, scheduled rows a Cancel button.
+     */
+    public void setEventsList(List<String[]> rows)
+    {
+        SwingUtilities.invokeLater(() -> {
+            eventsListPanel.removeAll();
+            if (rows.isEmpty())
+            {
+                JLabel none = new JLabel("No running or scheduled events.");
+                none.setFont(SMALL_ITALIC);
+                none.setForeground(new Color(150, 150, 150));
+                none.setAlignmentX(Component.LEFT_ALIGNMENT);
+                eventsListPanel.add(none);
+            }
+            for (String[] row : rows)
+            {
+                final String id = row[0];
+                String status = row[1];
+                boolean live = "active".equals(status);
+                Color chipColor = live ? new Color(76, 175, 80) : new Color(100, 149, 237);
+
+                JPanel card = new JPanel(new BorderLayout(4, 0));
+                card.setBackground(new Color(35, 35, 35));
+                card.setAlignmentX(Component.LEFT_ALIGNMENT);
+                card.setBorder(BorderFactory.createCompoundBorder(
+                    BorderFactory.createMatteBorder(0, 3, 0, 0, chipColor),
+                    new EmptyBorder(4, 6, 4, 4)));
+
+                JPanel text = new JPanel();
+                text.setLayout(new BoxLayout(text, BoxLayout.Y_AXIS));
+                text.setBackground(new Color(35, 35, 35));
+                JLabel name = new JLabel("<html><b>" + (live ? "LIVE" : "SCHEDULED") + "</b> \u00b7 " + row[2] + "</html>");
+                name.setFont(SMALL_FONT);
+                name.setForeground(chipColor);
+                text.add(name);
+                JLabel window = new JLabel("<html>" + row[3] + "</html>");
+                window.setFont(SMALL_ITALIC);
+                window.setForeground(new Color(150, 150, 150));
+                text.add(window);
+                card.add(text, BorderLayout.CENTER);
+
+                JButton act = createButton(live ? "End" : "Cancel");
+                act.addActionListener(e -> {
+                    if (confirmAction((live ? "End" : "Cancel") + " \"" + row[2] + "\"?"))
+                    {
+                        if (onCancelEvent != null) onCancelEvent.accept(id);
+                    }
+                });
+                JPanel btnWrap = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
+                btnWrap.setBackground(new Color(35, 35, 35));
+                btnWrap.add(act);
+                card.add(btnWrap, BorderLayout.EAST);
+
+                card.setMaximumSize(new Dimension(Integer.MAX_VALUE, card.getPreferredSize().height + 4));
+                eventsListPanel.add(card);
+                eventsListPanel.add(Box.createVerticalStrut(3));
+            }
+            eventsListPanel.revalidate();
+            eventsListPanel.repaint();
+        });
+    }
     public void setOnSyncRoster(Runnable cb) { this.onSyncRoster = cb; }
     public void setOnCreateAnnouncement(Consumer<Object[]> cb) { this.onCreateAnnouncement = cb; }
     public void setOnEditAnnouncement(Consumer<String[]> cb) { this.onEditAnnouncement = cb; }
@@ -462,21 +570,10 @@ public class AdminPanel extends JPanel
         SwingUtilities.invokeLater(() -> newBoardCodeLabel.setText("New code: " + code));
     }
 
+    /** Legacy hook (config refresh calls this) — the calendar list is the display now. */
     public void setActiveEvent(String type, String displayName, String endTime)
     {
-        SwingUtilities.invokeLater(() -> {
-            if (type == null || type.isEmpty())
-            {
-                activeEventLabel.setText("No active event");
-                activeEventLabel.setForeground(new Color(150, 150, 150));
-            }
-            else
-            {
-                String typeLabel = "boss".equals(type) ? "Boss" : "Skill";
-                activeEventLabel.setText("Active: " + typeLabel + " — " + displayName + " (ends " + endTime.replace("T", " ") + " ET)");
-                activeEventLabel.setForeground("boss".equals(type) ? new Color(231, 76, 60) : new Color(46, 204, 113));
-            }
-        });
+        if (onLoadEvents != null) onLoadEvents.run();
     }
 
     private void populateMetricBox()

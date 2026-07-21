@@ -38,13 +38,15 @@ public class AdminService
      * POST /admin/{slug}/events
      */
     public String startEventPlatform(String baseUrl, String apiKey, String slug,
-                                      String eventType, String metric, String displayName) throws IOException
+                                      String eventType, String metric, String displayName,
+                                      int durationDays, int startsInDays) throws IOException
     {
         JsonObject payload = new JsonObject();
         payload.addProperty("type", eventType);
         payload.addProperty("metric", metric);
         payload.addProperty("displayName", displayName);
-        payload.addProperty("durationDays", 7);
+        payload.addProperty("durationDays", durationDays);
+        payload.addProperty("startsInDays", startsInDays);
 
         RequestBody body = RequestBody.create(JSON_TYPE, gson.toJson(payload));
         Request request = new Request.Builder()
@@ -68,6 +70,33 @@ public class AdminService
                 throw new IOException(detail != null ? detail : "Platform API returned status: " + response.code());
             }
             return "Event started";
+        }
+    }
+
+    /** Running + scheduled events for the admin calendar. GET /clans/{slug}/events */
+    public java.util.List<JsonObject> fetchEventsList(String baseUrl, String apiKey, String slug) throws IOException
+    {
+        Request request = new Request.Builder()
+            .url(baseUrl + "/clans/" + slug + "/events?limit=8")
+            .header("Authorization", "Bearer " + apiKey)
+            .get()
+            .build();
+        try (Response response = httpClient.newCall(request).execute())
+        {
+            if (!response.isSuccessful() || response.body() == null)
+            {
+                throw new IOException("Platform API returned status: " + response.code());
+            }
+            JsonObject root = gson.fromJson(response.body().string(), JsonObject.class);
+            java.util.List<JsonObject> out = new java.util.ArrayList<>();
+            if (root != null && root.has("events"))
+            {
+                for (com.google.gson.JsonElement el : root.getAsJsonArray("events"))
+                {
+                    out.add(el.getAsJsonObject());
+                }
+            }
+            return out;
         }
     }
 
