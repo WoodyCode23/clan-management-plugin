@@ -183,6 +183,90 @@ public final class EventMetrics
         return null;
     }
 
+    // WOM metric -> item id for icons (generated from the website's BOSS_KC_ICONS so the
+    // two surfaces can't drift; clue tiers added on top).
+    private static final java.util.Map<String, Integer> ICON_ITEM_IDS = new java.util.HashMap<>();
+    static
+    {
+        ICON_ITEM_IDS.put("abyssal_sire", 13262);
+        ICON_ITEM_IDS.put("alchemical_hydra", 22746);
+        ICON_ITEM_IDS.put("amoxliatl", 30154);
+        ICON_ITEM_IDS.put("araxxor", 29836);
+        ICON_ITEM_IDS.put("artio", 13178);
+        ICON_ITEM_IDS.put("barrows_chests", 4708);
+        ICON_ITEM_IDS.put("bryophyta", 22372);
+        ICON_ITEM_IDS.put("callisto", 13178);
+        ICON_ITEM_IDS.put("calvarion", 13179);
+        ICON_ITEM_IDS.put("cerberus", 13247);
+        ICON_ITEM_IDS.put("chambers_of_xeric", 20851);
+        ICON_ITEM_IDS.put("chambers_of_xeric_challenge_mode", 22386);
+        ICON_ITEM_IDS.put("chaos_elemental", 11995);
+        ICON_ITEM_IDS.put("chaos_fanatic", 11995);
+        ICON_ITEM_IDS.put("commander_zilyana", 12651);
+        ICON_ITEM_IDS.put("corporeal_beast", 12816);
+        ICON_ITEM_IDS.put("crazy_archaeologist", 11990);
+        ICON_ITEM_IDS.put("dagannoth_prime", 12644);
+        ICON_ITEM_IDS.put("dagannoth_rex", 12645);
+        ICON_ITEM_IDS.put("dagannoth_supreme", 12643);
+        ICON_ITEM_IDS.put("deranged_archaeologist", 11990);
+        ICON_ITEM_IDS.put("duke_sucellus", 28250);
+        ICON_ITEM_IDS.put("fortis_colosseum", 28960);
+        ICON_ITEM_IDS.put("general_graardor", 12650);
+        ICON_ITEM_IDS.put("giant_mole", 12646);
+        ICON_ITEM_IDS.put("grotesque_guardians", 21748);
+        ICON_ITEM_IDS.put("hespori", 22875);
+        ICON_ITEM_IDS.put("hueycoatl", 30152);
+        ICON_ITEM_IDS.put("kalphite_queen", 12647);
+        ICON_ITEM_IDS.put("king_black_dragon", 12653);
+        ICON_ITEM_IDS.put("kraken", 12655);
+        ICON_ITEM_IDS.put("kreearra", 12649);
+        ICON_ITEM_IDS.put("kril_tsutsaroth", 12652);
+        ICON_ITEM_IDS.put("lunar_chests", 29836);
+        ICON_ITEM_IDS.put("nex", 26348);
+        ICON_ITEM_IDS.put("nightmare", 24491);
+        ICON_ITEM_IDS.put("obor", 20756);
+        ICON_ITEM_IDS.put("phantom_muspah", 27590);
+        ICON_ITEM_IDS.put("phosanis_nightmare", 24491);
+        ICON_ITEM_IDS.put("sarachnis", 23495);
+        ICON_ITEM_IDS.put("scorpia", 13181);
+        ICON_ITEM_IDS.put("scurrius", 28801);
+        ICON_ITEM_IDS.put("skotizo", 21273);
+        ICON_ITEM_IDS.put("sol_heredit", 28960);
+        ICON_ITEM_IDS.put("spindel", 13177);
+        ICON_ITEM_IDS.put("tempoross", 25602);
+        ICON_ITEM_IDS.put("the_corrupted_gauntlet", 23759);
+        ICON_ITEM_IDS.put("the_gauntlet", 23757);
+        ICON_ITEM_IDS.put("the_leviathan", 28252);
+        ICON_ITEM_IDS.put("the_whisperer", 28246);
+        ICON_ITEM_IDS.put("theatre_of_blood", 22473);
+        ICON_ITEM_IDS.put("theatre_of_blood_hard_mode", 22473);
+        ICON_ITEM_IDS.put("thermonuclear_smoke_devil", 12648);
+        ICON_ITEM_IDS.put("tombs_of_amascut", 27352);
+        ICON_ITEM_IDS.put("tombs_of_amascut_expert", 27352);
+        ICON_ITEM_IDS.put("tzkal_zuk", 21291);
+        ICON_ITEM_IDS.put("tztok_jad", 13225);
+        ICON_ITEM_IDS.put("vardorvis", 28248);
+        ICON_ITEM_IDS.put("venenatis", 13177);
+        ICON_ITEM_IDS.put("vetion", 13179);
+        ICON_ITEM_IDS.put("vorkath", 21992);
+        ICON_ITEM_IDS.put("yama", 29622);
+        ICON_ITEM_IDS.put("zalcano", 23760);
+        ICON_ITEM_IDS.put("zulrah", 12921);
+        ICON_ITEM_IDS.put("clue_scrolls_all", 2714);
+        ICON_ITEM_IDS.put("clue_scrolls_beginner", 23182);
+        ICON_ITEM_IDS.put("clue_scrolls_easy", 2677);
+        ICON_ITEM_IDS.put("clue_scrolls_medium", 2801);
+        ICON_ITEM_IDS.put("clue_scrolls_hard", 2722);
+        ICON_ITEM_IDS.put("clue_scrolls_elite", 12073);
+        ICON_ITEM_IDS.put("clue_scrolls_master", 19835);
+    }
+
+    /** Item id to draw as this metric's icon, or null when only a sprite (skills) fits. */
+    public static Integer iconItemId(String metric)
+    {
+        return metric == null ? null : ICON_ITEM_IDS.get(metric.toLowerCase());
+    }
+
     /** Get the event type string from an event type label. */
     public static String typeFromLabel(String label)
     {

@@ -3235,7 +3235,10 @@ public class ClanManagementPlugin extends Plugin
                 {
                     window = "";
                 }
-                rows.add(new String[]{ev.get("id").getAsString(), status, ev.get("displayName").getAsString(), window});
+                String evType = ev.has("type") ? ev.get("type").getAsString() : "";
+                String glyph = "boss".equals(evType) ? "\u2694 " : "skill".equals(evType) ? "\u2692 "
+                    : "clue".equals(evType) ? "\ud83d\udcdc " : "gamer".equals(evType) ? "\ud83c\udfae " : "";
+                rows.add(new String[]{ev.get("id").getAsString(), status, ev.get("displayName").getAsString(), window, glyph});
             }
             adminPanel.setEventsList(rows);
         }

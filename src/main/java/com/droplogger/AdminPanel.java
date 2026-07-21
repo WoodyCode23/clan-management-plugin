@@ -442,7 +442,8 @@ public class AdminPanel extends JPanel implements Scrollable
                 JPanel text = new JPanel();
                 text.setLayout(new BoxLayout(text, BoxLayout.Y_AXIS));
                 text.setBackground(new Color(35, 35, 35));
-                JLabel name = new JLabel("<html><b>" + (live ? "LIVE" : "SCHEDULED") + "</b> \u00b7 " + row[2] + "</html>");
+                String glyph = row.length > 4 && row[4] != null ? row[4] : "";
+                JLabel name = new JLabel("<html><b>" + (live ? "LIVE" : "SCHEDULED") + "</b> \u00b7 " + glyph + row[2] + "</html>");
                 name.setFont(SMALL_FONT);
                 name.setForeground(chipColor);
                 text.add(name);

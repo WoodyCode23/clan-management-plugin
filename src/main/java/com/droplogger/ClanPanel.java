@@ -2263,6 +2263,59 @@ public class ClanPanel extends PluginPanel
         return scroll;
     }
 
+    // Skill metric -> RuneLite sprite (compile-time constants; no magic numbers).
+    private static final java.util.Map<String, Integer> SKILL_SPRITES = new java.util.HashMap<>();
+    static
+    {
+        SKILL_SPRITES.put("attack", net.runelite.api.SpriteID.SKILL_ATTACK);
+        SKILL_SPRITES.put("strength", net.runelite.api.SpriteID.SKILL_STRENGTH);
+        SKILL_SPRITES.put("defence", net.runelite.api.SpriteID.SKILL_DEFENCE);
+        SKILL_SPRITES.put("ranged", net.runelite.api.SpriteID.SKILL_RANGED);
+        SKILL_SPRITES.put("prayer", net.runelite.api.SpriteID.SKILL_PRAYER);
+        SKILL_SPRITES.put("magic", net.runelite.api.SpriteID.SKILL_MAGIC);
+        SKILL_SPRITES.put("hitpoints", net.runelite.api.SpriteID.SKILL_HITPOINTS);
+        SKILL_SPRITES.put("agility", net.runelite.api.SpriteID.SKILL_AGILITY);
+        SKILL_SPRITES.put("herblore", net.runelite.api.SpriteID.SKILL_HERBLORE);
+        SKILL_SPRITES.put("thieving", net.runelite.api.SpriteID.SKILL_THIEVING);
+        SKILL_SPRITES.put("crafting", net.runelite.api.SpriteID.SKILL_CRAFTING);
+        SKILL_SPRITES.put("fletching", net.runelite.api.SpriteID.SKILL_FLETCHING);
+        SKILL_SPRITES.put("mining", net.runelite.api.SpriteID.SKILL_MINING);
+        SKILL_SPRITES.put("smithing", net.runelite.api.SpriteID.SKILL_SMITHING);
+        SKILL_SPRITES.put("fishing", net.runelite.api.SpriteID.SKILL_FISHING);
+        SKILL_SPRITES.put("cooking", net.runelite.api.SpriteID.SKILL_COOKING);
+        SKILL_SPRITES.put("firemaking", net.runelite.api.SpriteID.SKILL_FIREMAKING);
+        SKILL_SPRITES.put("woodcutting", net.runelite.api.SpriteID.SKILL_WOODCUTTING);
+        SKILL_SPRITES.put("runecrafting", net.runelite.api.SpriteID.SKILL_RUNECRAFT);
+        SKILL_SPRITES.put("runecraft", net.runelite.api.SpriteID.SKILL_RUNECRAFT);
+        SKILL_SPRITES.put("slayer", net.runelite.api.SpriteID.SKILL_SLAYER);
+        SKILL_SPRITES.put("farming", net.runelite.api.SpriteID.SKILL_FARMING);
+        SKILL_SPRITES.put("construction", net.runelite.api.SpriteID.SKILL_CONSTRUCTION);
+        SKILL_SPRITES.put("hunter", net.runelite.api.SpriteID.SKILL_HUNTER);
+    }
+
+    /** Icon for an event's metric: skill sprite, boss/clue item icon, or empty when unknown. */
+    private JLabel metricIcon(String type, String metric, int size)
+    {
+        JLabel icon = new JLabel();
+        icon.setPreferredSize(new Dimension(size, size));
+        String m = metric != null ? metric.toLowerCase() : "";
+        if (("skill".equals(type) || "gamer".equals(type)) && SKILL_SPRITES.containsKey(m))
+        {
+            if (spriteManager != null)
+            {
+                spriteManager.getSpriteAsync(SKILL_SPRITES.get(m), 0, img -> SwingUtilities.invokeLater(() ->
+                    icon.setIcon(new ImageIcon(img.getScaledInstance(size, size, Image.SCALE_SMOOTH)))));
+            }
+            return icon;
+        }
+        Integer itemId = EventMetrics.iconItemId(m);
+        if (itemId != null && itemManager != null)
+        {
+            itemManager.getImage(itemId).addTo(icon);
+        }
+        return icon;
+    }
+
     /** Every pending (scheduled) event as a simple dated list — the full calendar. */
     private void renderPendingList(com.google.gson.JsonArray pending)
     {
@@ -2292,12 +2345,17 @@ public class ClanPanel extends PluginPanel
             {
                 when = "?";
             }
-            JLabel row = new JLabel("<html>\u2022 <b>" + ev.get("displayName").getAsString() + "</b><br/>&nbsp;&nbsp;" + when + "</html>");
+            JPanel rowPanel = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 5, 1));
+            rowPanel.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+            rowPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
+            rowPanel.add(metricIcon(
+                ev.has("type") ? ev.get("type").getAsString() : null,
+                ev.has("metric") ? ev.get("metric").getAsString() : null, 16));
+            JLabel row = new JLabel("<html><b>" + ev.get("displayName").getAsString() + "</b> \u2014 " + when + "</html>");
             row.setFont(READABLE_FONT_SMALL);
             row.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
-            row.setAlignmentX(Component.LEFT_ALIGNMENT);
-            row.setBorder(new EmptyBorder(3, 2, 0, 0));
-            card.add(row);
+            rowPanel.add(row);
+            card.add(rowPanel);
         }
         eventContent.add(card);
         eventContent.add(Box.createVerticalStrut(8));
@@ -2329,10 +2387,16 @@ public class ClanPanel extends PluginPanel
             BorderFactory.createMatteBorder(0, 3, 0, 0, new Color(100, 149, 237)),
             new EmptyBorder(8, 8, 8, 8)));
 
-        JLabel title = new JLabel("<html><b>\ud83d\udcc5 " + upcoming.get("displayName").getAsString() + "</b></html>");
+        JPanel titleRow = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 5, 0));
+        titleRow.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+        titleRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+        titleRow.add(metricIcon(
+            upcoming.has("type") ? upcoming.get("type").getAsString() : null,
+            upcoming.has("metric") ? upcoming.get("metric").getAsString() : null, 20));
+        JLabel title = new JLabel("<html><b>" + upcoming.get("displayName").getAsString() + "</b></html>");
         title.setForeground(new Color(100, 149, 237));
-        title.setAlignmentX(Component.LEFT_ALIGNMENT);
-        card.add(title);
+        titleRow.add(title);
+        card.add(titleRow);
 
         JLabel timer = new JLabel();
         timer.setFont(READABLE_FONT.deriveFont(Font.BOLD, 15f));
@@ -2383,10 +2447,14 @@ public class ClanPanel extends PluginPanel
             BorderFactory.createMatteBorder(0, 3, 0, 0, ACCENT_GOLD),
             new EmptyBorder(6, 8, 6, 8)));
 
-        JLabel title = new JLabel("<html><b>\ud83c\udfc1 " + event.get("displayName").getAsString() + "</b></html>");
+        JPanel titleRow = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 5, 0));
+        titleRow.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+        titleRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+        titleRow.add(metricIcon(type, event.has("metric") ? event.get("metric").getAsString() : null, 20));
+        JLabel title = new JLabel("<html><b>" + event.get("displayName").getAsString() + "</b></html>");
         title.setForeground(ACCENT_GOLD);
-        title.setAlignmentX(Component.LEFT_ALIGNMENT);
-        card.add(title);
+        titleRow.add(title);
+        card.add(titleRow);
 
         try
         {
