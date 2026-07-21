@@ -32,8 +32,8 @@ public class AdminPanel extends JPanel implements Scrollable
     private final JComboBox<String> eventTypeBox = new JComboBox<>(new String[]{"Boss of the Week", "Skill of the Week", "Gamer of the Week", "Clue Hunter of the Week"});
     private final JComboBox<String> eventMetricBox = new JComboBox<>();
     private final JTextField eventNameField = new JTextField();
-    private final JSpinner eventDaysSpinner = new JSpinner(new SpinnerNumberModel(7, 1, 30, 1));
-    private final JSpinner eventStartInSpinner = new JSpinner(new SpinnerNumberModel(0, 0, 60, 1));
+    private final JTextField eventStartField = new JTextField();
+    private final JTextField eventEndField = new JTextField();
     private final JPanel eventsListPanel = new JPanel();
     private Runnable onLoadEvents;
     private Consumer<String> onCancelEvent;
@@ -157,21 +157,18 @@ public class AdminPanel extends JPanel implements Scrollable
         add(eventNameField);
         add(Box.createVerticalStrut(4));
 
-        JPanel timingRow = new JPanel(new GridLayout(1, 2, 6, 0));
-        timingRow.setBackground(ColorScheme.DARK_GRAY_COLOR);
-        timingRow.setAlignmentX(Component.LEFT_ALIGNMENT);
-        timingRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 40));
-        JPanel durCol = new JPanel(new BorderLayout());
-        durCol.setBackground(ColorScheme.DARK_GRAY_COLOR);
-        durCol.add(createFieldLabel("Duration (days)"), BorderLayout.NORTH);
-        durCol.add(eventDaysSpinner, BorderLayout.CENTER);
-        JPanel startCol = new JPanel(new BorderLayout());
-        startCol.setBackground(ColorScheme.DARK_GRAY_COLOR);
-        startCol.add(createFieldLabel("Starts in (days)"), BorderLayout.NORTH);
-        startCol.add(eventStartInSpinner, BorderLayout.CENTER);
-        timingRow.add(durCol);
-        timingRow.add(startCol);
-        add(timingRow);
+        add(createFieldLabel("Start \u2014 ET, blank = now (yyyy-MM-dd HH:mm)"));
+        eventStartField.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
+        eventStartField.setFont(SMALL_FONT);
+        eventStartField.setAlignmentX(Component.LEFT_ALIGNMENT);
+        add(eventStartField);
+        add(Box.createVerticalStrut(4));
+
+        add(createFieldLabel("End \u2014 ET, blank = start + 7 days"));
+        eventEndField.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
+        eventEndField.setFont(SMALL_FONT);
+        eventEndField.setAlignmentX(Component.LEFT_ALIGNMENT);
+        add(eventEndField);
         add(Box.createVerticalStrut(6));
 
         JPanel eventButtons = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
@@ -189,19 +186,21 @@ public class AdminPanel extends JPanel implements Scrollable
             String metric = EventMetrics.metricFromDisplayName(metricLabel);
             if (metric == null) return;
 
-            int days = (Integer) eventDaysSpinner.getValue();
-            int startsIn = (Integer) eventStartInSpinner.getValue();
+            String startText = eventStartField.getText().trim();
+            String endText = eventEndField.getText().trim();
             String custom = eventNameField.getText().trim();
             String displayName = custom.isEmpty() ? typeLabel + ": " + metricLabel : custom;
 
-            String when = startsIn == 0 ? "starting NOW" : "starting in " + startsIn + " day" + (startsIn == 1 ? "" : "s");
-            if (confirmAction("Schedule \"" + displayName + "\"?\n" + when + ", running " + days + " days."))
+            String when = startText.isEmpty() ? "starting NOW" : "starting " + startText + " ET";
+            String until = endText.isEmpty() ? "running 7 days" : "until " + endText + " ET";
+            if (confirmAction("Schedule \"" + displayName + "\"?\n" + when + ", " + until + "."))
             {
                 if (onStartEvent != null)
                 {
-                    onStartEvent.accept(new String[]{type, metric, displayName,
-                        String.valueOf(days), String.valueOf(startsIn)});
+                    onStartEvent.accept(new String[]{type, metric, displayName, startText, endText});
                     eventNameField.setText("");
+                    eventStartField.setText("");
+                    eventEndField.setText("");
                 }
             }
         });

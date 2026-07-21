@@ -39,14 +39,14 @@ public class AdminService
      */
     public String startEventPlatform(String baseUrl, String apiKey, String slug,
                                       String eventType, String metric, String displayName,
-                                      int durationDays, int startsInDays) throws IOException
+                                      String startAtIso, String endAtIso) throws IOException
     {
         JsonObject payload = new JsonObject();
         payload.addProperty("type", eventType);
         payload.addProperty("metric", metric);
         payload.addProperty("displayName", displayName);
-        payload.addProperty("durationDays", durationDays);
-        payload.addProperty("startsInDays", startsInDays);
+        if (startAtIso != null) payload.addProperty("startAt", startAtIso);
+        if (endAtIso != null) payload.addProperty("endAt", endAtIso);
 
         RequestBody body = RequestBody.create(JSON_TYPE, gson.toJson(payload));
         Request request = new Request.Builder()

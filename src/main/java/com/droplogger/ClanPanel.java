@@ -2263,6 +2263,46 @@ public class ClanPanel extends PluginPanel
         return scroll;
     }
 
+    /** Every pending (scheduled) event as a simple dated list — the full calendar. */
+    private void renderPendingList(com.google.gson.JsonArray pending)
+    {
+        JPanel card = new JPanel();
+        card.setLayout(new BoxLayout(card, BoxLayout.Y_AXIS));
+        card.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+        card.setAlignmentX(Component.LEFT_ALIGNMENT);
+        card.setBorder(new EmptyBorder(4, 8, 6, 8));
+
+        JLabel head = new JLabel("Upcoming events");
+        head.setFont(FontManager.getRunescapeBoldFont());
+        head.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+        head.setAlignmentX(Component.LEFT_ALIGNMENT);
+        card.add(head);
+
+        java.time.format.DateTimeFormatter fmt = java.time.format.DateTimeFormatter.ofPattern("MMM d, h:mm a");
+        for (int i = 0; i < pending.size(); i++)
+        {
+            com.google.gson.JsonObject ev = pending.get(i).getAsJsonObject();
+            String when;
+            try
+            {
+                when = java.time.Instant.parse(ev.get("startTime").getAsString())
+                    .atZone(java.time.ZoneId.of("America/New_York")).format(fmt) + " ET";
+            }
+            catch (Exception ex)
+            {
+                when = "?";
+            }
+            JLabel row = new JLabel("<html>\u2022 <b>" + ev.get("displayName").getAsString() + "</b><br/>&nbsp;&nbsp;" + when + "</html>");
+            row.setFont(READABLE_FONT_SMALL);
+            row.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+            row.setAlignmentX(Component.LEFT_ALIGNMENT);
+            row.setBorder(new EmptyBorder(3, 2, 0, 0));
+            card.add(row);
+        }
+        eventContent.add(card);
+        eventContent.add(Box.createVerticalStrut(8));
+    }
+
     /** Countdown to a scheduled event — a live ticking timer, shown from 7 days out. */
     private void renderCountdown(com.google.gson.JsonObject upcoming)
     {
@@ -2459,7 +2499,21 @@ public class ClanPanel extends PluginPanel
                     renderRace(race, localPlayerName);
                     renderedRace = true;
                 }
-                if (race.has("upcoming") && !race.get("upcoming").isJsonNull())
+                boolean hasLive = race.has("event") && !race.get("event").isJsonNull();
+                if (race.has("upcomingList") && race.get("upcomingList").isJsonArray()
+                    && race.getAsJsonArray("upcomingList").size() > 0)
+                {
+                    com.google.gson.JsonArray pending = race.getAsJsonArray("upcomingList");
+                    // Soonest event gets the ticking countdown; with no live race, ALL
+                    // pending events list below it so members see the full calendar.
+                    renderCountdown(pending.get(0).getAsJsonObject());
+                    if (!hasLive && pending.size() > 0)
+                    {
+                        renderPendingList(pending);
+                    }
+                    renderedRace = true;
+                }
+                else if (race.has("upcoming") && !race.get("upcoming").isJsonNull())
                 {
                     renderCountdown(race.getAsJsonObject("upcoming"));
                     renderedRace = true;

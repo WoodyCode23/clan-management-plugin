@@ -3192,6 +3192,22 @@ public class ClanManagementPlugin extends Plugin
         }
     }
 
+    /** "yyyy-MM-dd HH:mm" ET wall clock -> ISO instant; null when blank/invalid. */
+    private static String etToIso(String text)
+    {
+        if (text == null || text.trim().isEmpty()) return null;
+        try
+        {
+            java.time.LocalDateTime local = java.time.LocalDateTime.parse(text.trim(),
+                java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"));
+            return local.atZone(java.time.ZoneId.of("America/New_York")).toInstant().toString();
+        }
+        catch (Exception e)
+        {
+            return null;
+        }
+    }
+
     /** Fetch running + scheduled events and hand formatted rows to the admin calendar. */
     private void loadAdminEventsList()
     {
@@ -3309,12 +3325,19 @@ public class ClanManagementPlugin extends Plugin
                 String type = args[0];
                 String metric = args[1];
                 String displayName = args[2];
-                int days = Integer.parseInt(args[3]);
-                int startsIn = Integer.parseInt(args[4]);
-                adminPanel.setStatus(startsIn == 0 ? "Starting event..." : "Scheduling event...");
+                String startIso = etToIso(args[3]);
+                String endIso = etToIso(args[4]);
+                if ((args[3] != null && !args[3].isEmpty() && startIso == null)
+                    || (args[4] != null && !args[4].isEmpty() && endIso == null))
+                {
+                    adminPanel.setStatus("Bad date format \u2014 use yyyy-MM-dd HH:mm (ET)");
+                    return;
+                }
+                boolean startsNow = startIso == null;
+                adminPanel.setStatus(startsNow ? "Starting event..." : "Scheduling event...");
                 adminService.startEventPlatform(getPlatformUrl(), getPlatformKey(), getPlatformSlug(),
-                    type, metric, displayName, days, startsIn);
-                adminPanel.setStatus((startsIn == 0 ? "Event started: " : "Event scheduled: ") + displayName);
+                    type, metric, displayName, startIso, endIso);
+                adminPanel.setStatus((startsNow ? "Event started: " : "Event scheduled: ") + displayName);
                 loadAdminEventsList();
 
                 // Update local state
