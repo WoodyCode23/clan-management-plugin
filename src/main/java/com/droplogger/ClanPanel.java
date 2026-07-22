@@ -2384,8 +2384,14 @@ public class ClanPanel extends PluginPanel
         card.setBackground(ColorScheme.DARKER_GRAY_COLOR);
         card.setAlignmentX(Component.LEFT_ALIGNMENT);
         card.setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createMatteBorder(0, 3, 0, 0, new Color(100, 149, 237)),
+            BorderFactory.createMatteBorder(0, 3, 0, 0, ACCENT_GOLD),
             new EmptyBorder(8, 8, 8, 8)));
+
+        JLabel tag = new JLabel("SCHEDULED");
+        tag.setFont(READABLE_FONT_SMALL.deriveFont(Font.BOLD));
+        tag.setForeground(ACCENT_GOLD);
+        tag.setAlignmentX(Component.LEFT_ALIGNMENT);
+        card.add(tag);
 
         JPanel titleRow = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 5, 0));
         titleRow.setBackground(ColorScheme.DARKER_GRAY_COLOR);
@@ -2394,7 +2400,7 @@ public class ClanPanel extends PluginPanel
             upcoming.has("type") ? upcoming.get("type").getAsString() : null,
             upcoming.has("metric") ? upcoming.get("metric").getAsString() : null, 20));
         JLabel title = new JLabel("<html><b>" + upcoming.get("displayName").getAsString() + "</b></html>");
-        title.setForeground(new Color(100, 149, 237));
+        title.setForeground(Color.WHITE);
         titleRow.add(title);
         card.add(titleRow);
 
