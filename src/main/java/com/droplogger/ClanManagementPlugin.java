@@ -3387,15 +3387,17 @@ public class ClanManagementPlugin extends Plugin
         executor.submit(this::loadAdminEventsList);
 
         adminPanel.setOnSyncRoster(() -> {
-            int count = hiscoreTracker.syncRoster(getPlatformUrl(), getPlatformKey(), getPlatformSlug());
-            if (count > 0)
-            {
-                adminPanel.setStatus("Synced " + count + " members");
-            }
-            else
-            {
-                adminPanel.setStatus("Roster sync failed — join a clan first");
-            }
+            // ClanSettings is only readable on the client thread. Called straight from the Swing
+            // EDT (as this used to be) getClanSettings() returns null, so the sync bailed out
+            // before posting anything and the roster never pruned leavers. The auto-sync path
+            // already hops threads the same way.
+            adminPanel.setStatus("Syncing roster…");
+            clientThread.invokeLater(() -> {
+                int count = hiscoreTracker.syncRoster(getPlatformUrl(), getPlatformKey(), getPlatformSlug());
+                javax.swing.SwingUtilities.invokeLater(() -> adminPanel.setStatus(count > 0
+                    ? "Synced " + count + " members"
+                    : "Roster sync failed — join a clan first"));
+            });
         });
 
         // Show active event state in admin panel on load
