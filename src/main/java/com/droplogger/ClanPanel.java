@@ -86,6 +86,7 @@ public class ClanPanel extends PluginPanel
     private String currentClogRsn = null;
     private String currentClogTab = null;
     private PlatformApiService.PlayerProfile currentProfile = null;
+    private PlatformApiService.MemberAbout currentAbout = null;
     private java.util.function.Consumer<String> onLoadClog;
     // Combat Achievements drill-down (tier → boss → task done/missing), mirrors the clog flow.
     private PlatformApiService.PlayerCa currentCa = null;
@@ -928,12 +929,14 @@ public class ClanPanel extends PluginPanel
     }
 
     /** Entry point from the plugin: cache the profile and show the member's landing page. */
-    public void showMemberProfile(String rsn, PlatformApiService.PlayerProfile profile)
+    public void showMemberProfile(String rsn, PlatformApiService.PlayerProfile profile,
+                                  PlatformApiService.MemberAbout about)
     {
         SwingUtilities.invokeLater(() ->
         {
             currentClogRsn = rsn;
             currentProfile = profile;
+            currentAbout = about;
             currentClog = null; // the clog is fetched lazily when its section is opened
             renderMemberProfile();
         });
@@ -947,6 +950,12 @@ public class ClanPanel extends PluginPanel
         membersContent.add(Box.createVerticalStrut(6));
         membersContent.add(clogTitle(currentClogRsn, new Color(186, 142, 255), 16f));
         membersContent.add(Box.createVerticalStrut(8));
+
+        if (currentAbout != null && !currentAbout.isEmpty())
+        {
+            membersContent.add(buildAboutCard(currentAbout));
+            membersContent.add(Box.createVerticalStrut(8));
+        }
 
         if (currentProfile == null)
         {
@@ -1099,6 +1108,43 @@ public class ClanPanel extends PluginPanel
 
         makeCardClickable(card, action);
         return card;
+    }
+
+    /** The member's customizable "about": bio + favorite boss/skill + goal (all optional). */
+    private JComponent buildAboutCard(PlatformApiService.MemberAbout about)
+    {
+        JPanel card = new JPanel();
+        card.setLayout(new BoxLayout(card, BoxLayout.Y_AXIS));
+        card.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+        card.setAlignmentX(Component.LEFT_ALIGNMENT);
+        card.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createMatteBorder(0, 3, 0, 0, new Color(186, 142, 255)),
+            new EmptyBorder(6, 8, 6, 8)));
+
+        if (about.bio != null && !about.bio.isEmpty())
+        {
+            JLabel bio = new JLabel("<html><div style='width:" + STANDINGS_TEXT_WIDTH + "px'><i>“"
+                + escapeHtml(about.bio) + "”</i></div></html>");
+            bio.setForeground(Color.WHITE);
+            bio.setAlignmentX(Component.LEFT_ALIGNMENT);
+            card.add(bio);
+        }
+        addAboutRow(card, "Favorite boss", about.favoriteBoss);
+        addAboutRow(card, "Favorite skill", about.favoriteSkill);
+        addAboutRow(card, "Current goal", about.goal);
+        return card;
+    }
+
+    private void addAboutRow(JPanel card, String label, String value)
+    {
+        if (value == null || value.isEmpty()) return;
+        JLabel row = new JLabel("<html><span style='color:#8a8a8a'>" + label + "</span> <b>"
+            + escapeHtml(value) + "</b></html>");
+        row.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+        row.setFont(READABLE_FONT_SMALL);
+        row.setAlignmentX(Component.LEFT_ALIGNMENT);
+        row.setBorder(new EmptyBorder(3, 0, 0, 0));
+        card.add(row);
     }
 
     private void showMemberPbs()

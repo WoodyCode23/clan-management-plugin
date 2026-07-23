@@ -601,7 +601,9 @@ public class ClanManagementPlugin extends Plugin
         panel.setOnSelectMember(rsn -> executor.submit(() ->
         {
             if (!isPlatformConfigured()) return;
-            panel.showMemberProfile(rsn, platformApiService.fetchPlayerProfile(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), rsn));
+            PlatformApiService.PlayerProfile prof = platformApiService.fetchPlayerProfile(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), rsn);
+            PlatformApiService.MemberAbout about = platformApiService.fetchMemberAbout(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), rsn);
+            panel.showMemberProfile(rsn, prof, about);
         }));
         panel.setOnLoadClog(rsn -> executor.submit(() ->
         {

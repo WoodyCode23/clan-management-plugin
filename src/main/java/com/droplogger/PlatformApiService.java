@@ -1004,6 +1004,46 @@ public class PlatformApiService
         }
     }
 
+    /** A member's customizable "about" — the fields they set on the website. Any can be null. */
+    public static class MemberAbout
+    {
+        public final String bio;
+        public final String favoriteBoss;
+        public final String favoriteSkill;
+        public final String goal;
+        public MemberAbout(String bio, String favoriteBoss, String favoriteSkill, String goal)
+        {
+            this.bio = bio; this.favoriteBoss = favoriteBoss;
+            this.favoriteSkill = favoriteSkill; this.goal = goal;
+        }
+        public boolean isEmpty()
+        {
+            return (bio == null || bio.isEmpty()) && (favoriteBoss == null || favoriteBoss.isEmpty())
+                && (favoriteSkill == null || favoriteSkill.isEmpty()) && (goal == null || goal.isEmpty());
+        }
+    }
+
+    /** Fetch a member's customizable profile (bio / favorite boss+skill / goal). Never throws. */
+    public MemberAbout fetchMemberAbout(String baseUrl, String apiKey, String clanSlug, String rsn)
+    {
+        try
+        {
+            JsonObject root = getSync(baseUrl + "/clans/" + clanSlug + "/players/" + encodePath(rsn) + "/profile", apiKey);
+            if (root == null || !root.has("profile") || root.get("profile").isJsonNull()) return null;
+            JsonObject p = root.getAsJsonObject("profile");
+            return new MemberAbout(str(p, "bio"), str(p, "favoriteBoss"), str(p, "favoriteSkill"), str(p, "goal"));
+        }
+        catch (Exception ex)
+        {
+            return null;
+        }
+    }
+
+    private static String str(JsonObject o, String k)
+    {
+        return o.has(k) && !o.get(k).isJsonNull() ? o.get(k).getAsString() : null;
+    }
+
     /** Fetch a member's profile (PBs + recent drops + clog counts) in one call. */
     public PlayerProfile fetchPlayerProfile(String baseUrl, String apiKey, String clanSlug, String rsn)
     {
