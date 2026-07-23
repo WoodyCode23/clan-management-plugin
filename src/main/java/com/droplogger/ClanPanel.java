@@ -374,8 +374,9 @@ public class ClanPanel extends PluginPanel
         // Ranks tab (which clan ranks YOU qualify for)
         tabbedPane.addTab("Ranks", buildRanksTab());
 
-        // Event tab (live draft: your team + event state)
-        tabbedPane.addTab("Event", buildEventTab());
+        // Event tab intentionally NOT registered — the clan event feature isn't ready for public
+        // release. buildEventTab()/renderRace()/etc. are kept (unused) for the WOM-backed rebuild.
+        // Do NOT re-add addTab("Event", ...) without Ryan's go-ahead.
 
         // Lazy-load roster on first Members open; (re)evaluate ranks whenever the Ranks tab opens.
         tabbedPane.addChangeListener(e ->
@@ -385,29 +386,6 @@ public class ClanPanel extends PluginPanel
             if ("Members".equals(title) && currentMembers.isEmpty() && onLoadRoster != null)
             {
                 onLoadRoster.run();
-            }
-            if ("Event".equals(title) && !eventLoaded && onLoadEvent != null)
-            {
-                eventLoaded = true;
-                onLoadEvent.run();
-            }
-            // Refresh the race every 5 min, but ONLY while the Event tab is being looked at
-            // (matches the server's WOM sync cadence; anything faster is wasted requests).
-            if ("Event".equals(title))
-            {
-                if (eventRefreshTimer == null)
-                {
-                    eventRefreshTimer = new javax.swing.Timer(5 * 60 * 1000, ev ->
-                    {
-                        if (onLoadEvent != null) onLoadEvent.run();
-                    });
-                    eventRefreshTimer.setRepeats(true);
-                }
-                eventRefreshTimer.restart();
-            }
-            else if (eventRefreshTimer != null)
-            {
-                eventRefreshTimer.stop();
             }
             ranksActive = "Ranks".equals(title);
             if (ranksActive && onLoadRanks != null)
