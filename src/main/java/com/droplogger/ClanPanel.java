@@ -268,28 +268,37 @@ public class ClanPanel extends PluginPanel
     // Wrap width for event standings rows: panel width minus the card border, insets and gold rule.
     private static final int STANDINGS_TEXT_WIDTH = PluginPanel.PANEL_WIDTH - 40;
 
+    // The plugin must NEVER resize the client — in either axis.
+    //
+    // WIDTH: pinned to the standard panel width. RuneLite's PluginPanel already fixes width, but
+    // super(false) opts out of its wrapper, so we re-pin here.
+    //
+    // HEIGHT: this is the one that grew members' game WINDOWS. Base PluginPanel.getPreferredSize()
+    // returns `super.getPreferredSize().height` — i.e. CONTENT height — and super(false) skips the
+    // scroll-pane wrapper that would otherwise absorb it. So a tall tab (the Event race + standings)
+    // made the panel's preferred height huge, and RuneLite's keep-game-size behavior grew the client
+    // window to fit. Fix: report the PARENT viewport's height, never the content's. The panel then
+    // fills the sidebar exactly (never taller), and each tab's own JScrollPane handles overflow.
     @Override
     public Dimension getPreferredSize()
     {
-        return new Dimension(PINNED_WIDTH, super.getPreferredSize().height);
+        java.awt.Container p = getParent();
+        int h = (p != null && p.getHeight() > 0) ? p.getHeight() : 0;
+        return new Dimension(PINNED_WIDTH, h);
     }
 
-    // Pin the width on ALL THREE size hints. Overriding only getPreferredSize wasn't enough: a wide
-    // child (a long event standings row — plain JLabels report their full text as their MINIMUM
-    // width) made getMinimumSize exceed the panel width, and RuneLite's layout honors the minimum,
-    // growing the sidebar and — via keep-game-size — the player's game WINDOW. The plugin must never
-    // resize the client, so the width can never exceed the standard panel; over-wide content clips
-    // (and the renderers wrap their text) rather than pushing the panel out.
     @Override
     public Dimension getMinimumSize()
     {
-        return new Dimension(PINNED_WIDTH, super.getMinimumSize().height);
+        // Height 0 so the panel can shrink with the window instead of forcing it taller.
+        return new Dimension(PINNED_WIDTH, 0);
     }
 
     @Override
     public Dimension getMaximumSize()
     {
-        return new Dimension(PINNED_WIDTH, super.getMaximumSize().height);
+        // Width capped (never wider); height unbounded so the layout can stretch it to fill.
+        return new Dimension(PINNED_WIDTH, Integer.MAX_VALUE);
     }
 
     public ClanPanel()
