@@ -663,7 +663,7 @@ public class ClanPanel extends PluginPanel
         title.setAlignmentX(Component.LEFT_ALIGNMENT);
         header.add(title);
 
-        JLabel desc = new JLabel("Pick a member to view their collection log");
+        JLabel desc = new JLabel("Pick a member to view their profile");
         desc.setFont(READABLE_FONT_SMALL);
         desc.setForeground(new Color(140, 140, 140));
         desc.setAlignmentX(Component.LEFT_ALIGNMENT);
