@@ -141,6 +141,8 @@ public class ClanPanel extends PluginPanel
         @Override public boolean getScrollableTracksViewportWidth() { return true; }
         @Override public boolean getScrollableTracksViewportHeight() { return false; }
     }
+    // Leaderboards hub sub-view selector — home nav cards drive it to jump straight to a sub-view.
+    private JComboBox<String> leaderboardsSelector;
     private final JComboBox<String> hiscoreModeCombo = new JComboBox<>();
     private java.util.function.Consumer<String> onPbModeChange;
     private final JComboBox<String> hiscoreGroupCombo = new JComboBox<>();
@@ -262,11 +264,32 @@ public class ClanPanel extends PluginPanel
      * RuneLite's keep-game-size behavior then grew members' client WINDOWS whenever the panel
      * opened (worst alongside resizable-hybrid). Pin the standard width; height stays computed.
      */
+    private static final int PINNED_WIDTH = PluginPanel.PANEL_WIDTH + PluginPanel.SCROLLBAR_WIDTH;
+    // Wrap width for event standings rows: panel width minus the card border, insets and gold rule.
+    private static final int STANDINGS_TEXT_WIDTH = PluginPanel.PANEL_WIDTH - 40;
+
     @Override
     public Dimension getPreferredSize()
     {
-        Dimension d = super.getPreferredSize();
-        return new Dimension(PluginPanel.PANEL_WIDTH + PluginPanel.SCROLLBAR_WIDTH, d.height);
+        return new Dimension(PINNED_WIDTH, super.getPreferredSize().height);
+    }
+
+    // Pin the width on ALL THREE size hints. Overriding only getPreferredSize wasn't enough: a wide
+    // child (a long event standings row — plain JLabels report their full text as their MINIMUM
+    // width) made getMinimumSize exceed the panel width, and RuneLite's layout honors the minimum,
+    // growing the sidebar and — via keep-game-size — the player's game WINDOW. The plugin must never
+    // resize the client, so the width can never exceed the standard panel; over-wide content clips
+    // (and the renderers wrap their text) rather than pushing the panel out.
+    @Override
+    public Dimension getMinimumSize()
+    {
+        return new Dimension(PINNED_WIDTH, super.getMinimumSize().height);
+    }
+
+    @Override
+    public Dimension getMaximumSize()
+    {
+        return new Dimension(PINNED_WIDTH, super.getMaximumSize().height);
     }
 
     public ClanPanel()
@@ -329,14 +352,9 @@ public class ClanPanel extends PluginPanel
         // Home tab (always present, default)
         tabbedPane.addTab("Home", buildHomeTab());
 
-        // Speed Times tab
-        tabbedPane.addTab("Speed Times", buildHiscoresTab());
-
-        // Drops tab (leaderboard + recent)
-        tabbedPane.addTab("Drops", buildDropsTab());
-
-        // XP tab (WOM leaderboards)
-        tabbedPane.addTab("XP", buildWomTab());
+        // Leaderboards tab — Speed Times / Drops / XP condensed behind one selector (mirrors the
+        // website nav) so the panel isn't nine tabs wide.
+        tabbedPane.addTab("Leaderboards", buildLeaderboardsTab());
 
         // Activity tab (clan joins, leaves, rank changes)
         tabbedPane.addTab("Activity", buildActivityTab());
@@ -2490,7 +2508,10 @@ public class ClanPanel extends PluginPanel
             if (isMe) { myRank = i + 1; myScore = raceScore(type, score); }
             if (i < 10)
             {
-                JLabel line = new JLabel((i + 1) + ". " + rsn + " \u2014 " + raceScore(type, score));
+                // HTML with a fixed width so a long RSN wraps to a second line instead of forcing
+                // the panel (and the client) wider. STANDINGS_TEXT_WIDTH \u2248 panel minus borders/pad.
+                JLabel line = new JLabel("<html><div style='width:" + STANDINGS_TEXT_WIDTH + "px'>"
+                    + (i + 1) + ". " + rsn + " \u2014 " + raceScore(type, score) + "</div></html>");
                 line.setFont(isMe ? READABLE_FONT.deriveFont(Font.BOLD, 12f) : READABLE_FONT_SMALL);
                 line.setForeground(isMe ? Color.WHITE : ColorScheme.LIGHT_GRAY_COLOR);
                 line.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -2505,7 +2526,8 @@ public class ClanPanel extends PluginPanel
         }
         if (myRank > 10)
         {
-            JLabel mine = new JLabel("\u2026 " + myRank + ". " + localPlayerName + " \u2014 " + myScore);
+            JLabel mine = new JLabel("<html><div style='width:" + STANDINGS_TEXT_WIDTH + "px'>\u2026 "
+                + myRank + ". " + localPlayerName + " \u2014 " + myScore + "</div></html>");
             mine.setFont(READABLE_FONT.deriveFont(Font.BOLD, 12f));
             mine.setForeground(Color.WHITE);
             mine.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -2839,6 +2861,16 @@ public class ClanPanel extends PluginPanel
             @Override
             public void mouseClicked(MouseEvent e)
             {
+                // Speed Times / Drops / XP now live inside the Leaderboards tab — open it and
+                // switch the sub-view instead of looking for a top-level tab that no longer exists.
+                if (leaderboardsSelector != null
+                    && ("Speed Times".equals(tabName) || "Drops".equals(tabName) || "XP".equals(tabName)))
+                {
+                    int lb = tabbedPane.indexOfTab("Leaderboards");
+                    if (lb >= 0) tabbedPane.setSelectedIndex(lb);
+                    leaderboardsSelector.setSelectedItem(tabName);
+                    return;
+                }
                 int idx = tabbedPane.indexOfTab(tabName);
                 if (idx >= 0) tabbedPane.setSelectedIndex(idx);
             }
@@ -3875,6 +3907,38 @@ public class ClanPanel extends PluginPanel
             container.add(detailPanel);
         }
 
+        return container;
+    }
+
+    /**
+     * Leaderboards hub: a selector at the top swaps between the Speed Times, Drops and XP views
+     * (each unchanged) via a CardLayout — three former top-level tabs folded into one, matching the
+     * website's condensed nav.
+     */
+    private JComponent buildLeaderboardsTab()
+    {
+        JPanel container = new JPanel(new BorderLayout());
+        container.setBackground(ColorScheme.DARK_GRAY_COLOR);
+
+        JPanel cards = new JPanel(new CardLayout());
+        cards.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        cards.add(buildHiscoresTab(), "Speed Times");
+        cards.add(buildDropsTab(), "Drops");
+        cards.add(buildWomTab(), "XP");
+
+        JComboBox<String> selector = new JComboBox<>(new String[]{ "Speed Times", "Drops", "XP" });
+        selector.setFocusable(false);
+        selector.addActionListener(e ->
+            ((CardLayout) cards.getLayout()).show(cards, (String) selector.getSelectedItem()));
+        leaderboardsSelector = selector;
+
+        JPanel selectorRow = new JPanel(new BorderLayout());
+        selectorRow.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        selectorRow.setBorder(new EmptyBorder(6, 6, 4, 6));
+        selectorRow.add(selector, BorderLayout.CENTER);
+
+        container.add(selectorRow, BorderLayout.NORTH);
+        container.add(cards, BorderLayout.CENTER);
         return container;
     }
 
