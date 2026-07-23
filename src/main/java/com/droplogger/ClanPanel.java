@@ -3913,11 +3913,13 @@ public class ClanPanel extends PluginPanel
         cards.add(buildDropsTab(), "Drops");
         cards.add(buildWomTab(), "XP");
 
-        JComboBox<String> selector = new JComboBox<>(new String[]{ "Speed Times", "Drops", "XP" });
+        JComboBox<String> selector = new JComboBox<>(new String[]{ "Drops", "Speed Times", "XP" });
         selector.setFocusable(false);
         selector.addActionListener(e ->
             ((CardLayout) cards.getLayout()).show(cards, (String) selector.getSelectedItem()));
         leaderboardsSelector = selector;
+        // Default the hub to Drops (selecting it also shows the matching card via the listener).
+        selector.setSelectedItem("Drops");
 
         JPanel selectorRow = new JPanel(new BorderLayout());
         selectorRow.setBackground(ColorScheme.DARK_GRAY_COLOR);
