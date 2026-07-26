@@ -91,6 +91,14 @@ public class PbDetector
     private int lastKillCount = 0;
     private boolean isCoxCm = false;
     private long contextAtMs = 0; // when lastActivity was last set from a KC/count message
+    // True only when the CURRENT cox/cox_cm context came from a DEFINITIVE self-completion —
+    // the player's own "Your completed Chambers of Xeric count is:" or the "your team completed
+    // the Chambers of Xeric!" line. A bare "Chambers of Xeric" mention (entering the raid, a
+    // plugin hiscore line the plugin itself prints, etc.) sets context but leaves this false.
+    // A "Challenge duration:" may only resolve to CoX when this is true; otherwise it parks and
+    // the unambiguous completion-count message decides — which is what routes a Gauntlet's
+    // identical "Challenge duration:" line to the Gauntlet board instead of Chambers.
+    private boolean coxContextConfirmed = false;
 
     // ── Pending duration (Inferno / Fight Caves / Colosseum ordering) ──
     // In TzHaar content and the Colosseum the "Duration: x" line arrives BEFORE the
@@ -123,6 +131,7 @@ public class PbDetector
             lastKillCount = Integer.parseInt(kcMatcher.group(2).replace(",", ""));
             lastActivity = mapBossToGroup(lastBossName);
             contextAtMs = System.currentTimeMillis();
+            coxContextConfirmed = false; // a boss kill is never CoX; drop any prior confirmation
             claimPendingDuration();
             log.debug("Activity context set: {} ({}) KC={}", lastBossName, lastActivity, lastKillCount);
             return;
@@ -138,6 +147,9 @@ public class PbDetector
             lastKillCount = Integer.parseInt(raidCount.group(2).replace(",", ""));
             lastActivity = mapBossToGroup(lastBossName);
             contextAtMs = System.currentTimeMillis();
+            // "Your completed Chambers of Xeric count is:" is a definitive self-completion — this
+            // is exactly the signal a Challenge-duration line is allowed to resolve to CoX against.
+            coxContextConfirmed = "cox".equals(lastActivity) || "cox_cm".equals(lastActivity);
             claimPendingDuration();
             log.debug("Raid count context set: {} ({}) KC={}", lastBossName, lastActivity, lastKillCount);
             return;
@@ -149,6 +161,7 @@ public class PbDetector
             lastKillCount = Integer.parseInt(chestCount.group(2).replace(",", ""));
             lastActivity = mapBossToGroup(lastBossName);
             contextAtMs = System.currentTimeMillis();
+            coxContextConfirmed = false; // a chest count (Barrows) is never CoX
             claimPendingDuration();
             return;
         }
@@ -159,19 +172,27 @@ public class PbDetector
             lastKillCount = Integer.parseInt(completionCount.group(2).replace(",", ""));
             lastActivity = mapBossToGroup(lastBossName);
             contextAtMs = System.currentTimeMillis();
+            // "Your Corrupted Gauntlet completion count is:" resolves the Gauntlet unambiguously —
+            // definitively NOT CoX, so clear any lingering CoX confirmation.
+            coxContextConfirmed = false;
             claimPendingDuration();
             log.debug("Completion count context set: {} ({}) KC={}", lastBossName, lastActivity, lastKillCount);
             return;
         }
 
         // Track raid completions
-        if (COX_COMPLETE_MSG.matcher(cleanedMessage).find() ||
-            COX_COMPLETION.matcher(cleanedMessage).find())
+        boolean coxCompleteMsg = COX_COMPLETE_MSG.matcher(cleanedMessage).find();
+        if (coxCompleteMsg || COX_COMPLETION.matcher(cleanedMessage).find())
         {
             isCoxCm = COX_CM_PATTERN.matcher(cleanedMessage).find();
             lastActivity = isCoxCm ? "cox_cm" : "cox";
             lastBossName = isCoxCm ? "CM Chambers of Xeric" : "Chambers of Xeric";
             contextAtMs = System.currentTimeMillis();
+            // Only the real "your team completed the Chambers of Xeric!" line is definitive. A bare
+            // "Chambers of Xeric" mention (raid entry, a plugin-printed hiscore line) is too weak to
+            // resolve a Challenge-duration against — that is the exact hole a Gauntlet finishing
+            // moments later fell through, inheriting CoX context and landing on the Chambers board.
+            coxContextConfirmed = coxCompleteMsg;
         }
         else if (TOB_COMPLETE_MSG.matcher(cleanedMessage).find())
         {
@@ -349,11 +370,14 @@ public class PbDetector
      */
     private String resolveChallengeDuration()
     {
-        if ("cox_cm".equals(lastActivity))
+        // CoX only when the context is a CONFIRMED self-completion (count / "your team completed").
+        // Unconfirmed cox context (a bare mention) falls through to park — the completion-count
+        // message that follows then routes the time correctly (Gauntlet -> Gauntlet, CoX -> CoX).
+        if ("cox_cm".equals(lastActivity) && coxContextConfirmed)
         {
             return "cox_cm";
         }
-        if ("cox".equals(lastActivity))
+        if ("cox".equals(lastActivity) && coxContextConfirmed)
         {
             return "cox";
         }
@@ -510,6 +534,7 @@ public class PbDetector
         lastBossName = null;
         isCoxCm = false;
         contextAtMs = 0;
+        coxContextConfirmed = false;
         pendingTime = null;
         pendingPbTime = null;
         pendingCompletion = null;

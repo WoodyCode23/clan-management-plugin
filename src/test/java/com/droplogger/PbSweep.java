@@ -24,6 +24,19 @@ public class PbSweep
         seq("Gauntlet normal", "gaunt", "7:39.00",
             "Your Gauntlet completion count is: 12.",
             "Challenge duration: 7:39.00 (new personal best)");
+        // REGRESSION: a Gauntlet finishing while a WEAK "Chambers of Xeric" mention is still fresh
+        // (e.g. a line the plugin itself printed) must NOT inherit CoX context. It has to park and
+        // let the definitive Gauntlet completion-count claim it. This is the exact bug that put
+        // 6-7 min "cox_solo" times on the Chambers board.
+        seq("CG after weak CoX mention", "gaunt_corrupted", "5:57.00",
+            "Chambers of Xeric personal best: 21:40 (rank 3).",
+            "Challenge duration: 5:57.00 (new personal best)",
+            "Your Corrupted Gauntlet completion count is: 46.");
+        // Positive control: a real CoX "Challenge duration" still lands on CoX when the context is
+        // a CONFIRMED self-completion (the count message), proving the gate didn't break Chambers.
+        seq("CoX challenge, confirmed count-first", "cox", "22:15.00",
+            "Your completed Chambers of Xeric count is: 471.",
+            "Challenge duration: 22:15.00 (new personal best)");
 
         // ── Chambers of Xeric ──
         seq("CoX duration-first (parked)", "cox", "41:40.80",
