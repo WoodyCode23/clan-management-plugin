@@ -624,7 +624,7 @@ public class ClanManagementPlugin extends Plugin
             lastAuthWarnAt = now;
             clientThread.invokeLater(() ->
                 client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
-                    "[" + getClanName() + "] Your API key was REJECTED — drops/times are NOT syncing. "
+                    "[" + getClanName() + "] Your API key was REJECTED. Drops/times are NOT syncing. "
                         + "Run /getkey in Discord and paste the new key into the plugin settings.", ""));
         });
 
@@ -1508,7 +1508,7 @@ public class ClanManagementPlugin extends Plugin
         // Show chat confirmation
         final int pbCount = parsedPbs.size();
         client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
-            "[Clan Management] Syncing " + pbCount + " personal bests...", "");
+            "[" + getClanName() + "] Syncing " + pbCount + " personal bests...", "");
 
         // Submit all PBs to the platform API
         final String playerName = rsn;
@@ -1545,7 +1545,7 @@ public class ClanManagementPlugin extends Plugin
             final int finalSubmitted = submitted;
             clientThread.invokeLater(() ->
                 client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
-                    "[Clan Management] Synced " + finalSubmitted + " personal bests to platform", "")
+                    "[" + getClanName() + "] Synced " + finalSubmitted + " personal bests to platform", "")
             );
         });
     }
@@ -1641,6 +1641,8 @@ public class ClanManagementPlugin extends Plugin
                     {
                         log.info("Collection log synced: {} items for {}", count, rsn);
                         panel.setClogSyncStatus("Synced " + count + " items");
+                        clientThread.invokeLater(() -> client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+                            "[" + getClanName() + "] Collection log synced: " + clogObtainedCount + "/" + clogTotalCount + " unlocked", ""));
                     }
                     else
                     {
@@ -1876,7 +1878,7 @@ public class ClanManagementPlugin extends Plugin
             {
                 clientThread.invokeLater(() ->
                     client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
-                        "[" + getClanName() + "] Time recorded (unverified — not all party members in clan chat)", "")
+                        "[" + getClanName() + "] Time recorded (unverified: not all party members in clan chat)", "")
                 );
             }
         }
@@ -2248,6 +2250,10 @@ public class ClanManagementPlugin extends Plugin
         executor.submit(() -> platformApiService.syncCombatAchievements(
             getPlatformUrl(), getPlatformKey(), getPlatformSlug(), fRsn, fTasks));
         log.info("Synced {} combat achievements ({} complete) for {}", tasks.size(), fCompleted, fRsn);
+        // readCombatAchievements runs on the client thread (it reads the CA interface widgets), so
+        // the confirmation can post directly.
+        client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+            "[" + getClanName() + "] Combat achievements synced (" + fCompleted + "/" + tasks.size() + " complete)", "");
     }
 
     // PRIVACY: these item caches are IN-MEMORY ONLY and are NEVER sent anywhere. They exist solely
