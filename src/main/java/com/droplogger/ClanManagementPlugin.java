@@ -247,6 +247,7 @@ public class ClanManagementPlugin extends Plugin
     private int fetchedMinDropValue = 100000;
     private String clanName = "Solus";
     private boolean serverConfigLoaded = false;
+    private boolean achievementsSyncedThisSession = false; // diary/quest sync fires once per login
 
     // Cached drops tab data
     private List<Map<String, Object>> cachedLeaderboard;
@@ -850,6 +851,15 @@ public class ClanManagementPlugin extends Plugin
         {
             long hash = client.getAccountHash();
             platformApiService.setAccountHash(hash != -1 ? String.valueOf(hash) : null);
+
+            // Sync Achievement Diary + Quest standing once per login. Triggered here (not off the
+            // bootstrap fetch, which runs at the LOGIN screen before the player exists) and delayed
+            // a few seconds so the diary varbits / quest states are populated. The flag stops a
+            // world-hop's LOGGED_IN from re-firing it; it resets on a real logout below.
+            if (isPlatformConfigured() && !achievementsSyncedThisSession)
+            {
+                executor.schedule(() -> clientThread.invokeLater(this::readAchievements), 8, TimeUnit.SECONDS);
+            }
         }
 
         // Reset fight tracker on logout/hop to avoid stale data
@@ -865,6 +875,11 @@ public class ClanManagementPlugin extends Plugin
             rankOwnedCache.clear();   // don't carry one account's items to the next login
             rankOwnedIds.clear();
             rankBankRefreshed = false; // next login's first bank open refreshes ranks again
+        }
+        // Only a real logout (login screen) re-arms the diary/quest sync; a world hop must not.
+        if (event.getGameState() == GameState.LOGIN_SCREEN)
+        {
+            achievementsSyncedThisSession = false;
         }
     }
 
@@ -2478,6 +2493,7 @@ public class ClanManagementPlugin extends Plugin
         net.runelite.api.Player lp = client.getLocalPlayer();
         if (lp == null || lp.getName() == null || lp.getName().isEmpty()) return;
         final String rsn = lp.getName();
+        achievementsSyncedThisSession = true; // player is present; mark done so it fires once per login
 
         final int diaryEasy = countDiaries(DIARY_EASY);
         final int diaryMedium = countDiaries(DIARY_MEDIUM);
@@ -2667,10 +2683,6 @@ public class ClanManagementPlugin extends Plugin
                 {
                     clientThread.invokeLater(() -> hiscoreTracker.onLoginIfAdmin(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), getPlatformKey()));
                 }
-
-                // Sync Achievement Diary + Quest standing once per session. Scheduled a few seconds
-                // out so the diary varbits and quest states are populated after login.
-                executor.schedule(() -> clientThread.invokeLater(this::readAchievements), 8, TimeUnit.SECONDS);
             }
             catch (Exception e)
             {
