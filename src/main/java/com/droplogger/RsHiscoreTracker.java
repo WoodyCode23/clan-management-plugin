@@ -134,8 +134,10 @@ public class RsHiscoreTracker
             memberList.add(new String[]{name, rank, joinDate});
         }
 
-        log.info("Syncing roster: {} members", memberList.size());
-        executor.submit(() -> platformApiService.syncRoster(baseUrl, apiKey, slug, memberList));
+        // Send the clan NAME so the server can reject a roster synced from a different clan.
+        final String clanName = clanSettings.getName();
+        log.info("Syncing roster: {} members from clan '{}'", memberList.size(), clanName);
+        executor.submit(() -> platformApiService.syncRoster(baseUrl, apiKey, slug, memberList, clanName));
         return memberList.size();
     }
 

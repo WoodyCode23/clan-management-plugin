@@ -605,9 +605,13 @@ public class PlatformApiService
      * Sync the full clan roster to the platform API. Admin only.
      */
     public void syncRoster(String baseUrl, String apiKey, String clanSlug,
-                           java.util.List<String[]> members)
+                           java.util.List<String[]> members, String clanName)
     {
         JsonObject payload = new JsonObject();
+        if (clanName != null && !clanName.isEmpty())
+        {
+            payload.addProperty("clanName", clanName);
+        }
         JsonArray membersArr = new JsonArray();
         for (String[] member : members)
         {
