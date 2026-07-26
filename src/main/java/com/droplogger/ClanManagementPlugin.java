@@ -2520,6 +2520,7 @@ public class ClanManagementPlugin extends Plugin
         "MAGE_ARENA_I",
         "MAGE_ARENA_II",
         "SKIPPY_AND_THE_MOGRES",
+        "VALE_TOTEMS",
         "THE_BLOOD_MOON_LEGACY",
         "RECIPE_FOR_DISASTER__ANOTHER_COOKS_QUEST",
         "RECIPE_FOR_DISASTER__MOUNTAIN_DWARF",
