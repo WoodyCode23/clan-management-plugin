@@ -243,6 +243,28 @@ public class PlatformApiService
     }
 
     /**
+     * Sync this player's Achievement Diary + Quest standing (counts read from the in-game varbits /
+     * Quest states). The server stores one summary row per player and shows it on the Achievements
+     * page + profile; a newly-earned Quest/Diary Cape posts a milestone to the feed.
+     */
+    public void syncAchievementSummary(String baseUrl, String apiKey, String clanSlug, String rsn,
+                                       int questPoints, int questsComplete, int questsTotal,
+                                       int diaryEasy, int diaryMedium, int diaryHard, int diaryElite)
+    {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("rsn", rsn);
+        addAccountHash(payload);
+        payload.addProperty("questPoints", questPoints);
+        payload.addProperty("questsComplete", questsComplete);
+        payload.addProperty("questsTotal", questsTotal);
+        payload.addProperty("diaryEasy", diaryEasy);
+        payload.addProperty("diaryMedium", diaryMedium);
+        payload.addProperty("diaryHard", diaryHard);
+        payload.addProperty("diaryElite", diaryElite);
+        postAsync(baseUrl + "/clans/" + clanSlug + "/achievement-summary", apiKey, payload, "Achievement summary sync");
+    }
+
+    /**
      * Claim a clan rank. The plugin evaluates requirements LOCALLY and sends only the result
      * (eligible + what's missing) — never any bank/item data. The server pings staff.
      */

@@ -2463,6 +2463,50 @@ public class ClanManagementPlugin extends Plugin
         return n;
     }
 
+    // Quest points live in a long-standing player varp. Read best-effort; a wrong value just shows
+    // an odd QP count, it never blocks the diary/quest sync.
+    private static final int VARP_QUEST_POINTS = 101;
+
+    /**
+     * Read this player's Achievement Diary + Quest standing (client thread) and sync it to the
+     * platform, then confirm in chat. Diaries: completed regions per tier (out of 12). Quests:
+     * how many of the game's quests are FINISHED, plus quest points. Runs once per session.
+     */
+    private void readAchievements()
+    {
+        if (!isPlatformConfigured()) return;
+        net.runelite.api.Player lp = client.getLocalPlayer();
+        if (lp == null || lp.getName() == null || lp.getName().isEmpty()) return;
+        final String rsn = lp.getName();
+
+        final int diaryEasy = countDiaries(DIARY_EASY);
+        final int diaryMedium = countDiaries(DIARY_MEDIUM);
+        final int diaryHard = countDiaries(DIARY_HARD);
+        final int diaryElite = countDiaries(DIARY_ELITE);
+
+        int complete = 0, total = 0;
+        for (net.runelite.api.Quest q : net.runelite.api.Quest.values())
+        {
+            total++;
+            try { if (q.getState(client) == net.runelite.api.QuestState.FINISHED) complete++; }
+            catch (Exception ignored) { /* a quest's varbit may be unavailable this version */ }
+        }
+        int qp = 0;
+        try { qp = client.getVarpValue(VARP_QUEST_POINTS); }
+        catch (Exception ignored) { /* best-effort */ }
+
+        final int fQp = qp, fComplete = complete, fTotal = total;
+        executor.submit(() -> platformApiService.syncAchievementSummary(
+            getPlatformUrl(), getPlatformKey(), getPlatformSlug(), rsn,
+            fQp, fComplete, fTotal, diaryEasy, diaryMedium, diaryHard, diaryElite));
+
+        final int diaryTotal = diaryEasy + diaryMedium + diaryHard + diaryElite;
+        client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+            "[" + getClanName() + "] Diaries & quests synced (" + diaryTotal + "/48 diaries, "
+                + complete + " quests, " + qp + " QP)", "");
+        log.info("Synced achievements for {}: {} diaries, {} quests, {} QP", rsn, diaryTotal, complete, qp);
+    }
+
     /** Sum the KC of several WiseOldMan boss keys (for GWD / combined-raid aggregates). */
     private int kcSum(java.util.Map<String, Integer> kc, String... keys)
     {
@@ -2623,6 +2667,10 @@ public class ClanManagementPlugin extends Plugin
                 {
                     clientThread.invokeLater(() -> hiscoreTracker.onLoginIfAdmin(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), getPlatformKey()));
                 }
+
+                // Sync Achievement Diary + Quest standing once per session. Scheduled a few seconds
+                // out so the diary varbits and quest states are populated after login.
+                executor.schedule(() -> clientThread.invokeLater(this::readAchievements), 8, TimeUnit.SECONDS);
             }
             catch (Exception e)
             {
