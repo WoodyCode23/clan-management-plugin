@@ -247,9 +247,21 @@ public class PlatformApiService
      * Quest states). The server stores one summary row per player and shows it on the Achievements
      * page + profile; a newly-earned Quest/Diary Cape posts a milestone to the feed.
      */
+    /** One diary region's tier completion, for the profile drill-down. */
+    public static class DiaryRegion
+    {
+        public final String name;
+        public final boolean easy, medium, hard, elite;
+        public DiaryRegion(String name, boolean easy, boolean medium, boolean hard, boolean elite)
+        {
+            this.name = name; this.easy = easy; this.medium = medium; this.hard = hard; this.elite = elite;
+        }
+    }
+
     public void syncAchievementSummary(String baseUrl, String apiKey, String clanSlug, String rsn,
                                        int questPoints, int questsComplete, int questsTotal,
-                                       int diaryEasy, int diaryMedium, int diaryHard, int diaryElite)
+                                       int diaryEasy, int diaryMedium, int diaryHard, int diaryElite,
+                                       java.util.List<DiaryRegion> diaries, java.util.List<String> questsMissing)
     {
         JsonObject payload = new JsonObject();
         payload.addProperty("rsn", rsn);
@@ -261,6 +273,27 @@ public class PlatformApiService
         payload.addProperty("diaryMedium", diaryMedium);
         payload.addProperty("diaryHard", diaryHard);
         payload.addProperty("diaryElite", diaryElite);
+        if (diaries != null && !diaries.isEmpty())
+        {
+            JsonArray arr = new JsonArray();
+            for (DiaryRegion r : diaries)
+            {
+                JsonObject o = new JsonObject();
+                o.addProperty("name", r.name);
+                o.addProperty("easy", r.easy);
+                o.addProperty("medium", r.medium);
+                o.addProperty("hard", r.hard);
+                o.addProperty("elite", r.elite);
+                arr.add(o);
+            }
+            payload.add("diaries", arr);
+        }
+        if (questsMissing != null)
+        {
+            JsonArray arr = new JsonArray();
+            for (String q : questsMissing) arr.add(q);
+            payload.add("questsMissing", arr);
+        }
         postAsync(baseUrl + "/clans/" + clanSlug + "/achievement-summary", apiKey, payload, "Achievement summary sync");
     }
 
@@ -1021,12 +1054,35 @@ public class PlatformApiService
         public final int caTotal;
         public final List<PlayerPb> pbs;
         public final List<PlayerDrop> drops;
+        // Diary + quest standing (null when the member hasn't synced with a current plugin yet)
+        public final DiariesAndQuests diariesAndQuests;
         public PlayerProfile(int clogObtained, int clogTotal, int caCompleted, int caTotal,
-                             List<PlayerPb> pbs, List<PlayerDrop> drops)
+                             List<PlayerPb> pbs, List<PlayerDrop> drops, DiariesAndQuests diariesAndQuests)
         {
             this.clogObtained = clogObtained; this.clogTotal = clogTotal;
             this.caCompleted = caCompleted; this.caTotal = caTotal;
-            this.pbs = pbs; this.drops = drops;
+            this.pbs = pbs; this.drops = drops; this.diariesAndQuests = diariesAndQuests;
+        }
+    }
+
+    /** A member's diary + quest standing, with per-region / missing-quest drill-down detail. */
+    public static class DiariesAndQuests
+    {
+        public final int questPoints, questsComplete, questsTotal;
+        public final boolean questCape, diaryCape;
+        public final int diaryEasy, diaryMedium, diaryHard, diaryElite;
+        public final List<DiaryRegion> diaries;       // may be empty (older sync)
+        public final List<String> questsMissing;      // may be empty
+        public DiariesAndQuests(int questPoints, int questsComplete, int questsTotal,
+                                boolean questCape, boolean diaryCape,
+                                int diaryEasy, int diaryMedium, int diaryHard, int diaryElite,
+                                List<DiaryRegion> diaries, List<String> questsMissing)
+        {
+            this.questPoints = questPoints; this.questsComplete = questsComplete; this.questsTotal = questsTotal;
+            this.questCape = questCape; this.diaryCape = diaryCape;
+            this.diaryEasy = diaryEasy; this.diaryMedium = diaryMedium;
+            this.diaryHard = diaryHard; this.diaryElite = diaryElite;
+            this.diaries = diaries; this.questsMissing = questsMissing;
         }
     }
 
@@ -1110,7 +1166,43 @@ public class PlatformApiService
         int clogTotal = root.has("collectionLogTotal") && !root.get("collectionLogTotal").isJsonNull() ? root.get("collectionLogTotal").getAsInt() : 0;
         int caCompleted = root.has("caCompleted") && !root.get("caCompleted").isJsonNull() ? root.get("caCompleted").getAsInt() : 0;
         int caTotal = root.has("caTotal") && !root.get("caTotal").isJsonNull() ? root.get("caTotal").getAsInt() : 0;
-        return new PlayerProfile(clogObtained, clogTotal, caCompleted, caTotal, pbs, drops);
+
+        DiariesAndQuests dq = null;
+        if (root.has("diariesAndQuests") && !root.get("diariesAndQuests").isJsonNull())
+        {
+            JsonObject d = root.getAsJsonObject("diariesAndQuests");
+            List<DiaryRegion> regions = new ArrayList<>();
+            if (d.has("diaries") && d.get("diaries").isJsonArray())
+            {
+                for (JsonElement el : d.getAsJsonArray("diaries"))
+                {
+                    JsonObject r = el.getAsJsonObject();
+                    regions.add(new DiaryRegion(
+                        r.has("name") ? r.get("name").getAsString() : "",
+                        r.has("easy") && r.get("easy").getAsBoolean(),
+                        r.has("medium") && r.get("medium").getAsBoolean(),
+                        r.has("hard") && r.get("hard").getAsBoolean(),
+                        r.has("elite") && r.get("elite").getAsBoolean()));
+                }
+            }
+            List<String> missing = new ArrayList<>();
+            if (d.has("questsMissing") && d.get("questsMissing").isJsonArray())
+            {
+                for (JsonElement el : d.getAsJsonArray("questsMissing")) missing.add(el.getAsString());
+            }
+            dq = new DiariesAndQuests(
+                d.has("questPoints") ? d.get("questPoints").getAsInt() : 0,
+                d.has("questsComplete") ? d.get("questsComplete").getAsInt() : 0,
+                d.has("questsTotal") ? d.get("questsTotal").getAsInt() : 0,
+                d.has("questCape") && d.get("questCape").getAsBoolean(),
+                d.has("diaryCape") && d.get("diaryCape").getAsBoolean(),
+                d.has("diaryEasy") ? d.get("diaryEasy").getAsInt() : 0,
+                d.has("diaryMedium") ? d.get("diaryMedium").getAsInt() : 0,
+                d.has("diaryHard") ? d.get("diaryHard").getAsInt() : 0,
+                d.has("diaryElite") ? d.get("diaryElite").getAsInt() : 0,
+                regions, missing);
+        }
+        return new PlayerProfile(clogObtained, clogTotal, caCompleted, caTotal, pbs, drops, dq);
     }
 
     /** Create an announcement (admin — needs a key whose owner has manage_announcements/admin). */

@@ -979,6 +979,14 @@ public class ClanPanel extends PluginPanel
                 : "View combat achievements";
             membersContent.add(buildSectionCard("Combat Achievements", caSub, ACCENT_CA,
                 () -> { if (onLoadCa != null) onLoadCa.accept(currentClogRsn); }));
+            membersContent.add(Box.createVerticalStrut(6));
+            PlatformApiService.DiariesAndQuests dq = currentProfile.diariesAndQuests;
+            String dqSub = dq != null
+                ? dq.questsComplete + "/" + dq.questsTotal + " quests · "
+                    + (dq.diaryEasy + dq.diaryMedium + dq.diaryHard + dq.diaryElite) + "/48 diaries"
+                : "Not synced yet";
+            membersContent.add(buildSectionCard("Diaries & Quests", dqSub, new Color(212, 175, 55),
+                this::showMemberDiariesQuests));
 
             if (platformAdmin)
             {
@@ -1199,6 +1207,106 @@ public class ClanPanel extends PluginPanel
         }
         membersContent.revalidate();
         membersContent.repaint();
+    }
+
+    /** Member drill-down: Achievement Diary regions with per-tier ticks + quest standing. */
+    private void showMemberDiariesQuests()
+    {
+        final Color GOLD = new Color(212, 175, 55);
+        membersContent.removeAll();
+        membersContent.add(clogBackButton("← " + currentClogRsn, this::renderMemberProfile));
+        membersContent.add(Box.createVerticalStrut(6));
+        membersContent.add(clogTitle("Diaries & Quests", GOLD, 14f));
+        membersContent.add(Box.createVerticalStrut(4));
+
+        PlatformApiService.DiariesAndQuests dq = currentProfile != null ? currentProfile.diariesAndQuests : null;
+        if (dq == null)
+        {
+            membersContent.add(clogNote("Nothing synced yet — it syncs automatically when they log in with the plugin."));
+            membersContent.revalidate();
+            membersContent.repaint();
+            return;
+        }
+
+        String capes = (dq.questCape ? "  Quest Cape" : "") + (dq.diaryCape ? "  Diary Cape" : "");
+        membersContent.add(clogNote("Quests: " + dq.questsComplete + "/" + dq.questsTotal
+            + "  ·  " + dq.questPoints + " QP" + capes));
+        membersContent.add(Box.createVerticalStrut(6));
+
+        // Achievement Diaries — one row per region, a tick per tier
+        membersContent.add(clogTitle("Achievement Diaries", GOLD, 12f));
+        membersContent.add(Box.createVerticalStrut(2));
+        if (dq.diaries.isEmpty())
+        {
+            membersContent.add(clogNote(dq.diaryEasy + "/12 easy · " + dq.diaryMedium + "/12 medium · "
+                + dq.diaryHard + "/12 hard · " + dq.diaryElite + "/12 elite"));
+        }
+        else
+        {
+            boolean alt = false;
+            for (PlatformApiService.DiaryRegion r : dq.diaries)
+            {
+                membersContent.add(buildDiaryRegionRow(r, alt));
+                alt = !alt;
+            }
+        }
+
+        // Quests — the short interesting list is what's LEFT
+        membersContent.add(Box.createVerticalStrut(8));
+        membersContent.add(clogTitle("Quests", GOLD, 12f));
+        membersContent.add(Box.createVerticalStrut(2));
+        if (dq.questsMissing.isEmpty())
+        {
+            membersContent.add(clogNote(dq.questsComplete >= dq.questsTotal && dq.questsTotal > 0
+                ? "All " + dq.questsTotal + " quests complete!"
+                : dq.questsComplete + "/" + dq.questsTotal + " complete"));
+        }
+        else
+        {
+            membersContent.add(clogNote("Missing " + dq.questsMissing.size() + ":"));
+            for (String q : dq.questsMissing)
+            {
+                JLabel l = new JLabel("• " + q);
+                l.setFont(READABLE_FONT_SMALL);
+                l.setForeground(new Color(190, 175, 130));
+                l.setBorder(new EmptyBorder(1, 12, 1, 4));
+                l.setAlignmentX(Component.LEFT_ALIGNMENT);
+                membersContent.add(l);
+            }
+        }
+        membersContent.revalidate();
+        membersContent.repaint();
+    }
+
+    /** One diary region row: name + E/M/H/El tier ticks (green done, grey not). */
+    private JPanel buildDiaryRegionRow(PlatformApiService.DiaryRegion r, boolean alt)
+    {
+        JPanel row = new JPanel(new BorderLayout())
+        {
+            @Override public Dimension getMaximumSize() { return new Dimension(Integer.MAX_VALUE, getPreferredSize().height); }
+        };
+        row.setBackground(alt ? new Color(38, 38, 38) : new Color(33, 33, 33));
+        row.setBorder(new EmptyBorder(3, 8, 3, 8));
+        row.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        JLabel name = new JLabel(r.name);
+        name.setFont(READABLE_FONT_SMALL);
+        name.setForeground(Color.WHITE);
+        row.add(name, BorderLayout.WEST);
+
+        JPanel ticks = new JPanel(new GridLayout(1, 4, 6, 0));
+        ticks.setOpaque(false);
+        String[] tiers = {"E", "M", "H", "El"};
+        boolean[] done = {r.easy, r.medium, r.hard, r.elite};
+        for (int i = 0; i < 4; i++)
+        {
+            JLabel t = new JLabel(tiers[i], SwingConstants.CENTER);
+            t.setFont(READABLE_FONT_SMALL.deriveFont(Font.BOLD));
+            t.setForeground(done[i] ? new Color(105, 200, 105) : new Color(90, 90, 90));
+            ticks.add(t);
+        }
+        row.add(ticks, BorderLayout.EAST);
+        return row;
     }
 
     /** A collapsible section of PB rows: caret + colored title + count header, rows toggle below. */

@@ -2495,6 +2495,14 @@ public class ClanManagementPlugin extends Plugin
     // an odd QP count, it never blocks the diary/quest sync.
     private static final int VARP_QUEST_POINTS = 101;
 
+    // Region names aligned INDEX-FOR-INDEX with the DIARY_* varbit arrays above. Verified against
+    // the runelite-api Varbits constants (4458=Ardougne, 4462=Falador, 4466=Wilderness, 4471=Western,
+    // 4475=Kandarin, 4479=Varrock, 4483=Desert, 4487=Morytania, 4491=Fremennik, 4495=Lumbridge,
+    // 7925=Kourend, 3578=Karamja) — do not reorder one without the other.
+    private static final String[] DIARY_REGIONS = {
+        "Ardougne", "Falador", "Wilderness", "Western Provinces", "Kandarin", "Varrock",
+        "Desert", "Morytania", "Fremennik", "Lumbridge & Draynor", "Kourend & Kebos", "Karamja"};
+
     // RuneLite's Quest enum mixes in the miniquests and the 10 Recipe for Disaster SUBquests, so
     // the clan count only matches the in-game quest list once those are excluded (RECIPE_FOR_DISASTER
     // itself stays: it's the real quest). Matched by ENUM NAME, not enum constant, because the client
@@ -2551,12 +2559,26 @@ public class ClanManagementPlugin extends Plugin
         final int diaryHard = countDiaries(DIARY_HARD);
         final int diaryElite = countDiaries(DIARY_ELITE);
 
+        // Per-region tier detail for the profile drill-downs (same varbit arrays, per index).
+        final java.util.List<PlatformApiService.DiaryRegion> diaryDetail = new ArrayList<>();
+        for (int i = 0; i < DIARY_REGIONS.length; i++)
+        {
+            diaryDetail.add(new PlatformApiService.DiaryRegion(DIARY_REGIONS[i],
+                diaryTierDone(DIARY_EASY, i), diaryTierDone(DIARY_MEDIUM, i),
+                diaryTierDone(DIARY_HARD, i), diaryTierDone(DIARY_ELITE, i)));
+        }
+
         int complete = 0, total = 0;
+        final java.util.List<String> questsMissing = new ArrayList<>();
         for (net.runelite.api.Quest q : net.runelite.api.Quest.values())
         {
             if (NON_QUEST_ENTRIES.contains(q.name())) continue; // miniquests / RFD subquests aren't quests
             total++;
-            try { if (q.getState(client) == net.runelite.api.QuestState.FINISHED) complete++; }
+            try
+            {
+                if (q.getState(client) == net.runelite.api.QuestState.FINISHED) complete++;
+                else questsMissing.add(q.getName());
+            }
             catch (Exception ignored) { /* a quest's varbit may be unavailable this version */ }
         }
         int qp = 0;
@@ -2568,7 +2590,9 @@ public class ClanManagementPlugin extends Plugin
         // Diaries and quests barely change, so this is a one-time import and then a no-op on every
         // routine login. We only POST + announce when the reading actually differs from the last
         // sync for THIS character (signature persisted in config, so it survives client restarts).
-        final String sig = fQp + ":" + fComplete + ":" + fTotal + ":"
+        // "v2" = the detail-payload upgrade: forces one re-sync for characters imported before the
+        // per-region/missing-quest detail existed server-side.
+        final String sig = "v2:" + fQp + ":" + fComplete + ":" + fTotal + ":"
             + diaryEasy + ":" + diaryMedium + ":" + diaryHard + ":" + diaryElite;
         final String sigKey = "achSig." + rsn.toLowerCase();
         final String prev = configManager.getConfiguration("droplogger", sigKey);
@@ -2581,7 +2605,8 @@ public class ClanManagementPlugin extends Plugin
 
         executor.submit(() -> platformApiService.syncAchievementSummary(
             getPlatformUrl(), getPlatformKey(), getPlatformSlug(), rsn,
-            fQp, fComplete, fTotal, diaryEasy, diaryMedium, diaryHard, diaryElite));
+            fQp, fComplete, fTotal, diaryEasy, diaryMedium, diaryHard, diaryElite,
+            diaryDetail, questsMissing));
 
         final int diaryTotal = diaryEasy + diaryMedium + diaryHard + diaryElite;
         final String verb = prev == null ? "synced" : "updated"; // first import vs a later change
@@ -2589,6 +2614,13 @@ public class ClanManagementPlugin extends Plugin
             "[" + getClanName() + "] Diaries & quests " + verb + " (" + diaryTotal + "/48 diaries, "
                 + complete + " quests, " + qp + " QP)", "");
         log.info("Achievements {} for {}: {} diaries, {} quests, {} QP", verb, rsn, diaryTotal, complete, qp);
+    }
+
+    /** Is one region's tier complete? (client thread; index into a DIARY_* varbit array) */
+    private boolean diaryTierDone(int[][] varbits, int i)
+    {
+        try { return client.getVarbitValue(varbits[i][0]) >= varbits[i][1]; }
+        catch (Exception ignored) { return false; }
     }
 
     /** Sum the KC of several WiseOldMan boss keys (for GWD / combined-raid aggregates). */
