@@ -2512,15 +2512,31 @@ public class ClanManagementPlugin extends Plugin
         catch (Exception ignored) { /* best-effort */ }
 
         final int fQp = qp, fComplete = complete, fTotal = total;
+
+        // Diaries and quests barely change, so this is a one-time import and then a no-op on every
+        // routine login. We only POST + announce when the reading actually differs from the last
+        // sync for THIS character (signature persisted in config, so it survives client restarts).
+        final String sig = fQp + ":" + fComplete + ":" + fTotal + ":"
+            + diaryEasy + ":" + diaryMedium + ":" + diaryHard + ":" + diaryElite;
+        final String sigKey = "achSig." + rsn.toLowerCase();
+        final String prev = configManager.getConfiguration("droplogger", sigKey);
+        if (sig.equals(prev))
+        {
+            log.debug("Achievements unchanged for {} - skipping sync", rsn);
+            return;
+        }
+        configManager.setConfiguration("droplogger", sigKey, sig);
+
         executor.submit(() -> platformApiService.syncAchievementSummary(
             getPlatformUrl(), getPlatformKey(), getPlatformSlug(), rsn,
             fQp, fComplete, fTotal, diaryEasy, diaryMedium, diaryHard, diaryElite));
 
         final int diaryTotal = diaryEasy + diaryMedium + diaryHard + diaryElite;
+        final String verb = prev == null ? "synced" : "updated"; // first import vs a later change
         client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
-            "[" + getClanName() + "] Diaries & quests synced (" + diaryTotal + "/48 diaries, "
+            "[" + getClanName() + "] Diaries & quests " + verb + " (" + diaryTotal + "/48 diaries, "
                 + complete + " quests, " + qp + " QP)", "");
-        log.info("Synced achievements for {}: {} diaries, {} quests, {} QP", rsn, diaryTotal, complete, qp);
+        log.info("Achievements {} for {}: {} diaries, {} quests, {} QP", verb, rsn, diaryTotal, complete, qp);
     }
 
     /** Sum the KC of several WiseOldMan boss keys (for GWD / combined-raid aggregates). */
