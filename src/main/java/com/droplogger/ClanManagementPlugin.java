@@ -2495,6 +2495,39 @@ public class ClanManagementPlugin extends Plugin
     // an odd QP count, it never blocks the diary/quest sync.
     private static final int VARP_QUEST_POINTS = 101;
 
+    // RuneLite's Quest enum mixes in the 18 miniquests and the 10 Recipe for Disaster SUBquests
+    // (209 entries total). The clan count should match the in-game quest list (181 = 209 - 28),
+    // so these are excluded; RECIPE_FOR_DISASTER itself stays (it's the real quest).
+    private static final java.util.Set<net.runelite.api.Quest> NON_QUEST_ENTRIES = java.util.EnumSet.of(
+        net.runelite.api.Quest.ALFRED_GRIMHANDS_BARCRAWL,
+        net.runelite.api.Quest.BARBARIAN_TRAINING,
+        net.runelite.api.Quest.BEAR_YOUR_SOUL,
+        net.runelite.api.Quest.CURSE_OF_THE_EMPTY_LORD,
+        net.runelite.api.Quest.DADDYS_HOME,
+        net.runelite.api.Quest.THE_ENCHANTED_KEY,
+        net.runelite.api.Quest.ENTER_THE_ABYSS,
+        net.runelite.api.Quest.FAMILY_PEST,
+        net.runelite.api.Quest.THE_FROZEN_DOOR,
+        net.runelite.api.Quest.THE_GENERALS_SHADOW,
+        net.runelite.api.Quest.HIS_FAITHFUL_SERVANTS,
+        net.runelite.api.Quest.HOPESPEARS_WILL,
+        net.runelite.api.Quest.IN_SEARCH_OF_KNOWLEDGE,
+        net.runelite.api.Quest.INTO_THE_TOMBS,
+        net.runelite.api.Quest.LAIR_OF_TARN_RAZORLOR,
+        net.runelite.api.Quest.MAGE_ARENA_I,
+        net.runelite.api.Quest.MAGE_ARENA_II,
+        net.runelite.api.Quest.SKIPPY_AND_THE_MOGRES,
+        net.runelite.api.Quest.RECIPE_FOR_DISASTER__ANOTHER_COOKS_QUEST,
+        net.runelite.api.Quest.RECIPE_FOR_DISASTER__MOUNTAIN_DWARF,
+        net.runelite.api.Quest.RECIPE_FOR_DISASTER__WARTFACE__BENTNOZE,
+        net.runelite.api.Quest.RECIPE_FOR_DISASTER__PIRATE_PETE,
+        net.runelite.api.Quest.RECIPE_FOR_DISASTER__LUMBRIDGE_GUIDE,
+        net.runelite.api.Quest.RECIPE_FOR_DISASTER__EVIL_DAVE,
+        net.runelite.api.Quest.RECIPE_FOR_DISASTER__SKRACH_UGLOGWEE,
+        net.runelite.api.Quest.RECIPE_FOR_DISASTER__SIR_AMIK_VARZE,
+        net.runelite.api.Quest.RECIPE_FOR_DISASTER__KING_AWOWOGEI,
+        net.runelite.api.Quest.RECIPE_FOR_DISASTER__CULINAROMANCER);
+
     /**
      * Read this player's Achievement Diary + Quest standing (client thread) and sync it to the
      * platform, then confirm in chat. Diaries: completed regions per tier (out of 12). Quests:
@@ -2516,6 +2549,7 @@ public class ClanManagementPlugin extends Plugin
         int complete = 0, total = 0;
         for (net.runelite.api.Quest q : net.runelite.api.Quest.values())
         {
+            if (NON_QUEST_ENTRIES.contains(q)) continue; // miniquests / RFD subquests aren't quests
             total++;
             try { if (q.getState(client) == net.runelite.api.QuestState.FINISHED) complete++; }
             catch (Exception ignored) { /* a quest's varbit may be unavailable this version */ }
