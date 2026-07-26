@@ -927,6 +927,19 @@ public class ClanManagementPlugin extends Plugin
             handleCollectionLogEntry(cleanedMessage);
             handleDuplicatePet(cleanedMessage);
         }
+
+        // ── Live diary/quest sync ──
+        // Quest completions ("Congratulations, you've completed a quest: X") and diary tier
+        // completions ("Congratulations! You have completed all of the hard tasks in ...") both
+        // announce in chat, so re-read + sync right then — same live model as drops/PBs. A short
+        // delay lets the varbits/quest states settle; the signature check inside readAchievements
+        // makes a false positive a no-op.
+        String lowerMsg = cleanedMessage.toLowerCase();
+        if (lowerMsg.contains("you've completed a quest")
+            || (lowerMsg.contains("congratulations") && lowerMsg.contains("tasks in")))
+        {
+            executor.schedule(() -> clientThread.invokeLater(this::readAchievements), 3, TimeUnit.SECONDS);
+        }
     }
 
     // Duplicate pets fire ONLY this chat line — no clog unlock, no loot event — so the boss
