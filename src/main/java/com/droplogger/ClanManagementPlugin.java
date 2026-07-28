@@ -852,6 +852,9 @@ public class ClanManagementPlugin extends Plugin
             long hash = client.getAccountHash();
             platformApiService.setAccountHash(hash != -1 ? String.valueOf(hash) : null);
 
+            // Give the panel the game's chat-badge helm icons for the Members list (once per client).
+            sendAccountTypeIcons();
+
             // Sync Achievement Diary + Quest standing once per login. Triggered here (not off the
             // bootstrap fetch, which runs at the LOGIN screen before the player exists) and delayed
             // a few seconds so the diary varbits / quest states are populated. The flag stops a
@@ -2499,6 +2502,67 @@ public class ClanManagementPlugin extends Plugin
     // flavours — WOM reports every group iron as plain "ironman" — so the plugin reports the exact
     // type and the server treats it as authoritative over the WOM bulk sync.
     private static final int VARBIT_ACCOUNT_TYPE = 1777;
+
+    private boolean accountTypeIconsSent = false; // chat-badge sprites handed to the panel once per client
+
+    /**
+     * Hand the panel the game's own chat-badge sprites (mod icons) for each iron type, so the
+     * Members list can show the exact helm the game renders before names. Client thread; the mod
+     * icons are IndexedSprites (palette + pixel indices), converted here to ARGB images.
+     */
+    private void sendAccountTypeIcons()
+    {
+        if (accountTypeIconsSent) return;
+        try
+        {
+            net.runelite.api.IndexedSprite[] modIcons = client.getModIcons();
+            if (modIcons == null) return;
+            java.util.Map<String, java.awt.image.BufferedImage> out = new java.util.HashMap<>();
+            java.util.Map<String, net.runelite.api.IconID> wanted = new java.util.HashMap<>();
+            wanted.put("ironman", net.runelite.api.IconID.IRONMAN);
+            wanted.put("hardcore", net.runelite.api.IconID.HARDCORE_IRONMAN);
+            wanted.put("ultimate", net.runelite.api.IconID.ULTIMATE_IRONMAN);
+            wanted.put("gim", net.runelite.api.IconID.GROUP_IRONMAN);
+            wanted.put("hcgim", net.runelite.api.IconID.HARDCORE_GROUP_IRONMAN);
+            wanted.put("unranked_gim", net.runelite.api.IconID.UNRANKED_GROUP_IRONMAN);
+            for (java.util.Map.Entry<String, net.runelite.api.IconID> e : wanted.entrySet())
+            {
+                int idx = e.getValue().getIndex();
+                if (idx < 0 || idx >= modIcons.length || modIcons[idx] == null) continue;
+                java.awt.image.BufferedImage img = indexedSpriteToImage(modIcons[idx]);
+                if (img != null) out.put(e.getKey(), img);
+            }
+            if (!out.isEmpty())
+            {
+                panel.setAccountTypeIcons(out);
+                accountTypeIconsSent = true;
+            }
+        }
+        catch (Exception ex)
+        {
+            log.debug("Account-type icon extraction failed", ex);
+        }
+    }
+
+    /** Palette-indexed sprite → ARGB image (index 0 = transparent, as the game renders it). */
+    private static java.awt.image.BufferedImage indexedSpriteToImage(net.runelite.api.IndexedSprite s)
+    {
+        int w = s.getWidth(), h = s.getHeight();
+        if (w <= 0 || h <= 0) return null;
+        byte[] pixels = s.getPixels();
+        int[] palette = s.getPalette();
+        java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(w, h, java.awt.image.BufferedImage.TYPE_INT_ARGB);
+        for (int y = 0; y < h; y++)
+        {
+            for (int x = 0; x < w; x++)
+            {
+                int idx = pixels[y * w + x] & 0xFF;
+                if (idx == 0) continue; // transparent
+                img.setRGB(x, y, 0xFF000000 | palette[idx]);
+            }
+        }
+        return img;
+    }
 
     /** Map varbit 1777 to the platform's account-type string (client thread). */
     private String readAccountType()

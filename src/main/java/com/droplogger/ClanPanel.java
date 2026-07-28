@@ -806,7 +806,29 @@ public class ClanPanel extends PluginPanel
         membersContent.repaint();
     }
 
-    /** Short colored account-type tag ("IM"/"HC"/"UIM"/"GIM"…); null for regular/unknown. */
+    // The game's own chat-badge sprites (mod icons) keyed by account type — set from the client
+    // once logged in, so the panel shows the EXACT helm icons the game puts before names.
+    private final java.util.Map<String, javax.swing.ImageIcon> accountTypeIcons = new java.util.HashMap<>();
+
+    public void setAccountTypeIcons(java.util.Map<String, java.awt.image.BufferedImage> icons)
+    {
+        SwingUtilities.invokeLater(() ->
+        {
+            for (java.util.Map.Entry<String, java.awt.image.BufferedImage> e : icons.entrySet())
+            {
+                accountTypeIcons.put(e.getKey(), new javax.swing.ImageIcon(e.getValue()));
+            }
+            renderMemberList(); // re-render so already-visible rows pick the icons up
+        });
+    }
+
+    /** The in-game helm icon for an account type; null for regular/unknown or before login. */
+    private javax.swing.ImageIcon accountTypeIcon(String type)
+    {
+        return type == null ? null : accountTypeIcons.get(type);
+    }
+
+    /** Fallback text tag for when the game icons aren't available yet (e.g. dev client). */
     private JLabel accountTypeBadge(String type)
     {
         if (type == null) return null;
@@ -842,18 +864,29 @@ public class ClanPanel extends PluginPanel
         JLabel name = new JLabel(m.rsn);
         name.setFont(READABLE_FONT);
         name.setForeground(Color.WHITE);
-        JLabel typeBadge = accountTypeBadge(m.accountType);
-        if (typeBadge != null)
+        javax.swing.ImageIcon typeIcon = accountTypeIcon(m.accountType);
+        if (typeIcon != null)
         {
-            JPanel west = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
-            west.setOpaque(false);
-            west.add(name);
-            west.add(typeBadge);
-            row.add(west, BorderLayout.WEST);
+            // In-game style: the helm icon sits BEFORE the name, exactly like chat.
+            name.setIcon(typeIcon);
+            name.setIconTextGap(4);
+            row.add(name, BorderLayout.WEST);
         }
         else
         {
-            row.add(name, BorderLayout.WEST);
+            JLabel typeBadge = accountTypeBadge(m.accountType);
+            if (typeBadge != null)
+            {
+                JPanel west = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
+                west.setOpaque(false);
+                west.add(name);
+                west.add(typeBadge);
+                row.add(west, BorderLayout.WEST);
+            }
+            else
+            {
+                row.add(name, BorderLayout.WEST);
+            }
         }
 
         if (m.rank != null && !m.rank.isEmpty())
@@ -984,7 +1017,17 @@ public class ClanPanel extends PluginPanel
         membersContent.removeAll();
         membersContent.add(clogBackButton("← Members", this::renderMemberList));
         membersContent.add(Box.createVerticalStrut(6));
-        membersContent.add(clogTitle(currentClogRsn, new Color(186, 142, 255), 16f));
+        JLabel profileTitle = clogTitle(currentClogRsn, new Color(186, 142, 255), 16f);
+        if (currentProfile != null)
+        {
+            javax.swing.ImageIcon profTypeIcon = accountTypeIcon(currentProfile.accountType);
+            if (profTypeIcon != null)
+            {
+                profileTitle.setIcon(profTypeIcon); // helm before the name, like in-game chat
+                profileTitle.setIconTextGap(5);
+            }
+        }
+        membersContent.add(profileTitle);
         // Account type + EHB subtitle (either may be unknown; show what we have)
         if (currentProfile != null && (currentProfile.accountType != null || currentProfile.ehb != null))
         {
