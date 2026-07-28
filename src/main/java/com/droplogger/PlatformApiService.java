@@ -261,11 +261,14 @@ public class PlatformApiService
     public void syncAchievementSummary(String baseUrl, String apiKey, String clanSlug, String rsn,
                                        int questPoints, int questsComplete, int questsTotal,
                                        int diaryEasy, int diaryMedium, int diaryHard, int diaryElite,
-                                       java.util.List<DiaryRegion> diaries, java.util.List<String> questsMissing)
+                                       java.util.List<DiaryRegion> diaries, java.util.List<String> questsMissing,
+                                       String accountType)
     {
         JsonObject payload = new JsonObject();
         payload.addProperty("rsn", rsn);
         addAccountHash(payload);
+        // Exact in-game account type (varbit 1777) — the only source that knows GIM flavours.
+        if (accountType != null) payload.addProperty("accountType", accountType);
         payload.addProperty("questPoints", questPoints);
         payload.addProperty("questsComplete", questsComplete);
         payload.addProperty("questsTotal", questsTotal);

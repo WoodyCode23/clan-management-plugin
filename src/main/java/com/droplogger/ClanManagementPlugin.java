@@ -2495,6 +2495,31 @@ public class ClanManagementPlugin extends Plugin
     // an odd QP count, it never blocks the diary/quest sync.
     private static final int VARP_QUEST_POINTS = 101;
 
+    // Account type varbit (Varbits.ACCOUNT_TYPE). The GAME is the only source that knows the GIM
+    // flavours — WOM reports every group iron as plain "ironman" — so the plugin reports the exact
+    // type and the server treats it as authoritative over the WOM bulk sync.
+    private static final int VARBIT_ACCOUNT_TYPE = 1777;
+
+    /** Map varbit 1777 to the platform's account-type string (client thread). */
+    private String readAccountType()
+    {
+        try
+        {
+            switch (client.getVarbitValue(VARBIT_ACCOUNT_TYPE))
+            {
+                case 0: return "regular";
+                case 1: return "ironman";
+                case 2: return "ultimate";
+                case 3: return "hardcore";
+                case 4: return "gim";
+                case 5: return "hcgim";
+                case 6: return "unranked_gim";
+                default: return null;
+            }
+        }
+        catch (Exception ignored) { return null; }
+    }
+
     // Region names aligned INDEX-FOR-INDEX with the DIARY_* varbit arrays above. Verified against
     // the runelite-api Varbits constants (4458=Ardougne, 4462=Falador, 4466=Wilderness, 4471=Western,
     // 4475=Kandarin, 4479=Varrock, 4483=Desert, 4487=Morytania, 4491=Fremennik, 4495=Lumbridge,
@@ -2587,12 +2612,14 @@ public class ClanManagementPlugin extends Plugin
 
         final int fQp = qp, fComplete = complete, fTotal = total;
 
+        final String accountType = readAccountType();
+
         // Diaries and quests barely change, so this is a one-time import and then a no-op on every
         // routine login. We only POST + announce when the reading actually differs from the last
         // sync for THIS character (signature persisted in config, so it survives client restarts).
-        // "v2" = the detail-payload upgrade: forces one re-sync for characters imported before the
-        // per-region/missing-quest detail existed server-side.
-        final String sig = "v2:" + fQp + ":" + fComplete + ":" + fTotal + ":"
+        // "v3" = accountType joined the payload (v2 added the per-region/missing-quest detail);
+        // bumping forces one re-sync so existing characters upload their exact type (incl. GIM).
+        final String sig = "v3:" + accountType + ":" + fQp + ":" + fComplete + ":" + fTotal + ":"
             + diaryEasy + ":" + diaryMedium + ":" + diaryHard + ":" + diaryElite;
         final String sigKey = "achSig." + rsn.toLowerCase();
         final String prev = configManager.getConfiguration("droplogger", sigKey);
@@ -2606,7 +2633,7 @@ public class ClanManagementPlugin extends Plugin
         executor.submit(() -> platformApiService.syncAchievementSummary(
             getPlatformUrl(), getPlatformKey(), getPlatformSlug(), rsn,
             fQp, fComplete, fTotal, diaryEasy, diaryMedium, diaryHard, diaryElite,
-            diaryDetail, questsMissing));
+            diaryDetail, questsMissing, accountType));
 
         final int diaryTotal = diaryEasy + diaryMedium + diaryHard + diaryElite;
         final String verb = prev == null ? "synced" : "updated"; // first import vs a later change
