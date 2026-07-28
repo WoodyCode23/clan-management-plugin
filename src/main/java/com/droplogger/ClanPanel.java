@@ -179,6 +179,8 @@ public class ClanPanel extends PluginPanel
     private final JPanel womLeaderboardPanel = new JPanel();
     private final JComboBox<String> womMetricCombo = new JComboBox<>();
     private final JComboBox<String> womPeriodCombo = new JComboBox<>(new String[]{"Day", "Week", "Month", "Year", "All-Time"});
+    // Gained = the current rolling window; Records = best-ever gain in that window (WOM records)
+    private final JComboBox<String> womViewCombo = new JComboBox<>(new String[]{"Gained", "Records"});
     private final JComboBox<String> womModeCombo = new JComboBox<>(new String[]{"Skills", "Boss KC"});
     private java.util.function.BiConsumer<String, String> onFetchWomData;
 
@@ -804,6 +806,28 @@ public class ClanPanel extends PluginPanel
         membersContent.repaint();
     }
 
+    /** Short colored account-type tag ("IM"/"HC"/"UIM"/"GIM"…); null for regular/unknown. */
+    private JLabel accountTypeBadge(String type)
+    {
+        if (type == null) return null;
+        String label;
+        Color color;
+        switch (type)
+        {
+            case "ironman": label = "IM"; color = new Color(160, 160, 160); break;
+            case "hardcore": label = "HC"; color = new Color(220, 90, 90); break;
+            case "ultimate": label = "UIM"; color = new Color(200, 200, 185); break;
+            case "gim": label = "GIM"; color = new Color(90, 190, 120); break;
+            case "hcgim": label = "HCGIM"; color = new Color(220, 90, 90); break;
+            case "unranked_gim": label = "UGIM"; color = new Color(140, 150, 165); break;
+            default: return null; // regular needs no badge
+        }
+        JLabel l = new JLabel(label);
+        l.setFont(READABLE_FONT_SMALL.deriveFont(Font.BOLD, 9f));
+        l.setForeground(color);
+        return l;
+    }
+
     private JPanel buildMemberRow(PlatformApiService.RosterMember m)
     {
         JPanel row = new JPanel(new BorderLayout(6, 0));
@@ -818,7 +842,19 @@ public class ClanPanel extends PluginPanel
         JLabel name = new JLabel(m.rsn);
         name.setFont(READABLE_FONT);
         name.setForeground(Color.WHITE);
-        row.add(name, BorderLayout.WEST);
+        JLabel typeBadge = accountTypeBadge(m.accountType);
+        if (typeBadge != null)
+        {
+            JPanel west = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
+            west.setOpaque(false);
+            west.add(name);
+            west.add(typeBadge);
+            row.add(west, BorderLayout.WEST);
+        }
+        else
+        {
+            row.add(name, BorderLayout.WEST);
+        }
 
         if (m.rank != null && !m.rank.isEmpty())
         {
@@ -949,6 +985,34 @@ public class ClanPanel extends PluginPanel
         membersContent.add(clogBackButton("← Members", this::renderMemberList));
         membersContent.add(Box.createVerticalStrut(6));
         membersContent.add(clogTitle(currentClogRsn, new Color(186, 142, 255), 16f));
+        // Account type + EHB subtitle (either may be unknown; show what we have)
+        if (currentProfile != null && (currentProfile.accountType != null || currentProfile.ehb != null))
+        {
+            String typeText;
+            switch (currentProfile.accountType == null ? "" : currentProfile.accountType)
+            {
+                case "ironman": typeText = "Ironman"; break;
+                case "hardcore": typeText = "Hardcore Ironman"; break;
+                case "ultimate": typeText = "Ultimate Ironman"; break;
+                case "gim": typeText = "Group Ironman"; break;
+                case "hcgim": typeText = "Hardcore Group Ironman"; break;
+                case "unranked_gim": typeText = "Unranked Group Ironman"; break;
+                case "regular": typeText = "Main"; break;
+                default: typeText = null;
+            }
+            StringBuilder sub = new StringBuilder();
+            if (typeText != null) sub.append(typeText);
+            if (currentProfile.ehb != null)
+            {
+                if (sub.length() > 0) sub.append("  ·  ");
+                sub.append(String.format("%,.0f EHB", currentProfile.ehb));
+            }
+            JLabel subLabel = new JLabel(sub.toString());
+            subLabel.setFont(READABLE_FONT_SMALL);
+            subLabel.setForeground(new Color(150, 150, 150));
+            subLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+            membersContent.add(subLabel);
+        }
         membersContent.add(Box.createVerticalStrut(8));
 
         if (currentAbout != null && !currentAbout.isEmpty())
@@ -3440,13 +3504,19 @@ public class ClanPanel extends PluginPanel
         wrapper.add(row1);
         wrapper.add(Box.createVerticalStrut(4));
 
-        // Row 2: Period (full width)
+        // Row 2: Period + view (Gained / Records)
+        JPanel row2 = new JPanel(new GridLayout(1, 2, 4, 0));
+        row2.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        row2.setAlignmentX(Component.LEFT_ALIGNMENT);
+        row2.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
         womPeriodCombo.setFont(READABLE_FONT_SMALL);
-        womPeriodCombo.setAlignmentX(Component.LEFT_ALIGNMENT);
-        womPeriodCombo.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
+        womViewCombo.setFont(READABLE_FONT_SMALL);
+        womViewCombo.setToolTipText("Gained = this period so far. Records = the most anyone has ever done in a single period.");
+        row2.add(womPeriodCombo);
+        row2.add(womViewCombo);
 
         // Only trigger fetch on explicit refresh click, not on every combo change
-        wrapper.add(womPeriodCombo);
+        wrapper.add(row2);
         wrapper.add(Box.createVerticalStrut(8));
 
         // Leaderboard content
@@ -3489,6 +3559,14 @@ public class ClanPanel extends PluginPanel
             ? "boss:" + WOM_BOSS_METRICS.getOrDefault(selected, selected.toLowerCase())
             : selected.toLowerCase();
         String period = ((String) womPeriodCombo.getSelectedItem()).toLowerCase();
+        // Records view rides the period string (":records" suffix) so the callback signature
+        // stays a BiConsumer; the plugin splits it back apart. All-Time has no record window —
+        // the server maps it to week — so pass week explicitly to keep the UI honest.
+        if ("Records".equals(womViewCombo.getSelectedItem()))
+        {
+            if ("all-time".equals(period)) period = "week";
+            period = period + ":records";
+        }
         onFetchWomData.accept(metric, period);
     }
 

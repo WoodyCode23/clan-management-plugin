@@ -3148,14 +3148,17 @@ public class ClanManagementPlugin extends Plugin
         }
         try
         {
+            // A ":records" suffix on the period selects the best-ever-window view (WOM records).
+            boolean records = period.endsWith(":records");
+            if (records) period = period.substring(0, period.length() - ":records".length());
             // All-Time ranks by current total XP (no "+"); other periods rank by gain.
             String apiPeriod = "all-time".equals(period) ? "all" : period;
             boolean isGained = !"all".equals(apiPeriod);
             List<LeaderboardEntry> entries = metric.startsWith("boss:")
                 ? platformApiService.fetchKcLeaderboard(
-                    getPlatformUrl(), getPlatformKey(), getPlatformSlug(), metric.substring(5), apiPeriod)
+                    getPlatformUrl(), getPlatformKey(), getPlatformSlug(), metric.substring(5), apiPeriod, records)
                 : platformApiService.fetchXpLeaderboard(
-                    getPlatformUrl(), getPlatformKey(), getPlatformSlug(), metric, apiPeriod);
+                    getPlatformUrl(), getPlatformKey(), getPlatformSlug(), metric, apiPeriod, records);
             panel.updateWomLeaderboard(entries, isGained);
         }
         catch (Exception e)

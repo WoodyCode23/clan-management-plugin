@@ -506,12 +506,13 @@ public class PlatformApiService
      * (value stored in both experience and gained; the caller picks which to show by period).
      */
     public List<LeaderboardEntry> fetchXpLeaderboard(String baseUrl, String apiKey, String clanSlug,
-                                                         String skill, String period)
+                                                         String skill, String period, boolean records)
     {
         HttpUrl.Builder ub = HttpUrl.parse(baseUrl + "/clans/" + clanSlug + "/leaderboard").newBuilder()
             .addQueryParameter("board", "xp")
             .addQueryParameter("period", period)
             .addQueryParameter("limit", "20");
+        if (records) ub.addQueryParameter("view", "records"); // best-ever window instead of current
         if (skill != null && !skill.isEmpty() && !skill.equals("overall"))
         {
             ub.addQueryParameter("skill", skill);
@@ -544,12 +545,13 @@ public class PlatformApiService
     /** Boss-KC clan leaderboard (current standings or gained-over-period), served by our API
      *  from WiseOldMan bulk group data. */
     public List<LeaderboardEntry> fetchKcLeaderboard(String baseUrl, String apiKey, String clanSlug,
-                                                     String boss, String period)
+                                                     String boss, String period, boolean records)
     {
         HttpUrl.Builder ub = HttpUrl.parse(baseUrl + "/clans/" + clanSlug + "/leaderboard").newBuilder()
             .addQueryParameter("board", "kc")
             .addQueryParameter("period", period)
             .addQueryParameter("limit", "20");
+        if (records) ub.addQueryParameter("view", "records"); // best-ever window instead of current
         if (boss != null && !boss.isEmpty()) ub.addQueryParameter("boss", boss);
 
         Request request = new Request.Builder().url(ub.build())
@@ -879,8 +881,9 @@ public class PlatformApiService
         public final String rsn;
         public final String rank;       // in-game CC title (Senator, Xerician…)
         public final String ladderRank; // Discord-derived ladder rank id (heart_3, maxed…) — null if unlinked
-        public RosterMember(String rsn, String rank, String ladderRank)
-        { this.rsn = rsn; this.rank = rank; this.ladderRank = ladderRank; }
+        public final String accountType; // regular | ironman | hardcore | ultimate | gim | hcgim | unranked_gim
+        public RosterMember(String rsn, String rank, String ladderRank, String accountType)
+        { this.rsn = rsn; this.rank = rank; this.ladderRank = ladderRank; this.accountType = accountType; }
     }
 
     /** Fetch the clan roster (names + ranks) for the Members tab. */
@@ -895,7 +898,8 @@ public class PlatformApiService
             out.add(new RosterMember(
                 o.has("rsn") ? o.get("rsn").getAsString() : "",
                 o.has("rank") && !o.get("rank").isJsonNull() ? o.get("rank").getAsString() : null,
-                o.has("ladderRank") && !o.get("ladderRank").isJsonNull() ? o.get("ladderRank").getAsString() : null));
+                o.has("ladderRank") && !o.get("ladderRank").isJsonNull() ? o.get("ladderRank").getAsString() : null,
+                o.has("accountType") && !o.get("accountType").isJsonNull() ? o.get("accountType").getAsString() : null));
         }
         return out;
     }
@@ -1059,12 +1063,16 @@ public class PlatformApiService
         public final List<PlayerDrop> drops;
         // Diary + quest standing (null when the member hasn't synced with a current plugin yet)
         public final DiariesAndQuests diariesAndQuests;
+        public final String accountType; // exact type incl GIM flavours (null if unknown)
+        public final Double ehb;         // WOM type-aware EHB (null if unknown)
         public PlayerProfile(int clogObtained, int clogTotal, int caCompleted, int caTotal,
-                             List<PlayerPb> pbs, List<PlayerDrop> drops, DiariesAndQuests diariesAndQuests)
+                             List<PlayerPb> pbs, List<PlayerDrop> drops, DiariesAndQuests diariesAndQuests,
+                             String accountType, Double ehb)
         {
             this.clogObtained = clogObtained; this.clogTotal = clogTotal;
             this.caCompleted = caCompleted; this.caTotal = caTotal;
             this.pbs = pbs; this.drops = drops; this.diariesAndQuests = diariesAndQuests;
+            this.accountType = accountType; this.ehb = ehb;
         }
     }
 
@@ -1205,7 +1213,15 @@ public class PlatformApiService
                 d.has("diaryElite") ? d.get("diaryElite").getAsInt() : 0,
                 regions, missing);
         }
-        return new PlayerProfile(clogObtained, clogTotal, caCompleted, caTotal, pbs, drops, dq);
+        String accountType = null;
+        Double ehb = null;
+        if (root.has("player") && root.get("player").isJsonObject())
+        {
+            JsonObject p = root.getAsJsonObject("player");
+            if (p.has("accountType") && !p.get("accountType").isJsonNull()) accountType = p.get("accountType").getAsString();
+            if (p.has("ehb") && !p.get("ehb").isJsonNull()) ehb = p.get("ehb").getAsDouble();
+        }
+        return new PlayerProfile(clogObtained, clogTotal, caCompleted, caTotal, pbs, drops, dq, accountType, ehb);
     }
 
     /** Create an announcement (admin — needs a key whose owner has manage_announcements/admin). */
