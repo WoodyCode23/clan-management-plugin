@@ -3472,7 +3472,7 @@ public class ClanPanel extends PluginPanel
         titleRow.setAlignmentX(Component.LEFT_ALIGNMENT);
         titleRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 22));
 
-        JLabel title = new JLabel("Clan XP Leaderboard");
+        JLabel title = new JLabel("Clan Leaderboard");
         title.setFont(new Font("Segoe UI", Font.BOLD, 12));
         title.setForeground(new Color(76, 175, 80));
         titleRow.add(title, BorderLayout.WEST);
