@@ -351,6 +351,9 @@ public class ClanManagementPlugin extends Plugin
     // Adventure log PB sync state
     private int adventureLogPbTicksRemaining = -1;
     private int caReadTicksRemaining = -1; // ticks until we read the CA task interface after it opens
+    private static final int GIM_SIDEPANEL_GROUP = 726; // InterfaceID.GIM_SIDEPANEL (gameval)
+    private int gimReadTicksRemaining = -1; // ticks until we read the GIM group panel after it opens
+    private boolean gimGroupReported = false; // once per session
     // Task-name text color in the CA interface: bright green = completed, grey = incomplete.
     private static final int CA_COMPLETE_COLOR = 0x0DC10D;
     private static final int CA_TASK_NAME_COMPONENT = 10; // component 715,10 holds the task-name column
@@ -802,6 +805,16 @@ public class ClanManagementPlugin extends Plugin
             readCombatAchievements();
         }
 
+        if (gimReadTicksRemaining > 0)
+        {
+            gimReadTicksRemaining--;
+        }
+        else if (gimReadTicksRemaining == 0)
+        {
+            gimReadTicksRemaining = -1;
+            readGimGroupPanel();
+        }
+
         // Collection log auto-sync debounce
         if (clogDebounceTicksRemaining > 0)
         {
@@ -883,6 +896,7 @@ public class ClanManagementPlugin extends Plugin
         if (event.getGameState() == GameState.LOGIN_SCREEN)
         {
             achievementsSyncedThisSession = false;
+            gimGroupReported = false;
         }
     }
 
@@ -988,6 +1002,13 @@ public class ClanManagementPlugin extends Plugin
         if (event.getGroupId() == InterfaceID.CA_TASKS && isPlatformConfigured() && config.enableClogSync())
         {
             caReadTicksRemaining = 4;
+        }
+
+        // GIM Group side panel (interface 726): read the group's member list for automatic team
+        // detection. Once per session — the group barely changes.
+        if (event.getGroupId() == GIM_SIDEPANEL_GROUP && isPlatformConfigured() && !gimGroupReported)
+        {
+            gimReadTicksRemaining = 4; // let the panel's texts populate first
         }
 
         if (event.getGroupId() == InterfaceID.COLLECTION && isPlatformConfigured() && config.enableClogSync())
@@ -2285,6 +2306,65 @@ public class ClanManagementPlugin extends Plugin
         // the confirmation can post directly.
         client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
             "[" + getClanName() + "] Combat achievements synced (" + fCompleted + "/" + tasks.size() + " complete)", "");
+    }
+
+    /**
+     * Read the GIM Group side panel (interface 726) and report its texts for automatic team
+     * detection (client thread). The exact component layout isn't documented, so this walks every
+     * widget in the group and collects visible texts; the SERVER keeps only strings matching clan
+     * roster names, which makes stray labels harmless.
+     */
+    private void readGimGroupPanel()
+    {
+        if (!isPlatformConfigured() || gimGroupReported) return;
+        net.runelite.api.Player lp = client.getLocalPlayer();
+        if (lp == null || lp.getName() == null) return;
+        final String rsn = lp.getName();
+        final String accountType = readAccountType();
+        // Only group irons have a group panel worth reading.
+        if (accountType == null || !(accountType.equals("gim") || accountType.equals("hcgim") || accountType.equals("unranked_gim"))) return;
+
+        java.util.LinkedHashSet<String> texts = new java.util.LinkedHashSet<>();
+        for (int child = 0; child < 60 && texts.size() < 70; child++)
+        {
+            Widget w = client.getWidget(GIM_SIDEPANEL_GROUP, child);
+            if (w == null) continue;
+            collectWidgetTexts(w, texts, 0);
+        }
+        if (texts.isEmpty()) return;
+
+        gimGroupReported = true;
+        final java.util.List<String> payload = new java.util.ArrayList<>(texts);
+        executor.submit(() ->
+        {
+            JsonObject res = platformApiService.reportGimGroup(
+                getPlatformUrl(), getPlatformKey(), getPlatformSlug(), rsn, accountType, payload);
+            if (res != null && res.has("team") && !res.get("team").isJsonNull())
+            {
+                final String team = res.get("team").getAsString();
+                final boolean created = res.has("created") && res.get("created").getAsBoolean();
+                clientThread.invokeLater(() -> client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+                    "[" + getClanName() + "] GIM group " + (created ? "detected" : "synced") + ": " + team, ""));
+            }
+        });
+    }
+
+    /** Collect visible texts from a widget and its children (bounded depth). */
+    private void collectWidgetTexts(Widget w, java.util.Set<String> out, int depth)
+    {
+        if (w == null || depth > 3 || out.size() >= 70) return;
+        String t = w.getText();
+        if (t != null && !t.isEmpty())
+        {
+            String clean = Text.removeTags(t).trim();
+            if (!clean.isEmpty() && clean.length() <= 60) out.add(clean);
+        }
+        Widget[][] childSets = { w.getDynamicChildren(), w.getStaticChildren(), w.getNestedChildren() };
+        for (Widget[] set : childSets)
+        {
+            if (set == null) continue;
+            for (Widget c : set) collectWidgetTexts(c, out, depth + 1);
+        }
     }
 
     // PRIVACY: these item caches are IN-MEMORY ONLY and are NEVER sent anywhere. They exist solely

@@ -301,6 +301,42 @@ public class PlatformApiService
     }
 
     /**
+     * Report the texts of the in-game GIM Group side panel. The server keeps only strings that
+     * match clan-roster names and auto-creates/extends the reporter's team from them; everything
+     * else (labels, world numbers) is discarded server-side.
+     */
+    public JsonObject reportGimGroup(String baseUrl, String apiKey, String clanSlug, String rsn,
+                                     String accountType, java.util.List<String> texts)
+    {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("rsn", rsn);
+        addAccountHash(payload);
+        if (accountType != null) payload.addProperty("accountType", accountType);
+        JsonArray arr = new JsonArray();
+        for (String t : texts) arr.add(t);
+        payload.add("texts", arr);
+        try
+        {
+            Request request = new Request.Builder()
+                .url(baseUrl + "/clans/" + clanSlug + "/gim-group")
+                .header("Authorization", "Bearer " + apiKey)
+                .post(RequestBody.create(JSON, gson.toJson(payload)))
+                .build();
+            try (Response response = httpClient.newCall(request).execute())
+            {
+                checkAuth(response.code());
+                if (!response.isSuccessful() || response.body() == null) return null;
+                return gson.fromJson(response.body().string(), JsonObject.class);
+            }
+        }
+        catch (Exception e)
+        {
+            log.debug("GIM group report failed", e);
+            return null;
+        }
+    }
+
+    /**
      * Claim a clan rank. The plugin evaluates requirements LOCALLY and sends only the result
      * (eligible + what's missing) — never any bank/item data. The server pings staff.
      */
