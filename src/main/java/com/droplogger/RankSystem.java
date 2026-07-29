@@ -350,6 +350,8 @@ public final class RankSystem
         IMPLIES.put("trident of the swamp (e)", new String[]{"trident of the swamp"});
         IMPLIES.put("toxic trident", new String[]{"trident of the swamp"});      // alt name for the swamp trident
         IMPLIES.put("toxic trident (e)", new String[]{"trident of the swamp"});
+        IMPLIES.put("trident of the swamp (o)", new String[]{"trident of the swamp"});      // ornament kit
+        IMPLIES.put("trident of the swamp (e) (o)", new String[]{"trident of the swamp"});
         // Uncharged tridents still count as having obtained the trident
         IMPLIES.put("uncharged trident", new String[]{"trident of the seas"});
         IMPLIES.put("uncharged trident (e)", new String[]{"trident of the seas"});
@@ -362,12 +364,23 @@ public final class RankSystem
         IMPLIES.put("torva full helm (or)", new String[]{"torva full helm"});
         IMPLIES.put("torva platebody (or)", new String[]{"torva platebody"});
         IMPLIES.put("torva platelegs (or)", new String[]{"torva platelegs"});
-        IMPLIES.put("blessed dizana's quiver", new String[]{"dizana's quiver"});
+        IMPLIES.put("dizana's blessed quiver", new String[]{"dizana's quiver"}); // correct in-game name
+        IMPLIES.put("dizana's max cape", new String[]{"dizana's quiver"});  // quiver sunk into the max cape
+        IMPLIES.put("dizana's max hood", new String[]{"dizana's quiver"});
+        IMPLIES.put("dizana's quiver (broken)", new String[]{"dizana's quiver"});
         IMPLIES.put("amulet of rancour", new String[]{"amulet of torture"});     // rancour = torture upgrade
         IMPLIES.put("amulet of rancour (s)", new String[]{"amulet of rancour"}); // ornament variant
         IMPLIES.put("confliction gauntlets", new String[]{"tormented bracelet"}); // tormented upgrade (wiki-confirmed)
         IMPLIES.put("ferocious gloves", new String[]{"hydra leather"}); // made FROM the leather
         IMPLIES.put("dragon hunter lance", new String[]{"hydra's claw"}); // lance is built FROM the Hydra's claw
+        // Corrupted Gauntlet: crystal gear is built FROM the seeds (owning the gear proves the seed)
+        IMPLIES.put("blade of saeldor", new String[]{"enhanced crystal weapon seed"});
+        IMPLIES.put("blade of saeldor (c)", new String[]{"enhanced crystal weapon seed"});
+        IMPLIES.put("bow of faerdhinen", new String[]{"enhanced crystal weapon seed"});
+        IMPLIES.put("bow of faerdhinen (c)", new String[]{"enhanced crystal weapon seed"});
+        IMPLIES.put("crystal helm", new String[]{"crystal armour seed"});
+        IMPLIES.put("crystal body", new String[]{"crystal armour seed"});
+        IMPLIES.put("crystal legs", new String[]{"crystal armour seed"});
         // Maggot King necklace chain: rupture = anguish + etched fang (proves owning both).
         IMPLIES.put("necklace of rupture", new String[]{"necklace of anguish", "etched elder venator fang"});
         IMPLIES.put("etched elder venator fang", new String[]{"elder venator fang"});
@@ -410,7 +423,7 @@ public final class RankSystem
         IMPLIES.put("tanzanite helm", new String[]{"serpentine helm"});
         IMPLIES.put("magma helm", new String[]{"serpentine helm"});
         IMPLIES.put("toxic blowpipe", new String[]{"tanzanite fang"});
-        IMPLIES.put("blazing blowpipe", new String[]{"tanzanite fang"}); // VERIFY — blowpipe variant
+        IMPLIES.put("blazing blowpipe", new String[]{"toxic blowpipe"}); // ornamented blowpipe (chains to tanzanite fang)
         // Avernic defender CA-hilt variants count for the base defender. Ghommal's hilt (CA reward)
         // applied to it renames the item "Ghommal's avernic defender <tier>" (5 = Master, 6 = GM).
         IMPLIES.put("ghommal's avernic defender 5", new String[]{"avernic defender"});
@@ -603,7 +616,7 @@ public final class RankSystem
             Check.item("Ancestral hat"), Check.item("Ancestral robe top"), Check.item("Ancestral robe bottom"),
             Check.item("Torva full helm"), Check.item("Torva platebody"), Check.item("Torva platelegs"),
             Check.item("Oathplate helm"), Check.item("Oathplate chest"), Check.item("Oathplate legs"));
-        Group tzExtras = Group.of("Approaching Grandmaster — all of", 9,
+        Group tzExtras = Group.of("Approaching Grandmaster - all of", 11,
             Check.any("TzKal-Zuk — 5 KC or 4/10 Zuk GM tasks", 1, Check.kc("TzKal-Zuk 5 KC", 5, "tzkalzuk"),
                 Check.any("4 of 10 Inferno GM tasks", 4,
                     Check.caTask("Budget Setup"), Check.caTask("Facing Jad Head-on II"),
@@ -622,6 +635,11 @@ public final class RankSystem
             Check.kc("Chambers of Xeric — 200 KC", 200, "cox_total"),
             Check.kc("Theatre of Blood — 200 KC", 200, "tob_total"),
             Check.kc("Tombs of Amascut — 200 KC", 200, "toa_total"),
+            Check.caTask("It's Dark Down Here"),
+            Check.items("Purifying sigil (Yama)", 1, "Purifying sigil",
+                "Purifying sigil (top)", "Purifying sigil (middle)", "Purifying sigil (bottom)",
+                "Purifying sigil (left)", "Purifying sigil (right)",
+                "Radiant oathplate helm", "Radiant oathplate chest", "Radiant oathplate legs"),
             Check.caTier("Master"));
         RANKS.add(new Rank("tzkal", "TzKal", "PvM", "Late-game PvM (approaching GM)",
             req("dragon_sword"), Arrays.asList(tzUniques, tzArmour, tzExtras)));
