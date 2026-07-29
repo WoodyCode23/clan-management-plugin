@@ -415,9 +415,12 @@ public class ClanPanel extends PluginPanel
     // Home Tab
     // ══════════════════════════════════════════
 
-    private JPanel buildHomeTab()
+    private JComponent buildHomeTab()
     {
-        JPanel home = new JPanel();
+        // ScrollableColumn tracks the viewport width; wrapping it in a JScrollPane (below) keeps the
+        // lower nav cards ("Members", "My Ranks") reachable in a fixed-mode (765x503) client, where
+        // the content is taller than the panel. Mirrors the Members/Ranks/Admin tab scroll pattern.
+        ScrollableColumn home = new ScrollableColumn();
         home.setLayout(new BoxLayout(home, BoxLayout.Y_AXIS));
         home.setBackground(ColorScheme.DARK_GRAY_COLOR);
         home.setBorder(new EmptyBorder(10, 10, 10, 10));
@@ -560,7 +563,12 @@ public class ClanPanel extends PluginPanel
         homeStatusLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
         home.add(homeStatusLabel);
 
-        return home;
+        JScrollPane homeScroll = new JScrollPane(home,
+            JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED, JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        homeScroll.setBorder(null);
+        homeScroll.getViewport().setBackground(ColorScheme.DARK_GRAY_COLOR);
+        homeScroll.getVerticalScrollBar().setUnitIncrement(16);
+        return homeScroll;
     }
 
     // ══════════════════════════════════════════
