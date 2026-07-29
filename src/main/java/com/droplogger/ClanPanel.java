@@ -2162,24 +2162,29 @@ public class ClanPanel extends PluginPanel
             }
         }
 
-        // Claim button — opt-in. Sends only the result (eligible + what's missing), never items.
-        JButton request = new JButton(rs.eligible ? "Request " + rs.rank.name : "Request anyway (not eligible)");
+        // Claim button — opt-in, and ONLY when actually eligible. A rank you don't qualify for
+        // can't be requested at all (the button is disabled and says why); already-held ranks show
+        // "Already held". Sends only the result (eligible + what's missing), never items.
+        final boolean canRequest = rs.eligible && !rs.granted;
+        JButton request = new JButton(
+            rs.granted ? "Already held"
+                : rs.eligible ? "Request " + rs.rank.name
+                : "Not eligible yet");
         request.setFont(READABLE_FONT_SMALL);
         request.setFocusPainted(false);
         request.setAlignmentX(Component.LEFT_ALIGNMENT);
         request.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
         request.setBorder(new EmptyBorder(4, 8, 4, 8));
-        request.addActionListener(e ->
+        request.setEnabled(canRequest);
+        if (canRequest)
         {
-            java.util.List<String> missing = new java.util.ArrayList<>();
-            for (RankSystem.GroupStatus gs2 : rs.groups)
+            request.addActionListener(e ->
             {
-                if (!gs2.satisfied()) missing.add(gs2.group.label + " (" + gs2.met + "/" + gs2.group.need + ")");
-            }
-            if (onRequestRank != null) onRequestRank.accept(new Object[]{ rs.rank.name, rs.eligible, missing });
-            request.setText("Requested — staff pinged");
-            request.setEnabled(false);
-        });
+                if (onRequestRank != null) onRequestRank.accept(new Object[]{ rs.rank.name, true, new java.util.ArrayList<String>() });
+                request.setText("Requested — staff pinged");
+                request.setEnabled(false);
+            });
+        }
         details.add(Box.createVerticalStrut(6));
         details.add(request);
     }
