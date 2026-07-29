@@ -70,6 +70,9 @@ public class ClanPanel extends PluginPanel
     private final JPanel clogCatListPanel = new JPanel();
     private java.util.List<PlatformApiService.RosterMember> currentMembers = new java.util.ArrayList<>();
     private java.util.List<PlatformApiService.TeamSummary> currentTeams = new java.util.ArrayList<>();
+    // Selected game modes for the Members / Leaderboards filters (empty = show everything).
+    private final java.util.Set<String> memberModeFilter = new java.util.LinkedHashSet<>();
+    private final java.util.Set<String> leaderboardModeFilter = new java.util.LinkedHashSet<>();
     private java.util.function.Consumer<String> onSelectTeam; // team slug -> fetch + show profile
     private Runnable onLoadRoster;
     private Runnable onLoadEvent;
@@ -185,6 +188,9 @@ public class ClanPanel extends PluginPanel
     private final JComboBox<String> womViewCombo = new JComboBox<>(new String[]{"Gained", "Records"});
     private final JComboBox<String> womModeCombo = new JComboBox<>(new String[]{"Skills", "Boss KC"});
     private java.util.function.BiConsumer<String, String> onFetchWomData;
+    // Cached XP/KC board so the game-mode filter can re-render it client-side.
+    private java.util.List<LeaderboardEntry> lastWomEntries = null;
+    private boolean lastWomIsGained = false;
 
     // Boss label -> our snapshot-style key for Boss KC leaderboards (the clan API resolves these
     // against WiseOldMan bulk group data - one cached call serves every board).
@@ -692,6 +698,17 @@ public class ClanPanel extends PluginPanel
             public void changedUpdate(javax.swing.event.DocumentEvent e) { renderMemberList(); }
         });
         header.add(memberSearchField);
+
+        JComponent memberModeFilterComp = buildGameModeFilter(sel ->
+        {
+            memberModeFilter.clear();
+            memberModeFilter.addAll(sel);
+            renderMemberList();
+        });
+        memberModeFilterComp.setAlignmentX(Component.LEFT_ALIGNMENT);
+        header.add(Box.createVerticalStrut(4));
+        header.add(memberModeFilterComp);
+
         tab.add(header, BorderLayout.NORTH);
 
         membersContent.setLayout(new BoxLayout(membersContent, BoxLayout.Y_AXIS));
@@ -785,11 +802,15 @@ public class ClanPanel extends PluginPanel
             {
                 if (!q.isEmpty() && !t.name.toLowerCase().contains(q)
                     && t.members.stream().noneMatch(mm -> mm.rsn.toLowerCase().contains(q))) continue;
+                // Teams match on their flavour/kind (gim/hcgim/unranked_gim); custom teams have no
+                // game mode, so an active filter hides them.
+                if (!memberModeFilter.isEmpty() && !memberModeFilter.contains(t.kind)) continue;
                 rows.add(new Object[]{ t.name.toLowerCase(), (java.util.function.Supplier<JComponent>) () -> buildTeamRow(t) });
             }
             for (PlatformApiService.RosterMember m : currentMembers)
             {
                 if (!q.isEmpty() && !m.rsn.toLowerCase().contains(q)) continue;
+                if (!memberModeFilter.isEmpty() && !memberModeFilter.contains(normalizeAccountType(m.accountType))) continue;
                 rows.add(new Object[]{ m.rsn.toLowerCase(), (java.util.function.Supplier<JComponent>) () -> buildMemberRow(m) });
             }
             rows.sort((a, b) -> ((String) a[0]).compareTo((String) b[0]));
@@ -867,6 +888,136 @@ public class ClanPanel extends PluginPanel
         l.setFont(READABLE_FONT_SMALL.deriveFont(Font.BOLD, 9f));
         l.setForeground(color);
         return l;
+    }
+
+    // The seven account types in display order, each with a short text fallback for when the
+    // game's helm sprites aren't loaded yet (e.g. the dev client). Keys match players.accountType.
+    private static final String[][] GAME_MODE_MODES = {
+        { "regular",      "Main"  },
+        { "ironman",      "IM"    },
+        { "hardcore",     "HCIM"  },
+        { "ultimate",     "UIM"   },
+        { "gim",          "GIM"   },
+        { "hcgim",        "HCGIM" },
+        { "unranked_gim", "UGIM"  },
+    };
+
+    /** Normalize an account type for filtering; null/unknown becomes "regular". */
+    private static String normalizeAccountType(String type)
+    {
+        if (type == null) return "regular";
+        switch (type.toLowerCase())
+        {
+            case "ironman":      return "ironman";
+            case "hardcore":     return "hardcore";
+            case "ultimate":     return "ultimate";
+            case "gim":          return "gim";
+            case "hcgim":        return "hcgim";
+            case "unranked_gim": return "unranked_gim";
+            default:             return "regular";
+        }
+    }
+
+    /**
+     * A collapsible game-mode filter: a funnel toggle that shows/hides a row of seven helm
+     * toggles (one per account type, using the in-game helm icons with a short text fallback).
+     * Selecting helms narrows a list to those game modes; onChange fires with a copy of the
+     * selected keys on every change. Collapsing the funnel clears the selection and fires
+     * onChange with an empty set (meaning "show everything").
+     */
+    private JComponent buildGameModeFilter(java.util.function.Consumer<java.util.Set<String>> onChange)
+    {
+        final java.util.Set<String> selected = new java.util.LinkedHashSet<>();
+        final Color offBg = new Color(40, 40, 40);
+        final Color offBorder = new Color(60, 60, 60);
+        final Color onBg = new Color(70, 90, 120);
+        final Color onBorder = new Color(120, 170, 255);
+
+        JPanel holder = new JPanel();
+        holder.setLayout(new BoxLayout(holder, BoxLayout.Y_AXIS));
+        holder.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        holder.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        JPanel helmRow = new JPanel(new GridLayout(1, GAME_MODE_MODES.length, 2, 0));
+        helmRow.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        helmRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+        helmRow.setMaximumSize(new Dimension(PINNED_WIDTH, 26));
+        helmRow.setVisible(false);
+
+        for (String[] mode : GAME_MODE_MODES)
+        {
+            final String key = mode[0];
+            final JToggleButton b = new JToggleButton();
+            javax.swing.ImageIcon icon = accountTypeIcon(key);
+            if (icon != null) b.setIcon(icon); else b.setText(mode[1]);
+            b.setFont(READABLE_FONT_SMALL);
+            b.setForeground(new Color(210, 210, 210));
+            b.setBackground(offBg);
+            b.setOpaque(true);
+            b.setFocusPainted(false);
+            b.setMargin(new Insets(2, 4, 2, 4));
+            b.setToolTipText(mode[1]);
+            b.setBorder(BorderFactory.createLineBorder(offBorder));
+            b.addActionListener(e ->
+            {
+                if (b.isSelected())
+                {
+                    selected.add(key);
+                    b.setBackground(onBg);
+                    b.setBorder(BorderFactory.createLineBorder(onBorder));
+                }
+                else
+                {
+                    selected.remove(key);
+                    b.setBackground(offBg);
+                    b.setBorder(BorderFactory.createLineBorder(offBorder));
+                }
+                onChange.accept(new java.util.LinkedHashSet<>(selected));
+            });
+            helmRow.add(b);
+        }
+
+        final JToggleButton funnel = new JToggleButton("▾ Game mode");
+        funnel.setFont(READABLE_FONT_SMALL);
+        funnel.setForeground(new Color(180, 180, 180));
+        funnel.setBackground(offBg);
+        funnel.setOpaque(true);
+        funnel.setFocusPainted(false);
+        funnel.setMargin(new Insets(2, 8, 2, 8));
+        funnel.setToolTipText("Filter by game mode");
+        funnel.addActionListener(e ->
+        {
+            boolean open = funnel.isSelected();
+            helmRow.setVisible(open);
+            funnel.setText((open ? "▴" : "▾") + " Game mode");
+            if (!open)
+            {
+                selected.clear();
+                for (Component c : helmRow.getComponents())
+                {
+                    if (c instanceof JToggleButton)
+                    {
+                        JToggleButton hb = (JToggleButton) c;
+                        hb.setSelected(false);
+                        hb.setBackground(offBg);
+                        hb.setBorder(BorderFactory.createLineBorder(offBorder));
+                    }
+                }
+                onChange.accept(new java.util.LinkedHashSet<>());
+            }
+            holder.revalidate();
+            holder.repaint();
+        });
+
+        JPanel funnelRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+        funnelRow.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        funnelRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+        funnelRow.setMaximumSize(new Dimension(PINNED_WIDTH, 28));
+        funnelRow.add(funnel);
+
+        holder.add(funnelRow);
+        holder.add(helmRow);
+        return holder;
     }
 
     /** A shared-team row: gold name + GIM helm + account count; opens the team's shared profile. */
@@ -3813,28 +3964,48 @@ public class ClanPanel extends PluginPanel
     {
         SwingUtilities.invokeLater(() ->
         {
-            womLeaderboardPanel.removeAll();
+            lastWomEntries = entries;
+            lastWomIsGained = isGained;
+            renderWomLeaderboard();
+        });
+    }
 
-            if (entries == null || entries.isEmpty())
-            {
-                JLabel empty = new JLabel("No data available");
-                empty.setFont(READABLE_FONT_ITALIC);
-                empty.setForeground(Color.GRAY);
-                womLeaderboardPanel.add(empty);
-                womLeaderboardPanel.revalidate();
-                womLeaderboardPanel.repaint();
-                return;
-            }
+    /** Render the cached XP/KC board, applying the game-mode filter when one is active. */
+    private void renderWomLeaderboard()
+    {
+        womLeaderboardPanel.removeAll();
+        List<LeaderboardEntry> entries = lastWomEntries;
 
-            for (LeaderboardEntry entry : entries)
-            {
-                womLeaderboardPanel.add(createWomRow(entry, isGained));
-                womLeaderboardPanel.add(Box.createVerticalStrut(1));
-            }
-
+        if (entries == null || entries.isEmpty())
+        {
+            JLabel empty = new JLabel("No data available");
+            empty.setFont(READABLE_FONT_ITALIC);
+            empty.setForeground(Color.GRAY);
+            womLeaderboardPanel.add(empty);
             womLeaderboardPanel.revalidate();
             womLeaderboardPanel.repaint();
-        });
+            return;
+        }
+
+        boolean any = false;
+        for (LeaderboardEntry entry : entries)
+        {
+            if (!leaderboardModeFilter.isEmpty()
+                && !leaderboardModeFilter.contains(normalizeAccountType(entry.accountType))) continue;
+            womLeaderboardPanel.add(createWomRow(entry, lastWomIsGained));
+            womLeaderboardPanel.add(Box.createVerticalStrut(1));
+            any = true;
+        }
+        if (!any)
+        {
+            JLabel none = new JLabel("No players match");
+            none.setFont(READABLE_FONT_ITALIC);
+            none.setForeground(Color.GRAY);
+            womLeaderboardPanel.add(none);
+        }
+
+        womLeaderboardPanel.revalidate();
+        womLeaderboardPanel.repaint();
     }
 
     private JPanel createWomRow(LeaderboardEntry entry, boolean isGained)
@@ -4390,11 +4561,37 @@ public class ClanPanel extends PluginPanel
         JPanel selectorRow = new JPanel(new BorderLayout());
         selectorRow.setBackground(ColorScheme.DARK_GRAY_COLOR);
         selectorRow.setBorder(new EmptyBorder(6, 6, 4, 6));
+        selectorRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+        selectorRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 40));
         selectorRow.add(selector, BorderLayout.CENTER);
 
-        container.add(selectorRow, BorderLayout.NORTH);
+        JComponent lbFilter = buildGameModeFilter(sel ->
+        {
+            leaderboardModeFilter.clear();
+            leaderboardModeFilter.addAll(sel);
+            reRenderActiveBoard();
+        });
+        lbFilter.setBorder(new EmptyBorder(0, 6, 4, 6));
+        lbFilter.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        JPanel north = new JPanel();
+        north.setLayout(new BoxLayout(north, BoxLayout.Y_AXIS));
+        north.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        north.add(selectorRow);
+        north.add(lbFilter);
+
+        container.add(north, BorderLayout.NORTH);
         container.add(cards, BorderLayout.CENTER);
         return container;
+    }
+
+    /** Re-render whichever leaderboard board is currently showing (used on game-mode filter change). */
+    private void reRenderActiveBoard()
+    {
+        String sel = leaderboardsSelector != null ? (String) leaderboardsSelector.getSelectedItem() : null;
+        if ("Drops".equals(sel)) renderDropsLeaderboard();
+        else if ("XP".equals(sel)) renderWomLeaderboard();
+        else renderTimesFiltered(); // Speed Times has no per-account type; render is a safe no-op filter
     }
 
     private JPanel buildHiscoresTab()
@@ -5160,6 +5357,16 @@ public class ClanPanel extends PluginPanel
     {
         List<Map<String, Object>> players = lastDropsLbPlayers;
         String localPlayerName = lastDropsLbLocalName;
+        if (players != null && !leaderboardModeFilter.isEmpty())
+        {
+            List<Map<String, Object>> filtered = new java.util.ArrayList<>();
+            for (Map<String, Object> p : players)
+            {
+                String at = p.get("accountType") instanceof String ? (String) p.get("accountType") : null;
+                if (leaderboardModeFilter.contains(normalizeAccountType(at))) filtered.add(p);
+            }
+            players = filtered;
+        }
         {
             dropsLeaderboardPanel.removeAll();
 

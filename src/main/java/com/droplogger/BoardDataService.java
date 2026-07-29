@@ -97,9 +97,10 @@ public class BoardDataService
         String p = "monthly".equals(period) ? "month" : "yearly".equals(period) ? "year" : "all";
 
         Map<String, long[]> byRsn = new LinkedHashMap<>(); // rsn -> [points, value, drops]
-        mergeBoard(base, slug, key, "points", p, byRsn, 0);
-        mergeBoard(base, slug, key, "value", p, byRsn, 1);
-        mergeBoard(base, slug, key, "count", p, byRsn, 2);
+        Map<String, String> typeByRsn = new LinkedHashMap<>(); // rsn -> account type (for the game-mode filter)
+        mergeBoard(base, slug, key, "points", p, byRsn, 0, typeByRsn);
+        mergeBoard(base, slug, key, "value", p, byRsn, 1, typeByRsn);
+        mergeBoard(base, slug, key, "count", p, byRsn, 2, typeByRsn);
 
         List<Map<String, Object>> players = new ArrayList<>();
         for (Map.Entry<String, long[]> e : byRsn.entrySet())
@@ -109,6 +110,7 @@ public class BoardDataService
             player.put("points", (int) e.getValue()[0]);
             player.put("value", e.getValue()[1]);
             player.put("drops", (int) e.getValue()[2]);
+            player.put("accountType", typeByRsn.get(e.getKey())); // null until the API carries it
             players.add(player);
         }
         players.sort((a, b) -> Integer.compare((int) b.get("points"), (int) a.get("points")));
@@ -118,7 +120,7 @@ public class BoardDataService
     }
 
     private void mergeBoard(String base, String slug, String key, String board, String period,
-                            Map<String, long[]> byRsn, int idx) throws IOException
+                            Map<String, long[]> byRsn, int idx, Map<String, String> typeByRsn) throws IOException
     {
         Map<String, String> q = new LinkedHashMap<>();
         q.put("board", board);
@@ -132,6 +134,10 @@ public class BoardDataService
             String rsn = str(e, "rsn");
             long v = e.has("value") ? e.get("value").getAsLong() : 0L;
             byRsn.computeIfAbsent(rsn, k -> new long[3])[idx] = v;
+            if (e.has("accountType") && !e.get("accountType").isJsonNull())
+            {
+                typeByRsn.putIfAbsent(rsn, e.get("accountType").getAsString());
+            }
         }
     }
 

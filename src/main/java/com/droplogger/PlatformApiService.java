@@ -568,7 +568,9 @@ public class PlatformApiService
                 int rank = o.has("rank") ? o.get("rank").getAsInt() : entries.size() + 1;
                 String rsn = o.has("rsn") ? o.get("rsn").getAsString() : "";
                 long value = o.has("value") && !o.get("value").isJsonNull() ? o.get("value").getAsLong() : 0;
-                entries.add(new LeaderboardEntry(rank, rsn, "member", value, 0, value));
+                LeaderboardEntry le = new LeaderboardEntry(rank, rsn, "member", value, 0, value);
+                if (o.has("accountType") && !o.get("accountType").isJsonNull()) le.accountType = o.get("accountType").getAsString();
+                entries.add(le);
             }
         }
         catch (Exception ex)
@@ -605,7 +607,9 @@ public class PlatformApiService
                 int rank = o.has("rank") ? o.get("rank").getAsInt() : entries.size() + 1;
                 String rsn = o.has("rsn") ? o.get("rsn").getAsString() : "";
                 long value = o.has("value") && !o.get("value").isJsonNull() ? o.get("value").getAsLong() : 0;
-                entries.add(new LeaderboardEntry(rank, rsn, "member", value, 0, value));
+                LeaderboardEntry le = new LeaderboardEntry(rank, rsn, "member", value, 0, value);
+                if (o.has("accountType") && !o.get("accountType").isJsonNull()) le.accountType = o.get("accountType").getAsString();
+                entries.add(le);
             }
         }
         catch (Exception ex)

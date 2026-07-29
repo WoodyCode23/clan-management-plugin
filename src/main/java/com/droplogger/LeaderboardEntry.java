@@ -15,6 +15,10 @@ public class LeaderboardEntry
     public final int level;
     public final long gained;
     public ImageIcon roleIcon;
+    // Game mode (players.account_type: regular|ironman|hardcore|ultimate|gim|hcgim|unranked_gim).
+    // Null when the board payload predates the account-type field; the game-mode filter treats
+    // null as "regular".
+    public String accountType;
 
     public LeaderboardEntry(int rank, String username, String role, long experience, int level, long gained)
     {
