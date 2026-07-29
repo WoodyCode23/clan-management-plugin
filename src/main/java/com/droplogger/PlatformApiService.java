@@ -940,6 +940,154 @@ public class PlatformApiService
         return out;
     }
 
+    // ── Teams (GIM / shared profiles) ──
+    public static class TeamMemberBrief
+    {
+        public final String rsn;
+        public final String accountType;
+        public TeamMemberBrief(String rsn, String accountType) { this.rsn = rsn; this.accountType = accountType; }
+    }
+
+    public static class TeamSummary
+    {
+        public final String name, slug, kind;
+        public final List<TeamMemberBrief> members;
+        public TeamSummary(String name, String slug, String kind, List<TeamMemberBrief> members)
+        { this.name = name; this.slug = slug; this.kind = kind; this.members = members; }
+    }
+
+    public static class TeamProfileMember
+    {
+        public final String rsn, accountType;
+        public final long exp;
+        public final Double ehb;
+        public final int clogObtained, clogTotal;
+        public TeamProfileMember(String rsn, String accountType, long exp, Double ehb, int clogObtained, int clogTotal)
+        { this.rsn = rsn; this.accountType = accountType; this.exp = exp; this.ehb = ehb; this.clogObtained = clogObtained; this.clogTotal = clogTotal; }
+    }
+
+    public static class TeamPb
+    {
+        public final String bossKey, holder;
+        public final int teamSize, timeMs;
+        public TeamPb(String bossKey, int teamSize, int timeMs, String holder)
+        { this.bossKey = bossKey; this.teamSize = teamSize; this.timeMs = timeMs; this.holder = holder; }
+    }
+
+    public static class TeamDrop
+    {
+        public final String rsn, itemName, monsterName;
+        public final int itemId;
+        public final long value;
+        public TeamDrop(String rsn, String itemName, int itemId, long value, String monsterName)
+        { this.rsn = rsn; this.itemName = itemName; this.itemId = itemId; this.value = value; this.monsterName = monsterName; }
+    }
+
+    public static class TeamProfile
+    {
+        public final String name, slug, kind;
+        public final long totalExp;
+        public final double totalEhb;
+        public final int clogUnion;
+        public final List<TeamProfileMember> members;
+        public final List<TeamDrop> recentDrops;
+        public final List<TeamPb> pbs;
+        public TeamProfile(String name, String slug, String kind, long totalExp, double totalEhb, int clogUnion,
+                           List<TeamProfileMember> members, List<TeamDrop> recentDrops, List<TeamPb> pbs)
+        { this.name = name; this.slug = slug; this.kind = kind; this.totalExp = totalExp; this.totalEhb = totalEhb;
+          this.clogUnion = clogUnion; this.members = members; this.recentDrops = recentDrops; this.pbs = pbs; }
+    }
+
+    /** All teams (name + kind + member briefs) for the Members list. Never throws. */
+    public List<TeamSummary> fetchTeams(String baseUrl, String apiKey, String clanSlug)
+    {
+        List<TeamSummary> out = new ArrayList<>();
+        JsonObject root = getSync(baseUrl + "/clans/" + clanSlug + "/teams", apiKey);
+        if (root == null || !root.has("teams")) return out;
+        for (JsonElement el : root.getAsJsonArray("teams"))
+        {
+            JsonObject o = el.getAsJsonObject();
+            List<TeamMemberBrief> members = new ArrayList<>();
+            if (o.has("members") && o.get("members").isJsonArray())
+            {
+                for (JsonElement me : o.getAsJsonArray("members"))
+                {
+                    JsonObject m = me.getAsJsonObject();
+                    members.add(new TeamMemberBrief(
+                        m.has("rsn") ? m.get("rsn").getAsString() : "",
+                        m.has("accountType") && !m.get("accountType").isJsonNull() ? m.get("accountType").getAsString() : null));
+                }
+            }
+            out.add(new TeamSummary(
+                o.has("name") ? o.get("name").getAsString() : "",
+                o.has("slug") ? o.get("slug").getAsString() : "",
+                o.has("kind") ? o.get("kind").getAsString() : "gim",
+                members));
+        }
+        return out;
+    }
+
+    /** One team's aggregated shared profile. Null on failure / unknown team. */
+    public TeamProfile fetchTeamProfile(String baseUrl, String apiKey, String clanSlug, String teamSlug)
+    {
+        JsonObject root = getSync(baseUrl + "/clans/" + clanSlug + "/teams/" + encodePath(teamSlug), apiKey);
+        if (root == null || !root.has("team") || root.get("team").isJsonNull()) return null;
+        JsonObject t = root.getAsJsonObject("team");
+
+        List<TeamProfileMember> members = new ArrayList<>();
+        if (root.has("members") && root.get("members").isJsonArray())
+        {
+            for (JsonElement el : root.getAsJsonArray("members"))
+            {
+                JsonObject m = el.getAsJsonObject();
+                members.add(new TeamProfileMember(
+                    m.has("rsn") ? m.get("rsn").getAsString() : "",
+                    m.has("accountType") && !m.get("accountType").isJsonNull() ? m.get("accountType").getAsString() : null,
+                    m.has("exp") && !m.get("exp").isJsonNull() ? m.get("exp").getAsLong() : 0,
+                    m.has("ehb") && !m.get("ehb").isJsonNull() ? m.get("ehb").getAsDouble() : null,
+                    m.has("clogObtained") && !m.get("clogObtained").isJsonNull() ? m.get("clogObtained").getAsInt() : 0,
+                    m.has("clogTotal") && !m.get("clogTotal").isJsonNull() ? m.get("clogTotal").getAsInt() : 0));
+            }
+        }
+        List<TeamDrop> drops = new ArrayList<>();
+        if (root.has("recentDrops") && root.get("recentDrops").isJsonArray())
+        {
+            for (JsonElement el : root.getAsJsonArray("recentDrops"))
+            {
+                JsonObject d = el.getAsJsonObject();
+                drops.add(new TeamDrop(
+                    d.has("rsn") ? d.get("rsn").getAsString() : "",
+                    d.has("itemName") ? d.get("itemName").getAsString() : "",
+                    d.has("itemId") && !d.get("itemId").isJsonNull() ? d.get("itemId").getAsInt() : 0,
+                    d.has("value") && !d.get("value").isJsonNull() ? d.get("value").getAsLong() : 0,
+                    d.has("monsterName") && !d.get("monsterName").isJsonNull() ? d.get("monsterName").getAsString() : ""));
+            }
+        }
+        List<TeamPb> pbs = new ArrayList<>();
+        if (root.has("pbs") && root.get("pbs").isJsonArray())
+        {
+            for (JsonElement el : root.getAsJsonArray("pbs"))
+            {
+                JsonObject p = el.getAsJsonObject();
+                pbs.add(new TeamPb(
+                    p.has("bossKey") ? p.get("bossKey").getAsString() : "",
+                    p.has("teamSize") && !p.get("teamSize").isJsonNull() ? p.get("teamSize").getAsInt() : 1,
+                    p.has("timeMs") && !p.get("timeMs").isJsonNull() ? p.get("timeMs").getAsInt() : 0,
+                    p.has("rsn") ? p.get("rsn").getAsString() : ""));
+            }
+        }
+        JsonObject totals = root.has("totals") && root.get("totals").isJsonObject() ? root.getAsJsonObject("totals") : null;
+        long totalExp = totals != null && totals.has("totalExp") && !totals.get("totalExp").isJsonNull() ? totals.get("totalExp").getAsLong() : 0;
+        double totalEhb = totals != null && totals.has("totalEhb") && !totals.get("totalEhb").isJsonNull() ? totals.get("totalEhb").getAsDouble() : 0;
+        int clogUnion = totals != null && totals.has("clogUnion") && !totals.get("clogUnion").isJsonNull() ? totals.get("clogUnion").getAsInt() : 0;
+
+        return new TeamProfile(
+            t.has("name") ? t.get("name").getAsString() : "",
+            t.has("slug") ? t.get("slug").getAsString() : teamSlug,
+            t.has("kind") ? t.get("kind").getAsString() : "gim",
+            totalExp, totalEhb, clogUnion, members, drops, pbs);
+    }
+
     public static class RankMode
     {
         public final String mode;                    // "default" | "clog_only" | "admin_set"

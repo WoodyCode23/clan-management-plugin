@@ -69,6 +69,8 @@ public class ClanPanel extends PluginPanel
     private final JTextField clogTabSearchField = new JTextField();
     private final JPanel clogCatListPanel = new JPanel();
     private java.util.List<PlatformApiService.RosterMember> currentMembers = new java.util.ArrayList<>();
+    private java.util.List<PlatformApiService.TeamSummary> currentTeams = new java.util.ArrayList<>();
+    private java.util.function.Consumer<String> onSelectTeam; // team slug -> fetch + show profile
     private Runnable onLoadRoster;
     private Runnable onLoadEvent;
     private boolean heldRanksExpanded = false;
@@ -776,10 +778,25 @@ public class ClanPanel extends PluginPanel
         }
         else
         {
-            int shown = 0;
+            // Teams and members share ONE list, sorted by name — a team is a shared account among
+            // the members, not a pinned section. Rows carry a sort name + the render callback.
+            java.util.List<Object[]> rows = new java.util.ArrayList<>();
+            for (PlatformApiService.TeamSummary t : currentTeams)
+            {
+                if (!q.isEmpty() && !t.name.toLowerCase().contains(q)
+                    && t.members.stream().noneMatch(mm -> mm.rsn.toLowerCase().contains(q))) continue;
+                rows.add(new Object[]{ t.name.toLowerCase(), (java.util.function.Supplier<JComponent>) () -> buildTeamRow(t) });
+            }
             for (PlatformApiService.RosterMember m : currentMembers)
             {
                 if (!q.isEmpty() && !m.rsn.toLowerCase().contains(q)) continue;
+                rows.add(new Object[]{ m.rsn.toLowerCase(), (java.util.function.Supplier<JComponent>) () -> buildMemberRow(m) });
+            }
+            rows.sort((a, b) -> ((String) a[0]).compareTo((String) b[0]));
+
+            int shown = 0;
+            for (Object[] r : rows)
+            {
                 if (shown >= 80)
                 {
                     JLabel more = new JLabel("…refine your search to see more");
@@ -789,7 +806,9 @@ public class ClanPanel extends PluginPanel
                     membersContent.add(more);
                     break;
                 }
-                membersContent.add(buildMemberRow(m));
+                @SuppressWarnings("unchecked")
+                java.util.function.Supplier<JComponent> build = (java.util.function.Supplier<JComponent>) r[1];
+                membersContent.add(build.get());
                 membersContent.add(Box.createVerticalStrut(2));
                 shown++;
             }
@@ -848,6 +867,163 @@ public class ClanPanel extends PluginPanel
         l.setFont(READABLE_FONT_SMALL.deriveFont(Font.BOLD, 9f));
         l.setForeground(color);
         return l;
+    }
+
+    /** A shared-team row: gold name + GIM helm + account count; opens the team's shared profile. */
+    private JPanel buildTeamRow(PlatformApiService.TeamSummary t)
+    {
+        JPanel row = new JPanel(new BorderLayout(6, 0));
+        row.setBackground(new Color(44, 42, 33)); // faint gold tint so teams read as special
+        row.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(new Color(70, 66, 45)),
+            new EmptyBorder(7, 10, 7, 10)));
+        row.setAlignmentX(Component.LEFT_ALIGNMENT);
+        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 32));
+        row.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+
+        JLabel name = new JLabel(t.name);
+        name.setFont(READABLE_FONT.deriveFont(Font.BOLD));
+        name.setForeground(new Color(212, 175, 55));
+        // GIM flavour helm (kind == account type for gim/hcgim/unranked_gim).
+        javax.swing.ImageIcon helm = accountTypeIcon("custom".equals(t.kind) ? null : t.kind);
+        if (helm != null) { name.setIcon(helm); name.setIconTextGap(4); }
+        row.add(name, BorderLayout.WEST);
+
+        JLabel count = new JLabel(t.members.size() + (t.members.size() == 1 ? " account" : " accounts"));
+        count.setFont(READABLE_FONT_SMALL);
+        count.setForeground(new Color(150, 150, 150));
+        row.add(count, BorderLayout.EAST);
+
+        row.addMouseListener(new java.awt.event.MouseAdapter()
+        {
+            @Override public void mouseClicked(java.awt.event.MouseEvent e)
+            { if (onSelectTeam != null) onSelectTeam.accept(t.slug); }
+        });
+        return row;
+    }
+
+    /** The team shared profile: combined totals + members + recent drops + best times. */
+    public void showTeamProfile(PlatformApiService.TeamProfile tp)
+    {
+        SwingUtilities.invokeLater(() ->
+        {
+            membersContent.removeAll();
+            membersContent.add(clogBackButton("← Members", this::renderMemberList));
+            membersContent.add(Box.createVerticalStrut(6));
+            if (tp == null)
+            {
+                membersContent.add(clogNote("Could not load this team."));
+                membersContent.revalidate();
+                membersContent.repaint();
+                return;
+            }
+
+            JLabel title = clogTitle(tp.name, new Color(212, 175, 55), 16f);
+            javax.swing.ImageIcon helm = accountTypeIcon("custom".equals(tp.kind) ? null : tp.kind);
+            if (helm != null) { title.setIcon(helm); title.setIconTextGap(5); }
+            membersContent.add(title);
+
+            String flavour = "gim".equals(tp.kind) ? "Group Ironman"
+                : "hcgim".equals(tp.kind) ? "Hardcore Group Ironman"
+                : "unranked_gim".equals(tp.kind) ? "Unranked Group Ironman" : "Team";
+            membersContent.add(clogNote(flavour + "  ·  shared profile"));
+            membersContent.add(Box.createVerticalStrut(6));
+
+            // Combined totals
+            membersContent.add(clogNote(tp.clogUnion + " combined clog  ·  "
+                + formatXp(tp.totalExp) + " total XP  ·  " + String.format("%,.0f", tp.totalEhb) + " EHB"));
+            membersContent.add(Box.createVerticalStrut(8));
+
+            // Accounts
+            membersContent.add(clogTitle("Accounts", new Color(186, 142, 255), 12f));
+            membersContent.add(Box.createVerticalStrut(2));
+            for (PlatformApiService.TeamProfileMember m : tp.members)
+            {
+                JPanel row = new JPanel(new BorderLayout(6, 0));
+                row.setBackground(new Color(38, 38, 38));
+                row.setBorder(new EmptyBorder(4, 8, 4, 8));
+                row.setAlignmentX(Component.LEFT_ALIGNMENT);
+                row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
+                JLabel n = new JLabel(m.rsn);
+                n.setFont(READABLE_FONT_SMALL);
+                n.setForeground(Color.WHITE);
+                // A member keeps the team's flavour helm (they're all that GIM type).
+                javax.swing.ImageIcon mh = accountTypeIcon("custom".equals(tp.kind) ? m.accountType : tp.kind);
+                if (mh != null) { n.setIcon(mh); n.setIconTextGap(4); }
+                row.add(n, BorderLayout.WEST);
+                JLabel stat = new JLabel(formatXp(m.exp) + " xp"
+                    + (m.ehb != null ? "  ·  " + String.format("%,.0f", m.ehb) + " ehb" : ""));
+                stat.setFont(READABLE_FONT_SMALL);
+                stat.setForeground(new Color(150, 150, 150));
+                row.add(stat, BorderLayout.EAST);
+                membersContent.add(row);
+                membersContent.add(Box.createVerticalStrut(1));
+            }
+
+            // Recent drops
+            if (!tp.recentDrops.isEmpty())
+            {
+                membersContent.add(Box.createVerticalStrut(8));
+                membersContent.add(clogTitle("Recent Drops", new Color(255, 180, 100), 12f));
+                membersContent.add(Box.createVerticalStrut(2));
+                for (PlatformApiService.TeamDrop d : tp.recentDrops)
+                {
+                    JPanel row = new JPanel(new BorderLayout(6, 0));
+                    row.setBackground(new Color(35, 35, 35));
+                    row.setBorder(new EmptyBorder(4, 8, 4, 8));
+                    row.setAlignmentX(Component.LEFT_ALIGNMENT);
+                    row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
+                    int iconId = d.itemId > 0 ? d.itemId : resolveItemId(d.itemName);
+                    if (iconId > 0 && itemManager != null)
+                    {
+                        JLabel icon = new JLabel();
+                        icon.setPreferredSize(new Dimension(30, 26));
+                        AsyncBufferedImage img = itemManager.getImage(iconId);
+                        icon.setIcon(new ImageIcon(img));
+                        img.onLoaded(() -> { icon.setIcon(new ImageIcon(img)); icon.revalidate(); icon.repaint(); });
+                        row.add(icon, BorderLayout.WEST);
+                    }
+                    JLabel txt = new JLabel(d.itemName + "  ·  " + d.rsn);
+                    txt.setFont(READABLE_FONT_SMALL);
+                    txt.setForeground(Color.WHITE);
+                    row.add(txt, BorderLayout.CENTER);
+                    membersContent.add(row);
+                    membersContent.add(Box.createVerticalStrut(1));
+                }
+            }
+
+            // Best times (any member)
+            if (!tp.pbs.isEmpty())
+            {
+                membersContent.add(Box.createVerticalStrut(8));
+                membersContent.add(clogTitle("Best Times", new Color(100, 149, 237), 12f));
+                membersContent.add(Box.createVerticalStrut(2));
+                for (PlatformApiService.TeamPb pb : tp.pbs)
+                {
+                    BossCategory cat = BossCategory.fromKey(pb.bossKey);
+                    String sizeLabel = (cat != null && cat.getMaxPlayers() > 1) ? cat.getSizeLabel() : null;
+                    String label = bossName(pb.bossKey) + (sizeLabel != null ? " (" + sizeLabel + ")" : "");
+                    JPanel row = new JPanel(new BorderLayout(6, 0));
+                    row.setBackground(new Color(35, 35, 35));
+                    row.setBorder(new EmptyBorder(4, 8, 4, 8));
+                    row.setAlignmentX(Component.LEFT_ALIGNMENT);
+                    row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
+                    JLabel n = new JLabel(label);
+                    n.setFont(READABLE_FONT_SMALL);
+                    n.setForeground(Color.WHITE);
+                    row.add(n, BorderLayout.WEST);
+                    JLabel time = new JLabel(formatMs(pb.timeMs) + "  " + pb.holder);
+                    time.setFont(READABLE_FONT_SMALL);
+                    time.setForeground(new Color(100, 149, 237));
+                    row.add(time, BorderLayout.EAST);
+                    membersContent.add(row);
+                    membersContent.add(Box.createVerticalStrut(1));
+                }
+            }
+
+            membersContent.revalidate();
+            membersContent.repaint();
+        });
     }
 
     private JPanel buildMemberRow(PlatformApiService.RosterMember m)
@@ -3054,6 +3230,16 @@ public class ClanPanel extends PluginPanel
     }
 
     public void setOnSelectMember(java.util.function.Consumer<String> cb) { this.onSelectMember = cb; }
+    public void setOnSelectTeam(java.util.function.Consumer<String> cb) { this.onSelectTeam = cb; }
+
+    public void setTeams(java.util.List<PlatformApiService.TeamSummary> teams)
+    {
+        SwingUtilities.invokeLater(() ->
+        {
+            currentTeams = teams != null ? teams : new java.util.ArrayList<>();
+            renderMemberList();
+        });
+    }
     public void setPlatformAdmin(boolean a) { this.platformAdmin = a; }
     public void setOnSetRankOverride(java.util.function.Consumer<Object[]> cb) { this.onSetRankOverride = cb; }
     public void setOnClearRankOverride(java.util.function.Consumer<String> cb) { this.onClearRankOverride = cb; }

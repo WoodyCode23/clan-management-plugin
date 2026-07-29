@@ -583,6 +583,12 @@ public class ClanManagementPlugin extends Plugin
         {
             if (!isPlatformConfigured()) return;
             panel.setMemberList(platformApiService.fetchRoster(getPlatformUrl(), getPlatformKey(), getPlatformSlug()));
+            panel.setTeams(platformApiService.fetchTeams(getPlatformUrl(), getPlatformKey(), getPlatformSlug()));
+        }));
+        panel.setOnSelectTeam(teamSlug -> executor.submit(() ->
+        {
+            if (!isPlatformConfigured()) return;
+            panel.showTeamProfile(platformApiService.fetchTeamProfile(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), teamSlug));
         }));
         // Event tab: live draft state (public endpoint) — your team, captains, roster.
         panel.setOnLoadEvent(() -> executor.submit(() ->
