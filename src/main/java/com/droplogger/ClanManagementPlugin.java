@@ -264,6 +264,12 @@ public class ClanManagementPlugin extends Plugin
 
     // Collection log sync state (automatic — like WikiSync/RuneProfile)
     private final Map<Integer, ClogItem> clogSyncItems = Collections.synchronizedMap(new LinkedHashMap<>());
+    // Rank checks default to CURRENT possession (bank/equipment). The collection log may ONLY grant
+    // ownership for items consumed into a permanent unlock that leave no holdable trace, so a sold,
+    // lost, hacked, or Jagex-stripped item never counts. Keep this list tiny and deliberate.
+    private static final Set<String> CLOG_OWNED_WHITELIST = new HashSet<>(Arrays.asList(
+        "slepey tablet"
+    ));
     private Map<Integer, String[]> clogItemCategoryMap = null; // itemId -> [tab, category]
     private Map<String, Integer> clogNameToId = null; // lowercase item name -> itemId (for pet icons)
     private int clogDebounceTicksRemaining = -1;
@@ -2539,16 +2545,17 @@ public class ClanManagementPlugin extends Plugin
             cacheContainerItems(InventoryID.BANK);
             s.ownedItems.addAll(rankOwnedCache);
             s.itemIds.putAll(rankOwnedIds);
-            // ALSO count collection-log obtained items (read locally when the clog is opened).
-            // Consumed/combined uniques — Slepey tablet into the necklace, used prayer scrolls,
-            // Cursed phalanx — vanish from the bank but stay logged forever.
+            // ALSO count a TIGHT whitelist of collection-log items: only things CONSUMED into a
+            // permanent unlock that leave NO holdable trace (e.g. Slepey tablet). Everything else
+            // must be proven by CURRENT possession (bank/equipment), so a sold, lost, hacked, or
+            // Jagex-stripped item never counts. Icons still resolve from the clog id map regardless.
             synchronized (clogSyncItems)
             {
                 for (ClogItem ci : clogSyncItems.values())
                 {
                     String key = ci.name.toLowerCase();
-                    s.ownedItems.add(key);
                     s.itemIds.putIfAbsent(key, ci.itemId);
+                    if (CLOG_OWNED_WHITELIST.contains(key)) s.ownedItems.add(key);
                 }
             }
         }
