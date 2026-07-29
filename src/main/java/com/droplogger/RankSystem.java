@@ -367,6 +367,7 @@ public final class RankSystem
         IMPLIES.put("amulet of rancour (s)", new String[]{"amulet of rancour"}); // ornament variant
         IMPLIES.put("confliction gauntlets", new String[]{"tormented bracelet"}); // tormented upgrade (wiki-confirmed)
         IMPLIES.put("ferocious gloves", new String[]{"hydra leather"}); // made FROM the leather
+        IMPLIES.put("dragon hunter lance", new String[]{"hydra's claw"}); // lance is built FROM the Hydra's claw
         // Maggot King necklace chain: rupture = anguish + etched fang (proves owning both).
         IMPLIES.put("necklace of rupture", new String[]{"necklace of anguish", "etched elder venator fang"});
         IMPLIES.put("etched elder venator fang", new String[]{"elder venator fang"});
@@ -571,7 +572,7 @@ public final class RankSystem
             Check.any("Araxxor — 600 KC or Noxious halberd / Fang", 1, Check.kc("Araxxor 600 KC", 600, "araxxor"),
                 Check.items("Araxxor unique", 1, "Noxious halberd", "Noxious blade", "Noxious point", "Noxious pommel", "Araxyte fang")),
             Check.any("Alchemical Hydra — 1,001 KC or Claw + Leather", 1, Check.kc("Alchemical Hydra 1,001 KC", 1001, "alchemical_hydra"),
-                Check.all("Hydra uniques", Check.item("Hydra claw"), Check.item("Hydra leather"))),
+                Check.all("Hydra uniques", Check.item("Hydra's claw"), Check.item("Hydra leather"))),
             Check.items("Any DT2 Vestige", 1, "Ultor vestige", "Magus vestige", "Bellator vestige", "Venator vestige",
                 "Ultor ring", "Magus ring", "Bellator ring", "Venator ring"),
             Check.kc("Chambers of Xeric — 200 KC", 200, "cox_total"),
