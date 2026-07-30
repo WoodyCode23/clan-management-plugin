@@ -2482,6 +2482,25 @@ public class ClanManagementPlugin extends Plugin
         }
     }
 
+    // TEMP DEBUG (ornate rejuvenation pool detection) — logs any POH "pool" object's id + name when
+    // it loads, so we can identify the ornate pool for the TzKal stat-restoration check. Remove after.
+    @Subscribe
+    public void onGameObjectSpawnedPoolDebug(net.runelite.api.events.GameObjectSpawned event)
+    {
+        try
+        {
+            int id = event.getGameObject().getId();
+            net.runelite.api.ObjectComposition comp = client.getObjectDefinition(id);
+            String name = comp != null && comp.getName() != null ? comp.getName() : "";
+            String ln = name.toLowerCase();
+            if (ln.contains("pool") || ln.contains("rejuvenation"))
+            {
+                log.info("[POOL DEBUG] name='{}' id={} loc={}", name, id, event.getTile().getWorldLocation());
+            }
+        }
+        catch (Exception ignored) {}
+    }
+
     /** Build a snapshot of the local player's state for clan-rank validation. Client thread only.
      *  Reads are LOCAL; nothing here is transmitted. */
     private RankSystem.PlayerSnapshot buildRankSnapshot(boolean clogOnly)

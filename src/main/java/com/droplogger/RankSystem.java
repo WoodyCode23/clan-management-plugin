@@ -584,7 +584,7 @@ public final class RankSystem
         Group rnSword78Herb = Group.of("78 Herblore", 1, Check.skill("78 Herblore", "Herblore", 78));
         Group rnSwordHardCa = Group.of("Hard Combat Achievements", 1,
             caTierOrHilt("Hard", "Ghommal's hilt 3", "Ghommal's hilt 4", "Ghommal's hilt 5", "Ghommal's hilt 6"));
-        Group rnSwordAchieve = Group.of("Achieve 5 of 9", 5,
+        Group rnSwordAchieve = Group.of("Achieve 5 of 8", 5,
             Check.any("Zulrah — 512 KC or 2/3 uniques", 1, Check.kc("Zulrah 512 KC", 512, "zulrah"),
                 Check.items("2 Zulrah uniques", 2, "Tanzanite fang", "Magic fang", "Serpentine visage")),
             Check.any("God Wars — 508 KC or 4 uniques", 1, Check.kc("God Wars 508 KC", 508, "god_wars_dungeon"),
@@ -601,8 +601,7 @@ public final class RankSystem
             Check.kc("100 combined raid KC", 100, "raids_combined"),
             Check.any("Corrupted Gauntlet: 100 KC or Enhanced seed", 1,
                 Check.kc("Corrupted Gauntlet 100 KC", 100, "the_corrupted_gauntlet"),
-                Check.item("Enhanced crystal weapon seed")),
-            Check.caTier("Hard"));
+                Check.item("Enhanced crystal weapon seed")));
         RANKS.add(new Rank("rune_sword", "Rune Sword", "PvM", "Mid-game PvM",
             req("adamant_sword"), Arrays.asList(rnSwordUniques, rnSwordZenyte, rnSword78Herb, rnSwordHardCa, rnSwordAchieve)));
 
@@ -634,7 +633,7 @@ public final class RankSystem
             Check.items("Zaryte crossbow / Dragon claws / Voidwaker", 1, "Zaryte crossbow", "Dragon claws", "Voidwaker"));
         Group drSwordDebuffSpec = Group.of("Debuff special weapon (1 of 3)", 1,
             Check.items("Bandos godsword / Dragon warhammer / Elder maul", 1, "Bandos godsword", "Dragon warhammer", "Elder maul"));
-        Group drSwordAchieve = Group.of("Achieve 5 of 9", 5,
+        Group drSwordAchieve = Group.of("Achieve 5 of 8", 5,
             Check.any("Corrupted Gauntlet — 400 KC or weapon+armour seeds", 1, Check.kc("Corrupted Gauntlet 400 KC", 400, "the_corrupted_gauntlet"),
                 // Spec is enhanced weapon seed + 5 armour seeds; ownership is name-based so the
                 // armour-seed COUNT can't be verified — presence of both is the closest readable check.
@@ -651,8 +650,7 @@ public final class RankSystem
                 "Ultor ring", "Magus ring", "Bellator ring", "Venator ring"),
             Check.kc("Chambers of Xeric — 200 KC", 200, "cox_total"),
             Check.kc("Theatre of Blood — 200 KC", 200, "tob_total"),
-            Check.kc("Tombs of Amascut — 200 KC", 200, "toa_total"),
-            Check.caTier("Elite"));
+            Check.kc("Tombs of Amascut — 200 KC", 200, "toa_total"));
         RANKS.add(new Rank("dragon_sword", "Dragon Sword", "PvM", "Pre-late-game PvM",
             req("rune_sword"), Arrays.asList(drSwordUniques, drSwordZenyte, drSwordEliteCa, drSwordDamageSpec, drSwordDebuffSpec, drSwordAchieve)));
 
