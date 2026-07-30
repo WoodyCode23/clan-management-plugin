@@ -1417,8 +1417,11 @@ public class ClanPanel extends PluginPanel
         }
         else
         {
-            String clogSub = currentProfile.clogObtained
-                + (currentProfile.clogTotal > 0 ? " / " + currentProfile.clogTotal : "") + " unique items";
+            // Clog total is a global OSRS constant (1712 as of the 2026 update). A member's stored
+            // clogTotal is stale if they synced before an update, so show at least the current total
+            // instead of dropping the denominator entirely.
+            int clogTot = Math.max(currentProfile.clogTotal, 1712);
+            String clogSub = currentProfile.clogObtained + " / " + clogTot + " unique items";
             membersContent.add(buildSectionCard("Collection Log", clogSub, new Color(186, 142, 255),
                 () -> { if (onLoadClog != null) onLoadClog.accept(currentClogRsn); }));
             membersContent.add(Box.createVerticalStrut(6));

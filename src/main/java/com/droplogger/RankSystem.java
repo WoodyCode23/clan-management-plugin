@@ -495,12 +495,35 @@ public final class RankSystem
         return Check.items(label, n, "Amulet of torture", "Necklace of anguish", "Tormented bracelet", "Ring of suffering");
     }
 
+    // "Bigger and Badder" = the superior-slayer unlock. No clean varbit is exposed, so we accept any
+    // superior-monster unique clog slot as proof you unlocked (and fought) superiors. NOTE: this is
+    // slightly stricter than the raw unlock (needs a superior UNIQUE drop); swap to a varbit if found.
+    private static Check biggerAndBadder()
+    {
+        return Check.clogSlot("Bigger and Badder (superior slayer)",
+            "Imbued heart", "Eternal gem", "Dust battlestaff", "Mist battlestaff");
+    }
+
+    // "1 of 2 Titan prayer scrolls" (Royal Titans) — own a scroll OR have the prayer unlocked.
+    private static Check titanScrolls()
+    {
+        return Check.any("1 of 2 Titan prayer scrolls", 1,
+            Check.unlock("Deadeye unlocked", "deadeye"), Check.item("Deadeye prayer scroll"),
+            Check.unlock("Mystic Vigour unlocked", "mystic vigour"), Check.item("Mystic vigour prayer scroll"));
+    }
+
+    private static Check endGameMeleeHelm()
+    {
+        return Check.items("Any end-game melee helm", 1,
+            "Torva full helm", "Neitiznot faceguard", "Justiciar faceguard", "Oathplate helm");
+    }
+
     static
     {
         // ===================== PvM PATH (Sword) =====================
 
         // — Adamant Sword — Pre-mid-game PvM (no prerequisite).
-        Group amSwordUniques = Group.of("Obtain any 8 of 12 early-game uniques", 8,
+        Group amSwordUniques = Group.of("Obtain any 9 of 12 early-game uniques", 9,
             Check.item("Fire cape"),
             Check.items("Imbued god cape (MA2)", 1, "Imbued saradomin cape", "Imbued guthix cape", "Imbued zamorak cape"),
             Check.item("Dragon defender"),
@@ -511,23 +534,26 @@ public final class RankSystem
             Check.item("Zombie axe"),
             Check.item("Twinflame staff"),
             Check.item("Arclight"),
-            Check.item("Sulphur naginata"),
+            Check.item("Sulphur blades"),
             Check.item("Glacial temotli"));
-        Group amSwordAchieve = Group.of("Achieve 6 of 9", 6,
+        Group amSwordPrayer = Group.of("70 Prayer", 1, Check.skill("70 Prayer", "Prayer", 70));
+        Group amSwordMedCa = Group.of("Medium Combat Achievements", 1, Check.caTier("Medium"));
+        Group amSwordBigger = Group.of("Bigger and Badder (superior slayer)", 1, biggerAndBadder());
+        Group amSwordAchieve = Group.of("Achieve 5 of 9", 5,
             Check.items("Black mask", 1, "Black mask", "Black mask (i)"),
             Check.item("Barrows gloves"),
-            Check.skill("70 Prayer", "Prayer", 70),
             moonSet(),
             Check.item("Fighter torso"),
             fullVoid(),
             Check.items("Mix-n-Match Barrows", 1, "Dharok's helm", "Ahrim's hood", "Karil's coif", "Guthan's helm", "Torag's helm", "Verac's helm"),
             Check.items("Ranger boots / Spiked manacles", 1, "Ranger boots", "Spiked manacles"),
-            Check.caTier("Medium"));
+            Check.combat(100),
+            titanScrolls());
         RANKS.add(new Rank("adamant_sword", "Adamant Sword", "PvM", "Pre-mid-game PvM",
-            new ArrayList<>(), Arrays.asList(amSwordUniques, amSwordAchieve)));
+            new ArrayList<>(), Arrays.asList(amSwordUniques, amSwordPrayer, amSwordMedCa, amSwordBigger, amSwordAchieve)));
 
         // — Rune Sword — Mid-game PvM (requires Adamant Sword).
-        Group rnSwordUniques = Group.of("Obtain any 8 of 12 mid-game uniques", 8,
+        Group rnSwordUniques = Group.of("Obtain any 9 of 12 mid-game uniques", 9,
             Check.item("Fire cape"),
             Check.items("Imbued god cape (MA2)", 1, "Imbued saradomin cape", "Imbued guthix cape", "Imbued zamorak cape"),
             Check.item("Dragon defender"),
@@ -543,7 +569,9 @@ public final class RankSystem
                 Check.unlock("Mystic Vigour unlocked", "mystic vigour"), Check.item("Mystic vigour prayer scroll")),
             Check.item("Ava's assembler"));
         Group rnSwordZenyte = Group.of("Obtain any 1 of 4 Zenyte jewellery", 1, zenyte("Zenyte jewellery", 1));
-        Group rnSwordAchieve = Group.of("Achieve 6 of 9", 6,
+        Group rnSword78Herb = Group.of("78 Herblore", 1, Check.skill("78 Herblore", "Herblore", 78));
+        Group rnSwordHardDiary = Group.of("5 Hard Diaries", 1, Check.diary("Hard", 5));
+        Group rnSwordAchieve = Group.of("Achieve 5 of 9", 5,
             Check.any("Zulrah — 512 KC or 2/3 uniques", 1, Check.kc("Zulrah 512 KC", 512, "zulrah"),
                 Check.items("2 Zulrah uniques", 2, "Tanzanite fang", "Magic fang", "Serpentine visage")),
             Check.any("God Wars — 508 KC or 4 uniques", 1, Check.kc("God Wars 508 KC", 508, "god_wars_dungeon"),
@@ -552,17 +580,18 @@ public final class RankSystem
                     "Armadyl crossbow", "Staff of the dead", "Zamorakian spear", "Saradomin's light")),
             Check.any("Cerberus — 512 KC or 2 crystals", 1, Check.kc("Cerberus 512 KC", 512, "cerberus"),
                 Check.items("2 Cerberus crystals", 2, "Primordial crystal", "Pegasian crystal", "Eternal crystal")),
-            Check.any("Phantom Muspah — 500 KC or Venator bow", 1, Check.kc("Phantom Muspah 500 KC", 500, "phantom_muspah"),
-                Check.items("Venator bow", 1, "Venator bow", "Venator shard")),
             Check.any("Abyssal Sire — 620 KC or Bludgeon", 1, Check.kc("Abyssal Sire 620 KC", 620, "abyssal_sire"),
                 Check.items("Abyssal bludgeon", 1, "Abyssal bludgeon", "Bludgeon axon", "Bludgeon claw", "Bludgeon spine")),
             Check.any("Tormented Demons — 500 KC or Emberlight", 1, Check.kc("Tormented Demons 500 KC", 500, "tormented_demons"),
                 Check.items("Emberlight", 1, "Emberlight", "Burning claws", "Smouldering gland")),
-            Check.items("Neitiznot faceguard / Torva helm", 1, "Neitiznot faceguard", "Torva full helm"),
+            endGameMeleeHelm(),
             Check.kc("100 combined raid KC", 100, "raids_combined"),
+            Check.any("Corrupted Gauntlet: 100 KC or Enhanced seed", 1,
+                Check.kc("Corrupted Gauntlet 100 KC", 100, "the_corrupted_gauntlet"),
+                Check.item("Enhanced crystal weapon seed")),
             Check.caTier("Hard"));
         RANKS.add(new Rank("rune_sword", "Rune Sword", "PvM", "Mid-game PvM",
-            req("adamant_sword"), Arrays.asList(rnSwordUniques, rnSwordZenyte, rnSwordAchieve)));
+            req("adamant_sword"), Arrays.asList(rnSwordUniques, rnSwordZenyte, rnSword78Herb, rnSwordHardDiary, rnSwordAchieve)));
 
         // — Dragon Sword — Pre-late-game PvM (requires Rune Sword). ALL late uniques + 3/4 Zenyte.
         Group drSwordUniques = Group.of("Obtain ALL 16 late-game uniques", 16,
