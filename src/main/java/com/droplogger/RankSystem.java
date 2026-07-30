@@ -518,6 +518,17 @@ public final class RankSystem
             "Torva full helm", "Neitiznot faceguard", "Justiciar faceguard", "Oathplate helm");
     }
 
+    // A Combat Achievement TIER requirement, met by the tier varbit OR by owning a Ghommal's hilt of
+    // that tier or higher (the CA reward: hilt 2 = Medium, 3 = Hard, 4 = Elite, 5 = Master, 6 = GM).
+    // The hilt is a bank-checkable proof when CA data has not been synced this session.
+    private static Check caTierOrHilt(String tier, String... hilts)
+    {
+        java.util.List<Check> opts = new java.util.ArrayList<>();
+        opts.add(Check.caTier(tier));
+        for (String h : hilts) opts.add(Check.item(h));
+        return Check.any(tier + " Combat Achievements", 1, opts.toArray(new Check[0]));
+    }
+
     static
     {
         // ===================== PvM PATH (Sword) =====================
@@ -537,7 +548,8 @@ public final class RankSystem
             Check.item("Sulphur blades"),
             Check.item("Glacial temotli"));
         Group amSwordPrayer = Group.of("70 Prayer", 1, Check.skill("70 Prayer", "Prayer", 70));
-        Group amSwordMedCa = Group.of("Medium Combat Achievements", 1, Check.caTier("Medium"));
+        Group amSwordMedCa = Group.of("Medium Combat Achievements", 1,
+            caTierOrHilt("Medium", "Ghommal's hilt 2", "Ghommal's hilt 3", "Ghommal's hilt 4", "Ghommal's hilt 5", "Ghommal's hilt 6"));
         Group amSwordBigger = Group.of("Bigger and Badder (superior slayer)", 1, biggerAndBadder());
         Group amSwordAchieve = Group.of("Achieve 5 of 9", 5,
             Check.items("Black mask", 1, "Black mask", "Black mask (i)"),
@@ -570,7 +582,8 @@ public final class RankSystem
             Check.item("Ava's assembler"));
         Group rnSwordZenyte = Group.of("Obtain any 1 of 4 Zenyte jewellery", 1, zenyte("Zenyte jewellery", 1));
         Group rnSword78Herb = Group.of("78 Herblore", 1, Check.skill("78 Herblore", "Herblore", 78));
-        Group rnSwordHardDiary = Group.of("5 Hard Diaries", 1, Check.diary("Hard", 5));
+        Group rnSwordHardCa = Group.of("Hard Combat Achievements", 1,
+            caTierOrHilt("Hard", "Ghommal's hilt 3", "Ghommal's hilt 4", "Ghommal's hilt 5", "Ghommal's hilt 6"));
         Group rnSwordAchieve = Group.of("Achieve 5 of 9", 5,
             Check.any("Zulrah — 512 KC or 2/3 uniques", 1, Check.kc("Zulrah 512 KC", 512, "zulrah"),
                 Check.items("2 Zulrah uniques", 2, "Tanzanite fang", "Magic fang", "Serpentine visage")),
@@ -591,7 +604,7 @@ public final class RankSystem
                 Check.item("Enhanced crystal weapon seed")),
             Check.caTier("Hard"));
         RANKS.add(new Rank("rune_sword", "Rune Sword", "PvM", "Mid-game PvM",
-            req("adamant_sword"), Arrays.asList(rnSwordUniques, rnSwordZenyte, rnSword78Herb, rnSwordHardDiary, rnSwordAchieve)));
+            req("adamant_sword"), Arrays.asList(rnSwordUniques, rnSwordZenyte, rnSword78Herb, rnSwordHardCa, rnSwordAchieve)));
 
         // — Dragon Sword — Pre-late-game PvM (requires Rune Sword). ALL late uniques + 3/4 Zenyte.
         Group drSwordUniques = Group.of("Obtain ALL 17 late-game uniques", 17,
@@ -615,7 +628,8 @@ public final class RankSystem
             Check.item("Emberlight"),
             Check.clogSlot("Rite of vile transference", "Rite of vile transference"));
         Group drSwordZenyte = Group.of("Obtain any 3 of 4 Zenyte jewellery", 1, zenyte("3 of 4 Zenyte jewellery", 3));
-        Group drSwordEliteDiary = Group.of("5 Elite Diaries", 1, Check.diary("Elite", 5));
+        Group drSwordEliteCa = Group.of("Elite Combat Achievements", 1,
+            caTierOrHilt("Elite", "Ghommal's hilt 4", "Ghommal's hilt 5", "Ghommal's hilt 6"));
         Group drSwordDamageSpec = Group.of("Damage special weapon (1 of 3)", 1,
             Check.items("Zaryte crossbow / Dragon claws / Voidwaker", 1, "Zaryte crossbow", "Dragon claws", "Voidwaker"));
         Group drSwordDebuffSpec = Group.of("Debuff special weapon (1 of 3)", 1,
@@ -640,7 +654,7 @@ public final class RankSystem
             Check.kc("Tombs of Amascut — 200 KC", 200, "toa_total"),
             Check.caTier("Elite"));
         RANKS.add(new Rank("dragon_sword", "Dragon Sword", "PvM", "Pre-late-game PvM",
-            req("rune_sword"), Arrays.asList(drSwordUniques, drSwordZenyte, drSwordEliteDiary, drSwordDamageSpec, drSwordDebuffSpec, drSwordAchieve)));
+            req("rune_sword"), Arrays.asList(drSwordUniques, drSwordZenyte, drSwordEliteCa, drSwordDamageSpec, drSwordDebuffSpec, drSwordAchieve)));
 
         // — TzKal — Late-game PvM, approaching Grandmaster (requires Dragon Sword).
         Group tzUniques = Group.of("Obtain ALL TzKal uniques", 14,
@@ -687,7 +701,7 @@ public final class RankSystem
                 "Purifying sigil (top)", "Purifying sigil (middle)", "Purifying sigil (bottom)",
                 "Purifying sigil (left)", "Purifying sigil (right)",
                 "Radiant oathplate helm", "Radiant oathplate chest", "Radiant oathplate legs"),
-            Check.caTier("Master"));
+            caTierOrHilt("Master", "Ghommal's hilt 5", "Ghommal's hilt 6"));
         RANKS.add(new Rank("tzkal", "TzKal", "PvM", "Late-game PvM (approaching GM)",
             req("dragon_sword"), Arrays.asList(tzUniques, tzArmour, tzExtras)));
 
