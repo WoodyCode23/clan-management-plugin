@@ -2434,6 +2434,36 @@ public class ClanPanel extends PluginPanel
     private java.util.Map<String, Integer> clogNameToId; // clog name->id, resolves untradeable icons
     public void setClogNameToId(java.util.Map<String, Integer> m) { this.clogNameToId = m; }
 
+    // Hardcoded ids for untradeable rank items the GE search + clog(pet)-icon map can't return, so
+    // their icons render even when the player doesn't own them. Keys lowercased.
+    private static final java.util.Map<String, Integer> RANK_ICON_IDS = new java.util.HashMap<>();
+    static
+    {
+        RANK_ICON_IDS.put("arclight", 30305);
+        RANK_ICON_IDS.put("ava's accumulator", 10499);
+        RANK_ICON_IDS.put("ava's assembler", 22109);
+        RANK_ICON_IDS.put("avernic defender", 22322);
+        RANK_ICON_IDS.put("barrows gloves", 7462);
+        RANK_ICON_IDS.put("berserker ring (i)", 11773);
+        RANK_ICON_IDS.put("colossal pouch", 26784);
+        RANK_ICON_IDS.put("crystal halberd", 23987);
+        RANK_ICON_IDS.put("dizana's quiver", 28947);
+        RANK_ICON_IDS.put("emberlight", 29589);
+        RANK_ICON_IDS.put("ghommal's hilt 2", 25928);
+        RANK_ICON_IDS.put("ghommal's hilt 3", 25930);
+        RANK_ICON_IDS.put("ghommal's hilt 4", 25932);
+        RANK_ICON_IDS.put("ghommal's hilt 5", 25934);
+        RANK_ICON_IDS.put("ghommal's hilt 6", 25936);
+        RANK_ICON_IDS.put("imbued saradomin cape", 21791);
+        RANK_ICON_IDS.put("keris partisan of the sun", 27291);
+        RANK_ICON_IDS.put("osmumten's fang (or)", 27246);
+        RANK_ICON_IDS.put("purifying sigil", 30793);
+        RANK_ICON_IDS.put("rune pouch", 12791);
+        RANK_ICON_IDS.put("toxic blowpipe", 12924);
+        RANK_ICON_IDS.put("trident of the seas", 11908);
+        RANK_ICON_IDS.put("trident of the swamp", 12900);
+    }
+
     /** Resolve an exact in-game item name to its id (for icon display), cached.
      *  Prefers the player's OWNED items (works for untradeables too), then falls back to GE search. */
     private int resolveItemId(String name)
@@ -2452,6 +2482,8 @@ public class ClanPanel extends PluginPanel
             Integer clog = clogNameToId.get(key);
             if (clog != null && clog > 0) return clog;
         }
+        Integer override = RANK_ICON_IDS.get(key);
+        if (override != null) return override;
         Integer cached = rankItemIdCache.get(key);
         if (cached != null) return cached;
         int id = -1;
