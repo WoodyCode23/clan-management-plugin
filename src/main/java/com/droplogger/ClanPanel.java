@@ -898,10 +898,9 @@ public class ClanPanel extends PluginPanel
         return l;
     }
 
-    // The seven account types in display order, each with a short text fallback for when the
-    // game's helm sprites aren't loaded yet (e.g. the dev client). Keys match players.accountType.
+    // The six ironman account types in display order (Solus is ironman-only, so no Main), each with
+    // a short text fallback for when the game's helm sprites aren't loaded yet. Keys match accountType.
     private static final String[][] GAME_MODE_MODES = {
-        { "regular",      "Main"  },
         { "ironman",      "IM"    },
         { "hardcore",     "HCIM"  },
         { "ultimate",     "UIM"   },
