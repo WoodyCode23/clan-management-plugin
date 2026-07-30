@@ -985,7 +985,7 @@ public class ClanPanel extends PluginPanel
             helmRow.add(b);
         }
 
-        final JToggleButton funnel = new JToggleButton("▾ Game mode");
+        final JToggleButton funnel = new JToggleButton("▾");
         funnel.setFont(READABLE_FONT_SMALL);
         funnel.setForeground(new Color(180, 180, 180));
         funnel.setBackground(offBg);
@@ -997,7 +997,7 @@ public class ClanPanel extends PluginPanel
         {
             boolean open = funnel.isSelected();
             helmRow.setVisible(open);
-            funnel.setText((open ? "▴" : "▾") + " Game mode");
+            funnel.setText(open ? "▴" : "▾");
             if (!open)
             {
                 selected.clear();
