@@ -676,7 +676,7 @@ public final class RankSystem
                 Check.caTask("Duke Sucellus Sleeper"), Check.caTask("Leviathan Sleeper"),
                 Check.caTask("Vardorvis Sleeper"), Check.caTask("Whispered")),
             Check.caTask("Perfect Phosani's Nightmare"),
-            Check.caTask("Corrupted Gauntlet Speed-Runner"),
+            Check.items("Damage special weapon (1 of 3)", 1, "Zaryte crossbow", "Dragon claws", "Voidwaker"),
             Check.kc("Chambers of Xeric — 200 KC", 200, "cox_total"),
             Check.kc("Theatre of Blood — 200 KC", 200, "tob_total"),
             Check.kc("Tombs of Amascut — 200 KC", 200, "toa_total"),
