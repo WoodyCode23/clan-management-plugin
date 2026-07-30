@@ -566,7 +566,9 @@ public final class RankSystem
             Check.item("Fighter torso"),
             fullVoid(),
             Check.items("Mix-n-Match Barrows", 1, "Dharok's helm", "Ahrim's hood", "Karil's coif", "Guthan's helm", "Torag's helm", "Verac's helm"),
-            Check.items("Ranger boots / Spiked manacles", 1, "Ranger boots", "Spiked manacles"),
+            // Pegasian boots (and pegasian-containing Avernic treads via IMPLIES) surpass Ranger boots,
+            // so they satisfy this too; primordial/eternal-only treads correctly do not (not ranged).
+            Check.items("Ranger boots / Spiked manacles / Pegasian", 1, "Ranger boots", "Spiked manacles", "Pegasian boots"),
             Check.combat(100),
             titanScrolls());
         RANKS.add(new Rank("adamant_sword", "Adamant Sword", "PvM", "Pre-mid-game PvM",
