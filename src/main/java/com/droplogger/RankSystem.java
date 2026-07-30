@@ -671,23 +671,23 @@ public final class RankSystem
         };
 
         // — Adamant Pick — Early-game skiller.
-        Group amPickReq = Group.of("1,700 total level + 5 Medium Diaries", 2,
-            Check.total(1700), Check.diary("Medium", 5));
+        Group amPickReq = Group.of("1,800 total level + 6 Medium Diaries", 2,
+            Check.total(1800), Check.diary("Medium", 6));
         Group amPickItems = Group.of("Obtain any 2 of 8 early-game skiller items", 2, skiller8);
-        Group amPickAchieve = Group.of("Achieve 6 of 9 skills", 6,
+        Group amPickAchieve = Group.of("Achieve 5 of 9 skills", 5,
             Check.skill("70 Construction", "Construction", 70), Check.skill("75 Crafting", "Crafting", 75),
-            Check.skill("66 Herblore", "Herblore", 66), Check.skill("65 Farming", "Farming", 65),
-            Check.skill("72 Mining", "Mining", 72), Check.skill("69 Fletching", "Fletching", 69),
+            Check.skill("72 Herblore", "Herblore", 72), Check.skill("74 Farming", "Farming", 74),
+            Check.skill("74 Mining", "Mining", 74), Check.skill("74 Fletching", "Fletching", 74),
             Check.skill("70 Prayer", "Prayer", 70), Check.skill("80 Cooking", "Cooking", 80),
             Check.skill("80 Hunter", "Hunter", 80));
         RANKS.add(new Rank("adamant_pick", "Adamant Pick", "Skiller", "Early-game skiller",
             new ArrayList<>(), Arrays.asList(amPickReq, amPickItems, amPickAchieve)));
 
         // — Rune Pick — Mid-game skiller (requires Adamant Pick).
-        Group rnPickReq = Group.of("2,000 total + 5 Hard Diaries + 1 of 3 dragon tools", 3,
-            Check.total(2000), Check.diary("Hard", 5), dragonTools("1 of 3 dragon tools", 1));
+        Group rnPickReq = Group.of("2,050 total + 6 Hard Diaries + 1 of 3 dragon tools", 3,
+            Check.total(2050), Check.diary("Hard", 6), dragonTools("1 of 3 dragon tools", 1));
         Group rnPickItems = Group.of("Obtain any 4 of 8 mid-game skiller items", 4, skiller8);
-        Group rnPickAchieve = Group.of("Achieve 6 of 9 skills", 6,
+        Group rnPickAchieve = Group.of("Achieve 5 of 9 skills", 5,
             Check.skill("82 Construction", "Construction", 82), Check.skill("85 Crafting", "Crafting", 85),
             Check.skill("81 Herblore", "Herblore", 81), Check.skill("85 Farming", "Farming", 85),
             Check.skill("82 Fishing", "Fishing", 82), Check.skill("85 Agility", "Agility", 85),
@@ -697,10 +697,10 @@ public final class RankSystem
             req("adamant_pick"), Arrays.asList(rnPickReq, rnPickItems, rnPickAchieve)));
 
         // — Dragon Pick — Late-game skiller (requires Rune Pick).
-        Group drPickReq = Group.of("2,200 total + 5 Elite Diaries + 2 of 3 dragon tools", 3,
-            Check.total(2200), Check.diary("Elite", 5), dragonTools("2 of 3 dragon tools", 2));
+        Group drPickReq = Group.of("2,300 total + 6 Elite Diaries + 2 of 3 dragon tools", 3,
+            Check.total(2300), Check.diary("Elite", 6), dragonTools("2 of 3 dragon tools", 2));
         Group drPickItems = Group.of("Obtain any 8 of 12 late-game skiller items", 8, skiller12);
-        Group drPickAchieve = Group.of("Achieve 6 of 9 skills", 6,
+        Group drPickAchieve = Group.of("Achieve 5 of 9 skills", 5,
             Check.skill("90 Construction", "Construction", 90), Check.skill("93 Crafting", "Crafting", 93),
             Check.skill("90 Herblore", "Herblore", 90), Check.skill("94 Thieving", "Thieving", 94),
             Check.skill("89 Mining", "Mining", 89), Check.skill("92 Agility", "Agility", 92),
