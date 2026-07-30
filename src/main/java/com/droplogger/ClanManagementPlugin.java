@@ -2485,7 +2485,7 @@ public class ClanManagementPlugin extends Plugin
     // TEMP DEBUG (ornate rejuvenation pool detection) — logs any POH "pool" object's id + name when
     // it loads, so we can identify the ornate pool for the TzKal stat-restoration check. Remove after.
     @Subscribe
-    public void onGameObjectSpawnedPoolDebug(net.runelite.api.events.GameObjectSpawned event)
+    public void onGameObjectSpawned(net.runelite.api.events.GameObjectSpawned event)
     {
         try
         {
