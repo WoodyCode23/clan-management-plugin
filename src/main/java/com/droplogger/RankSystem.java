@@ -618,6 +618,8 @@ public final class RankSystem
         Group drSwordEliteDiary = Group.of("5 Elite Diaries", 1, Check.diary("Elite", 5));
         Group drSwordDamageSpec = Group.of("Damage special weapon (1 of 3)", 1,
             Check.items("Zaryte crossbow / Dragon claws / Voidwaker", 1, "Zaryte crossbow", "Dragon claws", "Voidwaker"));
+        Group drSwordDebuffSpec = Group.of("Debuff special weapon (1 of 3)", 1,
+            Check.items("Bandos godsword / Dragon warhammer / Elder maul", 1, "Bandos godsword", "Dragon warhammer", "Elder maul"));
         Group drSwordAchieve = Group.of("Achieve 5 of 9", 5,
             Check.any("Corrupted Gauntlet — 400 KC or weapon+armour seeds", 1, Check.kc("Corrupted Gauntlet 400 KC", 400, "the_corrupted_gauntlet"),
                 // Spec is enhanced weapon seed + 5 armour seeds; ownership is name-based so the
@@ -638,7 +640,7 @@ public final class RankSystem
             Check.kc("Tombs of Amascut — 200 KC", 200, "toa_total"),
             Check.caTier("Elite"));
         RANKS.add(new Rank("dragon_sword", "Dragon Sword", "PvM", "Pre-late-game PvM",
-            req("rune_sword"), Arrays.asList(drSwordUniques, drSwordZenyte, drSwordEliteDiary, drSwordDamageSpec, drSwordAchieve)));
+            req("rune_sword"), Arrays.asList(drSwordUniques, drSwordZenyte, drSwordEliteDiary, drSwordDamageSpec, drSwordDebuffSpec, drSwordAchieve)));
 
         // — TzKal — Late-game PvM, approaching Grandmaster (requires Dragon Sword).
         Group tzUniques = Group.of("Obtain ALL TzKal uniques", 14,
