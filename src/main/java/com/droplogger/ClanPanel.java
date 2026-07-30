@@ -2391,6 +2391,14 @@ public class ClanPanel extends PluginPanel
             int id = resolveItemId(r.check.names.get(0));
             if (id > 0) left.add(rankItemIcon(id, r.met));
         }
+        else if (r.check.kind == RankSystem.Kind.CLOG_SLOT && r.check.names != null && !r.check.names.isEmpty())
+        {
+            // Clog-slot proofs (e.g. Rite of vile transference): resolve the untradeable icon from the
+            // clog name->id map, falling back to the item search.
+            Integer cid = clogNameToId != null ? clogNameToId.get(r.check.names.get(0).toLowerCase()) : null;
+            int id = cid != null ? cid : resolveItemId(r.check.names.get(0));
+            if (id > 0) left.add(rankItemIcon(id, r.met));
+        }
         row.add(left, BorderLayout.WEST);
 
         JLabel l = new JLabel("<html>" + escapeHtml(r.label) + "</html>");

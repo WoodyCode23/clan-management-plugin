@@ -2585,6 +2585,7 @@ public class ClanManagementPlugin extends Plugin
         {
             for (ClogItem ci : clogSyncItems.values()) s.clogObtained.add(ci.name.toLowerCase());
         }
+        log.info("[RANK DEBUG] clogObtained size={} hasRiteOfVile={}", s.clogObtained.size(), s.clogObtained.contains("rite of vile transference"));
         RankSystem.expandOwned(s.ownedItems); // own Ultor → Berserker ring (i) ticks, etc.
 
         // Boss KCs (WiseOldMan via our server) + synthetic aggregates the rank checks reference.
