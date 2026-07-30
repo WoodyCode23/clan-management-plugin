@@ -2390,6 +2390,8 @@ public class ClanPanel extends PluginPanel
         {
             int id = resolveItemId(r.check.names.get(0));
             if (id > 0) left.add(rankItemIcon(id, r.met));
+            else System.out.println("[ICON DEBUG] unresolved '" + r.check.names.get(0) + "' clogHas="
+                + (clogNameToId != null && clogNameToId.containsKey(r.check.names.get(0).toLowerCase())));
         }
         else if (r.check.kind == RankSystem.Kind.CLOG_SLOT && r.check.names != null && !r.check.names.isEmpty())
         {

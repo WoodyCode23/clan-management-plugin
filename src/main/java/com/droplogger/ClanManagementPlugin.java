@@ -2482,23 +2482,18 @@ public class ClanManagementPlugin extends Plugin
         }
     }
 
-    // TEMP DEBUG (ornate rejuvenation pool detection) — logs any POH "pool" object's id + name when
-    // it loads, so we can identify the ornate pool for the TzKal stat-restoration check. Remove after.
+    // Ornate pool of Rejuvenation (object 29241) proves the TzKal stat-restoration requirement. When
+    // seen (in a POH) persist a flag so it survives sessions; the rank snapshot reads it as an unlock.
+    private static final int ORNATE_POOL_OBJECT_ID = 29241;
+    private boolean seenOrnatePool;
     @Subscribe
     public void onGameObjectSpawned(net.runelite.api.events.GameObjectSpawned event)
     {
-        try
+        if (!seenOrnatePool && event.getGameObject().getId() == ORNATE_POOL_OBJECT_ID)
         {
-            int id = event.getGameObject().getId();
-            net.runelite.api.ObjectComposition comp = client.getObjectDefinition(id);
-            String name = comp != null && comp.getName() != null ? comp.getName() : "";
-            String ln = name.toLowerCase();
-            if (ln.contains("pool") || ln.contains("rejuvenation"))
-            {
-                log.info("[POOL DEBUG] name='{}' id={} loc={}", name, id, event.getTile().getWorldLocation());
-            }
+            seenOrnatePool = true;
+            try { configManager.setConfiguration("droplogger", "seenOrnatePool", true); } catch (Exception ignored) {}
         }
-        catch (Exception ignored) {}
     }
 
     /** Build a snapshot of the local player's state for clan-rank validation. Client thread only.
@@ -2585,7 +2580,9 @@ public class ClanManagementPlugin extends Plugin
         {
             for (ClogItem ci : clogSyncItems.values()) s.clogObtained.add(ci.name.toLowerCase());
         }
-        log.info("[RANK DEBUG] clogObtained size={} hasRiteOfVile={}", s.clogObtained.size(), s.clogObtained.contains("rite of vile transference"));
+        // Ornate pool of Rejuvenation (persisted flag) proves the TzKal stat-restoration req.
+        if (seenOrnatePool || Boolean.TRUE.equals(configManager.getConfiguration("droplogger", "seenOrnatePool", Boolean.class)))
+            s.unlocks.add("ornate pool");
         RankSystem.expandOwned(s.ownedItems); // own Ultor → Berserker ring (i) ticks, etc.
 
         // Boss KCs (WiseOldMan via our server) + synthetic aggregates the rank checks reference.

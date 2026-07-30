@@ -675,7 +675,7 @@ public final class RankSystem
             Check.item("Ancestral hat"), Check.item("Ancestral robe top"), Check.item("Ancestral robe bottom"),
             Check.item("Torva full helm"), Check.item("Torva platebody"), Check.item("Torva platelegs"),
             Check.item("Oathplate helm"), Check.item("Oathplate chest"), Check.item("Oathplate legs"));
-        Group tzExtras = Group.of("Approaching Grandmaster - all of", 11,
+        Group tzExtras = Group.of("Approaching Grandmaster - all of", 12,
             Check.any("TzKal-Zuk — 5 KC or 4/10 Zuk GM tasks", 1, Check.kc("TzKal-Zuk 5 KC", 5, "tzkalzuk"),
                 Check.any("4 of 10 Inferno GM tasks", 4,
                     Check.caTask("Budget Setup"), Check.caTask("Facing Jad Head-on II"),
@@ -699,6 +699,8 @@ public final class RankSystem
                 "Purifying sigil (top)", "Purifying sigil (middle)", "Purifying sigil (bottom)",
                 "Purifying sigil (left)", "Purifying sigil (right)",
                 "Radiant oathplate helm", "Radiant oathplate chest", "Radiant oathplate legs"),
+            Check.any("Stat restoration (Ornate pool or Elite diary)", 1,
+                Check.unlock("Ornate pool", "ornate pool"), Check.diary("Elite", 1)),
             caTierOrHilt("Master", "Ghommal's hilt 5", "Ghommal's hilt 6"));
         RANKS.add(new Rank("tzkal", "TzKal", "PvM", "Late-game PvM (approaching GM)",
             req("dragon_sword"), Arrays.asList(tzUniques, tzArmour, tzExtras)));
