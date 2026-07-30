@@ -933,6 +933,20 @@ public class ClanPanel extends PluginPanel
      * selected keys on every change. Collapsing the funnel clears the selection and fires
      * onChange with an empty set (meaning "show everything").
      */
+    /** A small funnel/filter icon drawn at runtime; the panel font can't render a caret glyph reliably. */
+    private static javax.swing.ImageIcon funnelIcon()
+    {
+        java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(14, 14, java.awt.image.BufferedImage.TYPE_INT_ARGB);
+        java.awt.Graphics2D g = img.createGraphics();
+        g.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
+        g.setColor(new Color(210, 210, 210));
+        java.awt.geom.Path2D.Float p = new java.awt.geom.Path2D.Float();
+        p.moveTo(2, 3); p.lineTo(12, 3); p.lineTo(8.5f, 7.5f); p.lineTo(8.5f, 12f); p.lineTo(5.5f, 12f); p.lineTo(5.5f, 7.5f); p.closePath();
+        g.fill(p);
+        g.dispose();
+        return new javax.swing.ImageIcon(img);
+    }
+
     private JComponent buildGameModeFilter(java.util.function.Consumer<java.util.Set<String>> onChange)
     {
         final java.util.Set<String> selected = new java.util.LinkedHashSet<>();
@@ -985,7 +999,7 @@ public class ClanPanel extends PluginPanel
             helmRow.add(b);
         }
 
-        final JToggleButton funnel = new JToggleButton("▾");
+        final JToggleButton funnel = new JToggleButton(funnelIcon());
         funnel.setFont(READABLE_FONT_SMALL);
         funnel.setForeground(new Color(180, 180, 180));
         funnel.setBackground(offBg);
@@ -997,7 +1011,6 @@ public class ClanPanel extends PluginPanel
         {
             boolean open = funnel.isSelected();
             helmRow.setVisible(open);
-            funnel.setText(open ? "▴" : "▾");
             if (!open)
             {
                 selected.clear();
