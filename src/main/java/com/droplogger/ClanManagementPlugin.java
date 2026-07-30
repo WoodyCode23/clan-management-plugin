@@ -2498,6 +2498,7 @@ public class ClanManagementPlugin extends Plugin
         }
         s.totalLevel = client.getTotalLevel();
         s.totalXp = client.getOverallExperience();
+        s.combatLevel = client.getLocalPlayer() != null ? client.getLocalPlayer().getCombatLevel() : 0;
         addCaTier(s, "easy", VarbitID.CA_TIER_STATUS_EASY);
         addCaTier(s, "medium", VarbitID.CA_TIER_STATUS_MEDIUM);
         addCaTier(s, "hard", VarbitID.CA_TIER_STATUS_HARD);
@@ -2558,6 +2559,12 @@ public class ClanManagementPlugin extends Plugin
                     if (CLOG_OWNED_WHITELIST.contains(key)) s.ownedItems.add(key);
                 }
             }
+        }
+        // Clog-slot proofs (CLOG_SLOT checks): every synced clog slot name, independent of the
+        // ownership tightening above (these are permanent unlocks/proofs, not held items).
+        synchronized (clogSyncItems)
+        {
+            for (ClogItem ci : clogSyncItems.values()) s.clogObtained.add(ci.name.toLowerCase());
         }
         RankSystem.expandOwned(s.ownedItems); // own Ultor → Berserker ring (i) ticks, etc.
 

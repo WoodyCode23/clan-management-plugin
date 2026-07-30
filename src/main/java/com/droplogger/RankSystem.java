@@ -25,7 +25,7 @@ import java.util.Set;
  */
 public final class RankSystem
 {
-    public enum Kind { ITEMS, SKILL, TOTAL, CA_TIER, CA_TASK, DIARY, BOSS_KC, ALL, ANY, RANK, TOTAL_XP, CLOG, UNLOCK }
+    public enum Kind { ITEMS, SKILL, TOTAL, CA_TIER, CA_TASK, DIARY, BOSS_KC, ALL, ANY, RANK, TOTAL_XP, CLOG, UNLOCK, COMBAT_LEVEL, CLOG_SLOT }
 
     /** A single requirement check (leaf or composite). */
     public static final class Check
@@ -65,6 +65,11 @@ public final class RankSystem
         public static Check clog(int count) { return new Check(Kind.CLOG, count + " Collection Log slots", null, null, count, null, 0); }
         /** A persistent unlock (e.g. a prayer learned from a scroll — the scroll itself is consumed). */
         public static Check unlock(String label, String key) { return new Check(Kind.UNLOCK, label, null, key, 0, null, 0); }
+        /** Minimum combat level. */
+        public static Check combat(int level) { return new Check(Kind.COMBAT_LEVEL, level + " Combat", null, null, level, null, 0); }
+        /** Any of the named collection-log slots has been obtained. Read from the synced clog set (a
+         *  permanent unlock/proof), NOT current bank possession, so it is exempt from the clog-tightening. */
+        public static Check clogSlot(String label, String... names) { return new Check(Kind.CLOG_SLOT, label, Arrays.asList(names), null, 0, null, 0); }
     }
 
     /** A requirement group: need N of the option checks satisfied. */
@@ -95,6 +100,8 @@ public final class RankSystem
         public int totalLevel;
         public long totalXp;                                        // overall XP (for XP Beast)
         public int clogSlots;                                       // collection log slots obtained (Log Beast)
+        public int combatLevel;                                     // computed combat level (COMBAT_LEVEL checks)
+        public final Set<String> clogObtained = new HashSet<>();    // lowercased clog-slot names ever obtained (CLOG_SLOT checks)
         public final Set<String> unlocks = new HashSet<>();         // persistent unlocks (prayers, etc.) lowercased
         public final Set<String> caDone = new HashSet<>();          // lowercased completed CA task names
         public final Set<String> caTiersComplete = new HashSet<>(); // lowercased tiers fully complete
@@ -158,6 +165,11 @@ public final class RankSystem
                 return s.clogSlots >= c.value;
             case UNLOCK:
                 return s.unlocks.contains(c.key.toLowerCase());
+            case COMBAT_LEVEL:
+                return s.combatLevel >= c.value;
+            case CLOG_SLOT:
+                for (String n : c.names) if (s.clogObtained.contains(n.toLowerCase())) return true;
+                return false;
             case ALL:
                 for (Check ch : c.children) if (!evalCheck(ch, s)) return false;
                 return true;
