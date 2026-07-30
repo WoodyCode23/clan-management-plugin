@@ -2386,20 +2386,15 @@ public class ClanPanel extends PluginPanel
         left.add(dot);
 
         // Item icon for item checks (bright if owned, faded if not).
-        if (r.check.kind == RankSystem.Kind.ITEMS && r.check.names != null && !r.check.names.isEmpty())
+        // Icon for any check that has a concrete item/clog-slot inside it (items, clog slots, and
+        // composites like "Full Void" or "Augury OR scroll" via their first item).
+        String iconName = RankSystem.firstItemName(r.check);
+        if (iconName != null)
         {
-            int id = resolveItemId(r.check.names.get(0));
+            int id = resolveItemId(iconName);
             if (id > 0) left.add(rankItemIcon(id, r.met));
-            else System.out.println("[ICON DEBUG] unresolved '" + r.check.names.get(0) + "' clogHas="
-                + (clogNameToId != null && clogNameToId.containsKey(r.check.names.get(0).toLowerCase())));
-        }
-        else if (r.check.kind == RankSystem.Kind.CLOG_SLOT && r.check.names != null && !r.check.names.isEmpty())
-        {
-            // Clog-slot proofs (e.g. Rite of vile transference): resolve the untradeable icon from the
-            // clog name->id map, falling back to the item search.
-            Integer cid = clogNameToId != null ? clogNameToId.get(r.check.names.get(0).toLowerCase()) : null;
-            int id = cid != null ? cid : resolveItemId(r.check.names.get(0));
-            if (id > 0) left.add(rankItemIcon(id, r.met));
+            else log.info("[ICON DEBUG] unresolved '{}' clogHas={}", iconName,
+                clogNameToId != null && clogNameToId.containsKey(iconName.toLowerCase()));
         }
         row.add(left, BorderLayout.WEST);
 
@@ -2434,6 +2429,7 @@ public class ClanPanel extends PluginPanel
         return label;
     }
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(ClanPanel.class);
     private final java.util.Map<String, Integer> rankItemIdCache = new java.util.HashMap<>();
     private java.util.Map<String, Integer> clogNameToId; // clog name->id, resolves untradeable icons
     public void setClogNameToId(java.util.Map<String, Integer> m) { this.clogNameToId = m; }

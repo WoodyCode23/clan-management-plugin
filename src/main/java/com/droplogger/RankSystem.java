@@ -216,6 +216,14 @@ public final class RankSystem
         return id;
     }
 
+    /** First concrete item / clog-slot name inside a check (recursing composites), for icon display. */
+    public static String firstItemName(Check c)
+    {
+        if ((c.kind == Kind.ITEMS || c.kind == Kind.CLOG_SLOT) && c.names != null && !c.names.isEmpty()) return c.names.get(0);
+        if (c.children != null) for (Check ch : c.children) { String n = firstItemName(ch); if (n != null) return n; }
+        return null;
+    }
+
     /**
      * Evaluate every rank with prerequisite tiering resolved. A rank counts as "held" once its own
      * groups AND its required lower ranks are satisfied; we iterate to a fixpoint so a Rune rank can
