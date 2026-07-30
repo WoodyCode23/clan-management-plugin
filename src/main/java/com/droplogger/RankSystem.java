@@ -380,7 +380,7 @@ public final class RankSystem
         IMPLIES.put("dizana's max cape", new String[]{"dizana's quiver"});  // quiver sunk into the max cape
         IMPLIES.put("dizana's max hood", new String[]{"dizana's quiver"});
         IMPLIES.put("dizana's quiver (broken)", new String[]{"dizana's quiver"});
-        IMPLIES.put("amulet of rancour", new String[]{"amulet of torture"});     // rancour = torture upgrade
+        IMPLIES.put("amulet of rancour", new String[]{"amulet of torture", "araxyte fang"}); // rancour = torture + Araxyte fang
         IMPLIES.put("amulet of rancour (s)", new String[]{"amulet of rancour"}); // ornament variant
         IMPLIES.put("confliction gauntlets", new String[]{"tormented bracelet"}); // tormented upgrade (wiki-confirmed)
         IMPLIES.put("ferocious gloves", new String[]{"hydra leather"}); // made FROM the leather
@@ -594,7 +594,7 @@ public final class RankSystem
             req("adamant_sword"), Arrays.asList(rnSwordUniques, rnSwordZenyte, rnSword78Herb, rnSwordHardDiary, rnSwordAchieve)));
 
         // — Dragon Sword — Pre-late-game PvM (requires Rune Sword). ALL late uniques + 3/4 Zenyte.
-        Group drSwordUniques = Group.of("Obtain ALL 16 late-game uniques", 16,
+        Group drSwordUniques = Group.of("Obtain ALL 17 late-game uniques", 17,
             Check.item("Infernal cape"),
             Check.items("Imbued god cape (MA2)", 1, "Imbued saradomin cape", "Imbued guthix cape", "Imbued zamorak cape"),
             Check.item("Avernic defender"),
@@ -612,9 +612,13 @@ public final class RankSystem
             Check.item("Toxic blowpipe"),
             Check.item("Osmumten's fang"),
             Check.item("Occult necklace"),
-            Check.item("Emberlight"));
+            Check.item("Emberlight"),
+            Check.clogSlot("Rite of vile transference", "Rite of vile transference"));
         Group drSwordZenyte = Group.of("Obtain any 3 of 4 Zenyte jewellery", 1, zenyte("3 of 4 Zenyte jewellery", 3));
-        Group drSwordAchieve = Group.of("Achieve 6 of 9", 6,
+        Group drSwordEliteDiary = Group.of("5 Elite Diaries", 1, Check.diary("Elite", 5));
+        Group drSwordDamageSpec = Group.of("Damage special weapon (1 of 3)", 1,
+            Check.items("Zaryte crossbow / Dragon claws / Voidwaker", 1, "Zaryte crossbow", "Dragon claws", "Voidwaker"));
+        Group drSwordAchieve = Group.of("Achieve 5 of 9", 5,
             Check.any("Corrupted Gauntlet — 400 KC or weapon+armour seeds", 1, Check.kc("Corrupted Gauntlet 400 KC", 400, "the_corrupted_gauntlet"),
                 // Spec is enhanced weapon seed + 5 armour seeds; ownership is name-based so the
                 // armour-seed COUNT can't be verified — presence of both is the closest readable check.
@@ -623,8 +627,8 @@ public final class RankSystem
                 Check.items("8 GWD uniques", 8, "Bandos chestplate", "Bandos tassets", "Bandos boots",
                     "Armadyl helmet", "Armadyl chestplate", "Armadyl chainskirt", "Saradomin sword",
                     "Armadyl crossbow", "Staff of the dead", "Zamorakian spear", "Saradomin's light", "Zamorakian hasta")),
-            Check.any("Araxxor — 600 KC or Noxious halberd / Fang", 1, Check.kc("Araxxor 600 KC", 600, "araxxor"),
-                Check.items("Araxxor unique", 1, "Noxious halberd", "Noxious blade", "Noxious point", "Noxious pommel", "Araxyte fang")),
+            Check.any("Araxxor: 600 KC or Araxyte fang", 1, Check.kc("Araxxor 600 KC", 600, "araxxor"),
+                Check.item("Araxyte fang")),
             Check.any("Alchemical Hydra — 1,001 KC or Claw + Leather", 1, Check.kc("Alchemical Hydra 1,001 KC", 1001, "alchemical_hydra"),
                 Check.all("Hydra uniques", Check.item("Hydra's claw"), Check.item("Hydra leather"))),
             Check.items("Any DT2 Vestige", 1, "Ultor vestige", "Magus vestige", "Bellator vestige", "Venator vestige",
@@ -634,7 +638,7 @@ public final class RankSystem
             Check.kc("Tombs of Amascut — 200 KC", 200, "toa_total"),
             Check.caTier("Elite"));
         RANKS.add(new Rank("dragon_sword", "Dragon Sword", "PvM", "Pre-late-game PvM",
-            req("rune_sword"), Arrays.asList(drSwordUniques, drSwordZenyte, drSwordAchieve)));
+            req("rune_sword"), Arrays.asList(drSwordUniques, drSwordZenyte, drSwordEliteDiary, drSwordDamageSpec, drSwordAchieve)));
 
         // — TzKal — Late-game PvM, approaching Grandmaster (requires Dragon Sword).
         Group tzUniques = Group.of("Obtain ALL TzKal uniques", 14,
