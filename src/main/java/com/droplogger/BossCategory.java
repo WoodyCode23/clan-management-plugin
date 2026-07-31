@@ -269,6 +269,9 @@ public class BossCategory
     public static final BossCategory MAGGOT_KING_SOLO = register(
         "maggot_king_solo", "maggot_king", "Maggot King", "New Bosses", 1, 1, false);
 
+    public static final BossCategory MAD_ANGEL_SOLO = register(
+        "mad_angel_solo", "mad_angel", "Mad Angel", "New Bosses", 1, 1, false);
+
     // ── Slayer Bosses ──
 
     public static final BossCategory CERBERUS = register(

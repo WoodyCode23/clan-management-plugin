@@ -455,6 +455,7 @@ public class PbDetector
         // Hueycoatl / Amoxliatl
         if (lower.contains("hueycoatl")) return "hueycoatl";
         if (lower.contains("amoxliatl")) return "amoxliatl";
+        if (lower.contains("mad angel")) return "mad_angel";
 
         // GWD bosses
         if (lower.contains("general graardor") || lower.contains("graardor")) return "bandos";
