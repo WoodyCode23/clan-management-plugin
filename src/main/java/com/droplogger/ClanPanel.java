@@ -2393,8 +2393,6 @@ public class ClanPanel extends PluginPanel
         {
             int id = resolveItemId(iconName);
             if (id > 0) left.add(rankItemIcon(id, r.met));
-            else log.info("[ICON DEBUG] unresolved '{}' clogHas={}", iconName,
-                clogNameToId != null && clogNameToId.containsKey(iconName.toLowerCase()));
         }
         row.add(left, BorderLayout.WEST);
 
