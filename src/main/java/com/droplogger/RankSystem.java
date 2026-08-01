@@ -359,9 +359,10 @@ public final class RankSystem
         IMPLIES.put("crystal pickaxe", new String[]{"dragon pickaxe"});
         IMPLIES.put("crystal axe", new String[]{"dragon axe"});
         IMPLIES.put("crystal harpoon", new String[]{"dragon harpoon"});
-        IMPLIES.put("infernal pickaxe", new String[]{"dragon pickaxe"});
-        IMPLIES.put("infernal axe", new String[]{"dragon axe"});
-        IMPLIES.put("infernal harpoon", new String[]{"dragon harpoon"});
+        // Infernal tool = dragon tool + a CONSUMED Smouldering stone, so owning one proves both.
+        IMPLIES.put("infernal pickaxe", new String[]{"dragon pickaxe", "smouldering stone"});
+        IMPLIES.put("infernal axe", new String[]{"dragon axe", "smouldering stone"});
+        IMPLIES.put("infernal harpoon", new String[]{"dragon harpoon", "smouldering stone"});
         IMPLIES.put("dragon axe (or)", new String[]{"dragon axe"});
         IMPLIES.put("dragon harpoon (or)", new String[]{"dragon harpoon"});
         // Weapon upgrades count for the base they're built from
@@ -444,6 +445,10 @@ public final class RankSystem
         IMPLIES.put("magma helm", new String[]{"serpentine helm"});
         IMPLIES.put("toxic blowpipe", new String[]{"tanzanite fang"});
         IMPLIES.put("blazing blowpipe", new String[]{"toxic blowpipe"}); // ornamented blowpipe (chains to tanzanite fang)
+        // Occult necklace ornament kit → base (Dragon sword unique)
+        IMPLIES.put("occult necklace (or)", new String[]{"occult necklace"});
+        // Colossal pouch divine upgrade → base colossal pouch (skiller path)
+        IMPLIES.put("divine colossal pouch", new String[]{"colossal pouch"});
         // Avernic defender CA-hilt variants count for the base defender. Ghommal's hilt (CA reward)
         // applied to it renames the item "Ghommal's avernic defender <tier>" (5 = Master, 6 = GM).
         IMPLIES.put("ghommal's avernic defender 5", new String[]{"avernic defender"});
@@ -594,7 +599,7 @@ public final class RankSystem
         Group rnSword78Herb = Group.of("78 Herblore", 1, Check.skill("78 Herblore", "Herblore", 78));
         Group rnSwordHardCa = Group.of("Hard Combat Achievements", 1,
             caTierOrHilt("Hard", "Ghommal's hilt 3", "Ghommal's hilt 4", "Ghommal's hilt 5", "Ghommal's hilt 6"));
-        Group rnSwordAchieve = Group.of("Achieve 5 of 8", 5,
+        Group rnSwordAchieve = Group.of("Achieve 5 of 9", 5,
             Check.any("Zulrah — 512 KC or 2/3 uniques", 1, Check.kc("Zulrah 512 KC", 512, "zulrah"),
                 Check.items("2 Zulrah uniques", 2, "Tanzanite fang", "Magic fang", "Serpentine visage")),
             Check.any("God Wars — 508 KC or 4 uniques", 1, Check.kc("God Wars 508 KC", 508, "god_wars_dungeon"),
@@ -611,7 +616,9 @@ public final class RankSystem
             Check.kc("100 combined raid KC", 100, "raids_combined"),
             Check.any("Corrupted Gauntlet: 100 KC or Enhanced seed", 1,
                 Check.kc("Corrupted Gauntlet 100 KC", 100, "the_corrupted_gauntlet"),
-                Check.item("Enhanced crystal weapon seed")));
+                Check.item("Enhanced crystal weapon seed")),
+            Check.items("Voidwaker — full or any piece", 1,
+                "Voidwaker", "Voidwaker blade", "Voidwaker gem", "Voidwaker hilt"));
         RANKS.add(new Rank("rune_sword", "Rune Sword", "PvM", "Mid-game PvM",
             req("adamant_sword"), Arrays.asList(rnSwordUniques, rnSwordZenyte, rnSword78Herb, rnSwordHardCa, rnSwordAchieve)));
 
