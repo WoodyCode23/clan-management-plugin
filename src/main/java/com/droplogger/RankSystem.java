@@ -463,8 +463,6 @@ public final class RankSystem
         IMPLIES.put("blazing blowpipe", new String[]{"toxic blowpipe"}); // ornamented blowpipe (chains to tanzanite fang)
         // Occult necklace ornament kit → base (Dragon sword unique)
         IMPLIES.put("occult necklace (or)", new String[]{"occult necklace"});
-        // Colossal pouch divine upgrade → base colossal pouch (skiller path)
-        IMPLIES.put("divine colossal pouch", new String[]{"colossal pouch"});
         // Avernic defender CA-hilt variants count for the base defender. Ghommal's hilt (CA reward)
         // applied to it renames the item "Ghommal's avernic defender <tier>" (5 = Master, 6 = GM).
         IMPLIES.put("ghommal's avernic defender 5", new String[]{"avernic defender"});
