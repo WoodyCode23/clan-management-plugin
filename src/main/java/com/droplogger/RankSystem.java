@@ -25,7 +25,7 @@ import java.util.Set;
  */
 public final class RankSystem
 {
-    public enum Kind { ITEMS, SKILL, TOTAL, CA_TIER, CA_TASK, DIARY, BOSS_KC, ALL, ANY, RANK, TOTAL_XP, CLOG, UNLOCK, COMBAT_LEVEL, CLOG_SLOT }
+    public enum Kind { ITEMS, ITEMS_PREFIX, SKILL, TOTAL, CA_TIER, CA_TASK, DIARY, BOSS_KC, ALL, ANY, RANK, TOTAL_XP, CLOG, UNLOCK, COMBAT_LEVEL, CLOG_SLOT }
 
     /** A single requirement check (leaf or composite). */
     public static final class Check
@@ -48,6 +48,12 @@ public final class RankSystem
         /** Own k of the listed item names (k = names.length means "all", k = 1 means "any"). */
         public static Check items(String label, int k, String... names)
         { return new Check(Kind.ITEMS, label, Arrays.asList(names), null, k, null, 0); }
+        // Match owned items by NAME PREFIX — covers league/locked/broken variants (e.g. "Void ranger
+        // helm (l)") that share the base name. Keeps ranged-only for the void helm since melee/mage
+        // are "Void melee/mage helm", which don't share the "Void ranger helm" prefix.
+        public static Check itemPrefix(String name) { return itemsPrefix(name, 1, name); }
+        public static Check itemsPrefix(String label, int k, String... prefixes)
+        { return new Check(Kind.ITEMS_PREFIX, label, Arrays.asList(prefixes), null, k, null, 0); }
         public static Check skill(String label, String skill, int level)
         { return new Check(Kind.SKILL, label, null, skill, level, null, 0); }
         public static Check total(int min) { return new Check(Kind.TOTAL, min + " total level", null, null, min, null, 0); }
@@ -145,6 +151,16 @@ public final class RankSystem
                 for (String n : c.names) if (s.ownedItems.contains(n.toLowerCase())) have++;
                 return have >= c.value;
             }
+            case ITEMS_PREFIX:
+            {
+                int have = 0;
+                for (String p : c.names)
+                {
+                    String pl = p.toLowerCase();
+                    for (String owned : s.ownedItems) if (owned.startsWith(pl)) { have++; break; }
+                }
+                return have >= c.value;
+            }
             case SKILL:
                 return s.skills.getOrDefault(c.key.toLowerCase(), 0) >= c.value;
             case TOTAL:
@@ -219,7 +235,7 @@ public final class RankSystem
     /** First concrete item / clog-slot name inside a check (recursing composites), for icon display. */
     public static String firstItemName(Check c)
     {
-        if ((c.kind == Kind.ITEMS || c.kind == Kind.CLOG_SLOT) && c.names != null && !c.names.isEmpty()) return c.names.get(0);
+        if ((c.kind == Kind.ITEMS || c.kind == Kind.ITEMS_PREFIX || c.kind == Kind.CLOG_SLOT) && c.names != null && !c.names.isEmpty()) return c.names.get(0);
         if (c.children != null) for (Check ch : c.children) { String n = firstItemName(ch); if (n != null) return n; }
         return null;
     }
@@ -681,10 +697,10 @@ public final class RankSystem
             Check.item("Dragon pickaxe"),
             Check.item("Amulet of rancour"),
             Check.item("Avernic treads"),
-            Check.item("Void ranger helm"),
-            Check.item("Elite void top"),
-            Check.item("Elite void robe"),
-            Check.item("Void knight gloves"),
+            Check.itemPrefix("Void ranger helm"),
+            Check.itemPrefix("Elite void top"),
+            Check.itemPrefix("Elite void robe"),
+            Check.itemPrefix("Void knight gloves"),
             Check.item("Keris partisan of the sun"),
             Check.item("Slepey tablet"));
         Group tzArmour = Group.of("Obtain any 5 pieces of Masori / Ancestral / Torva / Oathplate", 5,
