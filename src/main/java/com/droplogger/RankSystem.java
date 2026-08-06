@@ -563,7 +563,7 @@ public final class RankSystem
         // — Adamant Sword — Pre-mid-game PvM (no prerequisite).
         Group amSwordUniques = Group.of("Obtain any 9 of 12 early-game uniques", 9,
             Check.item("Fire cape"),
-            Check.items("Imbued god cape (MA2)", 1, "Imbued saradomin cape", "Imbued guthix cape", "Imbued zamorak cape"),
+            Check.itemsPrefix("Imbued god cape (MA2)", 1, "Imbued saradomin cape", "Imbued guthix cape", "Imbued zamorak cape"),
             Check.item("Dragon defender"),
             Check.item("Berserker ring (i)"),
             Check.item("Book of the dead"),
@@ -596,7 +596,7 @@ public final class RankSystem
         // — Rune Sword — Mid-game PvM (requires Adamant Sword).
         Group rnSwordUniques = Group.of("Obtain any 9 of 12 mid-game uniques", 9,
             Check.item("Fire cape"),
-            Check.items("Imbued god cape (MA2)", 1, "Imbued saradomin cape", "Imbued guthix cape", "Imbued zamorak cape"),
+            Check.itemsPrefix("Imbued god cape (MA2)", 1, "Imbued saradomin cape", "Imbued guthix cape", "Imbued zamorak cape"),
             Check.item("Dragon defender"),
             Check.item("Berserker ring (i)"),
             Check.item("Book of the dead"),
@@ -639,7 +639,7 @@ public final class RankSystem
         // — Dragon Sword — Pre-late-game PvM (requires Rune Sword). ALL late uniques + 3/4 Zenyte.
         Group drSwordUniques = Group.of("Obtain ALL 17 late-game uniques", 17,
             Check.item("Infernal cape"),
-            Check.items("Imbued god cape (MA2)", 1, "Imbued saradomin cape", "Imbued guthix cape", "Imbued zamorak cape"),
+            Check.itemsPrefix("Imbued god cape (MA2)", 1, "Imbued saradomin cape", "Imbued guthix cape", "Imbued zamorak cape"),
             Check.item("Avernic defender"),
             Check.item("Berserker ring (i)"),
             Check.item("Book of the dead"),
