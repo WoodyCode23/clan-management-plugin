@@ -1157,6 +1157,7 @@ public class ClanPanel extends PluginPanel
                     JLabel txt = new JLabel(d.itemName + "  ·  " + d.rsn);
                     txt.setFont(READABLE_FONT_SMALL);
                     txt.setForeground(Color.WHITE);
+                    txt.setToolTipText(d.itemName + "  ·  " + d.rsn); // full text on hover when the row clips it
                     row.add(txt, BorderLayout.CENTER);
                     membersContent.add(row);
                     membersContent.add(Box.createVerticalStrut(1));
@@ -1954,6 +1955,7 @@ public class ClanPanel extends PluginPanel
         JLabel item = new JLabel(d.itemName);
         item.setFont(READABLE_FONT_SMALL);
         item.setForeground(Color.WHITE);
+        item.setToolTipText(d.itemName); // full name on hover, so a long name clipped by the panel is still readable
         item.setAlignmentX(Component.LEFT_ALIGNMENT);
         left.add(item);
         if (d.monsterName != null && !d.monsterName.isEmpty())
