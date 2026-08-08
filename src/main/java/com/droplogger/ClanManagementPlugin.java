@@ -619,7 +619,8 @@ public class ClanManagementPlugin extends Plugin
             if (!isPlatformConfigured()) return;
             PlatformApiService.PlayerProfile prof = platformApiService.fetchPlayerProfile(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), rsn);
             PlatformApiService.MemberAbout about = platformApiService.fetchMemberAbout(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), rsn);
-            panel.showMemberProfile(rsn, prof, about);
+            java.util.Map<String, Integer> kc = platformApiService.fetchPlayerKc(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), rsn);
+            panel.showMemberProfile(rsn, prof, about, kc);
         }));
         panel.setOnLoadClog(rsn -> executor.submit(() ->
         {

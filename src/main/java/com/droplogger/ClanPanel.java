@@ -91,6 +91,7 @@ public class ClanPanel extends PluginPanel
     private String currentClogRsn = null;
     private String currentClogTab = null;
     private PlatformApiService.PlayerProfile currentProfile = null;
+    private java.util.Map<String, Integer> currentProfileKc = java.util.Collections.emptyMap(); // selected member's boss KCs (WOM-style keys)
     private PlatformApiService.MemberAbout currentAbout = null;
     private java.util.function.Consumer<String> onLoadClog;
     // Combat Achievements drill-down (tier → boss → task done/missing), mirrors the clog flow.
@@ -1347,13 +1348,14 @@ public class ClanPanel extends PluginPanel
 
     /** Entry point from the plugin: cache the profile and show the member's landing page. */
     public void showMemberProfile(String rsn, PlatformApiService.PlayerProfile profile,
-                                  PlatformApiService.MemberAbout about)
+                                  PlatformApiService.MemberAbout about, java.util.Map<String, Integer> kc)
     {
         SwingUtilities.invokeLater(() ->
         {
             currentClogRsn = rsn;
             currentProfile = profile;
             currentAbout = about;
+            currentProfileKc = kc != null ? kc : java.util.Collections.emptyMap();
             currentClog = null; // the clog is fetched lazily when its section is opened
             renderMemberProfile();
         });
@@ -2710,6 +2712,22 @@ public class ClanPanel extends PluginPanel
         clogCatListPanel.repaint();
     }
 
+    /** Boss KC for a clog category, if it maps to a tracked boss. Clue/minigame/pet categories that
+     *  don't match a boss KC key return null (no KC shown). Matches on alphanumerics only, so display
+     *  names like "Abyssal Sire" line up with KC keys like "abyssal_sire". */
+    private Integer lookupCategoryKc(String category)
+    {
+        if (category == null || currentProfileKc == null || currentProfileKc.isEmpty()) return null;
+        String norm = category.toLowerCase().replaceAll("[^a-z0-9]", "");
+        for (java.util.Map.Entry<String, Integer> e : currentProfileKc.entrySet())
+        {
+            Integer v = e.getValue();
+            if (v != null && v > 0 && e.getKey().toLowerCase().replaceAll("[^a-z0-9]", "").equals(norm))
+                return v;
+        }
+        return null;
+    }
+
     /** Level 3: the item icon grid for a category (owned bright, missing dimmed). */
     private void showClogCategory(String tab, String category)
     {
@@ -2729,7 +2747,8 @@ public class ClanPanel extends PluginPanel
             if (it.owned) owned++;
         }
 
-        JLabel cnt = new JLabel(owned + " / " + total);
+        Integer bossKc = lookupCategoryKc(category);
+        JLabel cnt = new JLabel(owned + " / " + total + (bossKc != null ? "   ·   KC: " + String.format("%,d", bossKc) : ""));
         cnt.setFont(READABLE_FONT_SMALL);
         cnt.setForeground(new Color(170, 170, 170));
         cnt.setAlignmentX(Component.LEFT_ALIGNMENT);
