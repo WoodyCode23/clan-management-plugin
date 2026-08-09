@@ -1984,7 +1984,7 @@ public class ClanPanel extends PluginPanel
         }
         if (d.points > 0)
         {
-            JLabel pts = new JLabel("+" + d.points + " pts");
+            JLabel pts = new JLabel("+" + String.format("%.1f", d.points) + " pts");
             pts.setFont(READABLE_FONT_SMALL);
             pts.setForeground(new Color(76, 175, 80));
             pts.setAlignmentX(Component.RIGHT_ALIGNMENT);
@@ -5485,7 +5485,7 @@ public class ClanPanel extends PluginPanel
                     Map<String, Object> p = players.get(i);
                     int rank = ((Number) p.getOrDefault("rank", i + 1)).intValue();
                     String rsn = (String) p.getOrDefault("rsn", "");
-                    int points = ((Number) p.getOrDefault("points", 0)).intValue();
+                    double points = ((Number) p.getOrDefault("points", 0)).doubleValue();
                     int drops = ((Number) p.getOrDefault("drops", 0)).intValue();
                     long value = ((Number) p.getOrDefault("value", 0L)).longValue();
 
@@ -5542,7 +5542,7 @@ public class ClanPanel extends PluginPanel
 
                     // Fixed-width columns so Pts/Drops/GP line up on every row — a 0 in any
                     // column must not shift its neighbours.
-                    row.add(dropsStatsColumns(String.valueOf(points), String.valueOf(drops), gpStr,
+                    row.add(dropsStatsColumns(String.format("%.1f", points), String.valueOf(drops), gpStr,
                         isMe ? new Color(76, 175, 80) : new Color(150, 150, 150), false,
                         row.getBackground()), BorderLayout.EAST);
 
@@ -5637,7 +5637,7 @@ public class ClanPanel extends PluginPanel
                     String item = (String) drop.getOrDefault("item", "");
                     String player = (String) drop.getOrDefault("player", "");
                     long value = ((Number) drop.getOrDefault("value", 0L)).longValue();
-                    int points = ((Number) drop.getOrDefault("points", 0)).intValue();
+                    double points = ((Number) drop.getOrDefault("points", 0)).doubleValue();
                     String monster = (String) drop.getOrDefault("monster", "");
                     int dropItemId = ((Number) drop.getOrDefault("itemId", 0)).intValue();
 
@@ -5711,7 +5711,7 @@ public class ClanPanel extends PluginPanel
 
                     if (points > 0)
                     {
-                        JLabel ptLabel = new JLabel("+" + points + " pts");
+                        JLabel ptLabel = new JLabel("+" + String.format("%.1f", points) + " pts");
                         ptLabel.setFont(READABLE_FONT_SMALL);
                         ptLabel.setForeground(new Color(76, 175, 80));
                         ptLabel.setAlignmentX(Component.RIGHT_ALIGNMENT);
@@ -5789,18 +5789,18 @@ public class ClanPanel extends PluginPanel
             else
             {
                 // Summary stats
-                int totalPts = 0;
+                double totalPts = 0;
                 long totalGp = 0;
                 for (Map<String, Object> d : drops)
                 {
-                    totalPts += ((Number) d.getOrDefault("points", 0)).intValue();
+                    totalPts += ((Number) d.getOrDefault("points", 0)).doubleValue();
                     totalGp += ((Number) d.getOrDefault("value", 0L)).longValue();
                 }
                 String gpStr = totalGp >= 1_000_000
                     ? String.format("%.1fM gp", totalGp / 1_000_000.0)
                     : String.format("%,d gp", totalGp);
                 JLabel summary = new JLabel(
-                    String.format("%d pts | %s | %d drops", totalPts, gpStr, drops.size()));
+                    String.format("%,.1f pts | %s | %d drops", totalPts, gpStr, drops.size()));
                 summary.setFont(READABLE_FONT_SMALL);
                 summary.setForeground(new Color(180, 180, 180));
                 summary.setBorder(new EmptyBorder(4, 6, 4, 6));
@@ -5815,7 +5815,7 @@ public class ClanPanel extends PluginPanel
                     String item = (String) drop.getOrDefault("item", "");
                     String monster = (String) drop.getOrDefault("monster", "");
                     int kc = ((Number) drop.getOrDefault("kc", 0)).intValue();
-                    int pts = ((Number) drop.getOrDefault("points", 0)).intValue();
+                    double pts = ((Number) drop.getOrDefault("points", 0)).doubleValue();
                     long val = ((Number) drop.getOrDefault("value", 0L)).longValue();
                     String ts = (String) drop.getOrDefault("timestamp", "");
                     // Extract just the date portion
@@ -5872,7 +5872,7 @@ public class ClanPanel extends PluginPanel
 
                     if (pts > 0)
                     {
-                        JLabel ptLbl = new JLabel("+" + pts);
+                        JLabel ptLbl = new JLabel("+" + String.format("%.1f", pts));
                         ptLbl.setFont(READABLE_FONT_SMALL);
                         ptLbl.setForeground(new Color(76, 175, 80));
                         row.add(ptLbl, BorderLayout.EAST);
@@ -6052,15 +6052,15 @@ public class ClanPanel extends PluginPanel
         filtered.sort((a, b) -> {
             if ("Points (High)".equals(sort))
             {
-                return Integer.compare(
-                    Integer.parseInt(b.getOrDefault("points", "0")),
-                    Integer.parseInt(a.getOrDefault("points", "0")));
+                return Double.compare(
+                    Double.parseDouble(b.getOrDefault("points", "0")),
+                    Double.parseDouble(a.getOrDefault("points", "0")));
             }
             else if ("Points (Low)".equals(sort))
             {
-                return Integer.compare(
-                    Integer.parseInt(a.getOrDefault("points", "0")),
-                    Integer.parseInt(b.getOrDefault("points", "0")));
+                return Double.compare(
+                    Double.parseDouble(a.getOrDefault("points", "0")),
+                    Double.parseDouble(b.getOrDefault("points", "0")));
             }
             else if ("Name (A-Z)".equals(sort))
             {
@@ -6114,7 +6114,7 @@ public class ClanPanel extends PluginPanel
     private JPanel createWhitelistRow(Map<String, String> item, int index)
     {
         String name = item.getOrDefault("item", "");
-        int points = Integer.parseInt(item.getOrDefault("points", "0"));
+        double points = Double.parseDouble(item.getOrDefault("points", "0"));
         String boss = item.getOrDefault("source", "");
 
         JPanel row = new JPanel(new BorderLayout(2, 0));
@@ -6124,7 +6124,7 @@ public class ClanPanel extends PluginPanel
         row.setAlignmentX(Component.LEFT_ALIGNMENT);
         row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
         row.setBorder(new EmptyBorder(2, 4, 2, 4));
-        if (!boss.isEmpty()) row.setToolTipText(name + " — " + boss + " (" + points + " pts)");
+        if (!boss.isEmpty()) row.setToolTipText(name + " · " + boss + " (" + String.format("%.1f", points) + " pts)");
 
         // Left: item name
         JLabel nameLabel = new JLabel(truncate(name, 28));
@@ -6141,7 +6141,7 @@ public class ClanPanel extends PluginPanel
         row.add(nameLabel, BorderLayout.CENTER);
 
         // Right: points
-        JLabel ptsLabel = new JLabel(String.format("%,d pts", points));
+        JLabel ptsLabel = new JLabel(String.format("%,.1f pts", points));
         ptsLabel.setFont(new Font("Segoe UI", Font.BOLD, 10));
         ptsLabel.setForeground(nameColor);
         row.add(ptsLabel, BorderLayout.EAST);

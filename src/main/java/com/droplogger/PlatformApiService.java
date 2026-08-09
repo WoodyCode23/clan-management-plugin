@@ -1232,8 +1232,8 @@ public class PlatformApiService
         public final long value;
         public final String monsterName;
         public final int killCount;
-        public final int points;
-        public PlayerDrop(String itemName, int itemId, long value, String monsterName, int killCount, int points)
+        public final double points; // precise; rounded to 1dp only at display
+        public PlayerDrop(String itemName, int itemId, long value, String monsterName, int killCount, double points)
         {
             this.itemName = itemName; this.itemId = itemId; this.value = value; this.monsterName = monsterName;
             this.killCount = killCount; this.points = points;
@@ -1357,7 +1357,7 @@ public class PlatformApiService
                     o.has("value") && !o.get("value").isJsonNull() ? o.get("value").getAsLong() : 0,
                     o.has("monsterName") && !o.get("monsterName").isJsonNull() ? o.get("monsterName").getAsString() : "",
                     o.has("killCount") && !o.get("killCount").isJsonNull() ? o.get("killCount").getAsInt() : 0,
-                    o.has("points") && !o.get("points").isJsonNull() ? o.get("points").getAsInt() : 0));
+                    o.has("points") && !o.get("points").isJsonNull() ? o.get("points").getAsDouble() : 0.0));
             }
         }
 
