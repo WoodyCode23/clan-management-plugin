@@ -2965,6 +2965,8 @@ public class ClanPanel extends PluginPanel
             raidRaceContent.add(raidRaceStandingsPanel(race));
             raidRaceContent.add(Box.createVerticalStrut(10));
             raidRaceContent.add(raidRaceBoardPanel(race, selectedRaidTeamId));
+            raidRaceContent.add(Box.createVerticalStrut(10));
+            raidRaceContent.add(raidRaceContributionsPanel(race, selectedRaidTeamId));
 
             raidRaceContent.revalidate();
             raidRaceContent.repaint();
@@ -2999,12 +3001,32 @@ public class ClanPanel extends PluginPanel
         titleRow.add(raidRaceStatusChip(event.status));
         header.add(titleRow);
 
+        String meta = "Racing for: " + raidRaceWinConditionLabel(event.winCondition);
+        if (event.hostUsername != null && !event.hostUsername.isEmpty())
+        {
+            meta += "    Host: " + event.hostUsername;
+        }
+        header.add(clogNote(meta));
+
         if ("draft".equals(event.status))
         {
             header.add(clogNote("Drafting is live."));
         }
 
         return header;
+    }
+
+    /** Human label for a win condition value; null defaults to most_slots. */
+    private String raidRaceWinConditionLabel(String wc)
+    {
+        if (wc == null) return "Most slots filled";
+        switch (wc)
+        {
+            case "most_drops": return "Most drops";
+            case "first_to_complete": return "First to complete";
+            case "most_slots":
+            default: return "Most slots filled";
+        }
     }
 
     private JLabel raidRaceStatusChip(String status)
@@ -3134,10 +3156,11 @@ public class ClanPanel extends PluginPanel
             return panel;
         }
 
+        boolean mostDrops = race.event != null && "most_drops".equals(race.event.winCondition);
         int rank = 1;
         for (PlatformApiService.ClogRaceStanding standing : race.standings)
         {
-            panel.add(raidRaceStandingRow(rank, standing, boardSize));
+            panel.add(raidRaceStandingRow(rank, standing, boardSize, mostDrops));
             panel.add(Box.createVerticalStrut(3));
             rank++;
         }
@@ -3145,10 +3168,17 @@ public class ClanPanel extends PluginPanel
         return panel;
     }
 
-    /** One clickable standings row; reuses buildClogProgressCard's "X / Y" card, highlighted when selected. */
-    private JPanel raidRaceStandingRow(int rank, PlatformApiService.ClogRaceStanding standing, int boardSize)
+    /** One clickable standings row; reuses buildClogProgressCard's "X / Y" card, highlighted when selected.
+     *  For the most_drops win condition the team's total drops are appended to the label so the metric
+     *  that decides the winner is visible alongside the slots-filled progress bar. */
+    private JPanel raidRaceStandingRow(int rank, PlatformApiService.ClogRaceStanding standing, int boardSize, boolean mostDrops)
     {
-        JPanel card = buildClogProgressCard(rank + ". " + standing.name, standing.count, boardSize);
+        String label = rank + ". " + standing.name;
+        if (mostDrops)
+        {
+            label += " (" + standing.drops + (standing.drops == 1 ? " drop)" : " drops)");
+        }
+        JPanel card = buildClogProgressCard(label, standing.count, boardSize);
         boolean selected = standing.teamId.equals(selectedRaidTeamId);
         if (selected)
         {
@@ -3258,6 +3288,62 @@ public class ClanPanel extends PluginPanel
             holder.add(grid, BorderLayout.NORTH);
             panel.add(holder);
             panel.add(Box.createVerticalStrut(8));
+        }
+
+        return panel;
+    }
+
+    /** For the selected team: each member and how many board slots they were first to fill (fills
+     *  contributed), sorted most-to-least. Sourced from the read shape's contributions array. */
+    private JPanel raidRaceContributionsPanel(PlatformApiService.ClogRace race, String teamId)
+    {
+        JPanel panel = new JPanel();
+        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        panel.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        panel.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        panel.add(clogTitle("Member contributions", ACCENT_GOLD, 13f));
+        panel.add(Box.createVerticalStrut(4));
+
+        java.util.List<PlatformApiService.ClogRaceContribution> rows = new java.util.ArrayList<>();
+        if (teamId != null && race.contributions != null)
+        {
+            for (PlatformApiService.ClogRaceContribution c : race.contributions)
+            {
+                if (teamId.equals(c.teamId)) rows.add(c);
+            }
+        }
+        rows.sort((a, b) -> Integer.compare(b.fills, a.fills));
+
+        if (rows.isEmpty())
+        {
+            JLabel none = new JLabel("No contributions yet");
+            none.setFont(READABLE_FONT_ITALIC);
+            none.setForeground(new Color(100, 100, 100));
+            none.setAlignmentX(Component.LEFT_ALIGNMENT);
+            panel.add(none);
+            return panel;
+        }
+
+        for (PlatformApiService.ClogRaceContribution c : rows)
+        {
+            JPanel row = new JPanel(new BorderLayout());
+            row.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+            row.setBorder(new EmptyBorder(4, 7, 4, 7));
+            row.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+            JLabel nameLbl = new JLabel(c.rsn);
+            nameLbl.setFont(READABLE_FONT);
+            nameLbl.setForeground(Color.WHITE);
+
+            JLabel fillsLbl = new JLabel(c.fills + (c.fills == 1 ? " fill" : " fills"));
+            fillsLbl.setFont(READABLE_FONT_SMALL);
+            fillsLbl.setForeground(new Color(180, 180, 180));
+
+            row.add(nameLbl, BorderLayout.WEST);
+            row.add(fillsLbl, BorderLayout.EAST);
+            panel.add(row);
+            panel.add(Box.createVerticalStrut(3));
         }
 
         return panel;
