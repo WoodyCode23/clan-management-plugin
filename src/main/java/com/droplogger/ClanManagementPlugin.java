@@ -2949,6 +2949,9 @@ public class ClanManagementPlugin extends Plugin
         }
         try
         {
+            // Fetch the unified schedule + the live clog race in the same cycle; setSchedule stores
+            // it and updateRaidRace renders both (schedule on top, clog detail below).
+            panel.setSchedule(platformApiService.fetchSchedule(getPlatformUrl(), getPlatformKey(), getPlatformSlug()));
             panel.updateRaidRace(platformApiService.fetchClogRace(getPlatformUrl(), getPlatformKey(), getPlatformSlug()));
         }
         catch (Exception ex)

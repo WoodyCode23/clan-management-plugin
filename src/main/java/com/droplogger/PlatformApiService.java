@@ -1421,6 +1421,83 @@ public class PlatformApiService
         }
     }
 
+    /** One row in the unified Events Center schedule (any event type). */
+    public static class ScheduleEntry
+    {
+        public final String id;
+        public final String type;
+        public final String typeLabel;
+        public final String name;
+        public final String status;      // upcoming | live | ended
+        public final String startTime;
+        public final String endTime;
+        public final String hostUsername; // null when no host
+        public ScheduleEntry(String id, String type, String typeLabel, String name, String status,
+                             String startTime, String endTime, String hostUsername)
+        {
+            this.id = id; this.type = type; this.typeLabel = typeLabel; this.name = name;
+            this.status = status; this.startTime = startTime; this.endTime = endTime; this.hostUsername = hostUsername;
+        }
+    }
+
+    /** The unified schedule across all event types, bucketed live / upcoming / past. */
+    public static class Schedule
+    {
+        public final List<ScheduleEntry> live;
+        public final List<ScheduleEntry> upcoming;
+        public final List<ScheduleEntry> past;
+        public Schedule(List<ScheduleEntry> live, List<ScheduleEntry> upcoming, List<ScheduleEntry> past)
+        {
+            this.live = live; this.upcoming = upcoming; this.past = past;
+        }
+    }
+
+    private static String jsonStr(JsonObject o, String key)
+    {
+        return o.has(key) && !o.get(key).isJsonNull() ? o.get(key).getAsString() : null;
+    }
+
+    private static List<ScheduleEntry> parseScheduleBucket(JsonObject root, String key)
+    {
+        List<ScheduleEntry> out = new ArrayList<>();
+        if (root.has(key) && root.get(key).isJsonArray())
+        {
+            for (JsonElement el : root.getAsJsonArray(key))
+            {
+                JsonObject o = el.getAsJsonObject();
+                String hostUsername = null;
+                if (o.has("host") && o.get("host").isJsonObject())
+                {
+                    JsonObject h = o.getAsJsonObject("host");
+                    hostUsername = jsonStr(h, "username");
+                }
+                out.add(new ScheduleEntry(
+                    jsonStr(o, "id"), jsonStr(o, "type"), jsonStr(o, "typeLabel"), jsonStr(o, "name"),
+                    jsonStr(o, "status"), jsonStr(o, "startTime"), jsonStr(o, "endTime"), hostUsername));
+            }
+        }
+        return out;
+    }
+
+    /** Fetch the clan's unified event schedule for the Events tab. Returns null on 404 / failure. */
+    public Schedule fetchSchedule(String baseUrl, String apiKey, String clanSlug)
+    {
+        JsonObject root = getSync(baseUrl + "/clans/" + clanSlug + "/schedule", apiKey);
+        if (root == null) return null;
+        try
+        {
+            return new Schedule(
+                parseScheduleBucket(root, "live"),
+                parseScheduleBucket(root, "upcoming"),
+                parseScheduleBucket(root, "past"));
+        }
+        catch (Exception ex)
+        {
+            log.debug("parse schedule failed: {}", ex.getMessage());
+            return null;
+        }
+    }
+
     private static String encodePath(String s)
     {
         try { return java.net.URLEncoder.encode(s, "UTF-8").replace("+", "%20"); }

@@ -111,6 +111,7 @@ public class ClanPanel extends PluginPanel
     private String selectedRaidTeamId;
     private javax.swing.Timer raidRaceCountdown = null;
     private PlatformApiService.ClogRace currentRaidRace = null; // cached so a standings-row click can rebuild without a refetch
+    private volatile PlatformApiService.Schedule currentSchedule = null; // latest unified schedule, rendered atop the Events tab
     private Runnable onLoadRaidRace;
     private boolean raidRaceActive = false;
 
@@ -2030,6 +2031,8 @@ public class ClanPanel extends PluginPanel
     public void setOnLoadRanks(Runnable cb) { this.onLoadRanks = cb; }
     public void setOnLoadRaidRace(Runnable cb) { this.onLoadRaidRace = cb; }
     public boolean isRaidRaceActive() { return raidRaceActive; }
+    /** Store the latest unified schedule; it renders atop the Events tab on the next updateRaidRace. */
+    public void setSchedule(PlatformApiService.Schedule schedule) { this.currentSchedule = schedule; }
     public void setOnRequestRank(java.util.function.Consumer<Object[]> cb) { this.onRequestRank = cb; }
     public boolean isRanksActive() { return ranksActive; }
 
@@ -2912,9 +2915,17 @@ public class ClanPanel extends PluginPanel
             currentRaidRace = race;
             raidRaceContent.removeAll();
 
+            // The unified event schedule sits at the top of the Events tab, above the live clog
+            // race detail, and shows even when no clog race is running.
+            if (currentSchedule != null)
+            {
+                raidRaceContent.add(raidRaceSchedulePanel(currentSchedule));
+                raidRaceContent.add(Box.createVerticalStrut(12));
+            }
+
             if (race == null || race.event == null)
             {
-                JLabel none = new JLabel("No raid race is running right now.");
+                JLabel none = new JLabel("No clog race is running right now.");
                 none.setFont(READABLE_FONT_ITALIC);
                 none.setForeground(new Color(100, 100, 100));
                 none.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -2981,6 +2992,68 @@ public class ClanPanel extends PluginPanel
             if (teamId.equals(t.teamId)) return true;
         }
         return false;
+    }
+
+    /** The unified event schedule (all types) at the top of the Events tab: a "Schedule" title and
+     *  Live / Upcoming / Past buckets, each a short list of "Type: name" rows with the host. */
+    private JPanel raidRaceSchedulePanel(PlatformApiService.Schedule schedule)
+    {
+        JPanel panel = new JPanel();
+        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        panel.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        panel.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        panel.add(clogTitle("Schedule", ACCENT_GOLD, 13f));
+        panel.add(Box.createVerticalStrut(4));
+
+        boolean any = false;
+        any |= addScheduleBucket(panel, "Live", schedule.live);
+        any |= addScheduleBucket(panel, "Upcoming", schedule.upcoming);
+        any |= addScheduleBucket(panel, "Past", schedule.past);
+        if (!any)
+        {
+            JLabel none = new JLabel("No events scheduled");
+            none.setFont(READABLE_FONT_ITALIC);
+            none.setForeground(new Color(100, 100, 100));
+            none.setAlignmentX(Component.LEFT_ALIGNMENT);
+            panel.add(none);
+        }
+        return panel;
+    }
+
+    private boolean addScheduleBucket(JPanel panel, String label, java.util.List<PlatformApiService.ScheduleEntry> entries)
+    {
+        if (entries == null || entries.isEmpty()) return false;
+
+        JLabel head = new JLabel(label);
+        head.setFont(READABLE_FONT_SMALL.deriveFont(Font.BOLD));
+        head.setForeground(new Color(150, 150, 150));
+        head.setAlignmentX(Component.LEFT_ALIGNMENT);
+        head.setBorder(new EmptyBorder(4, 0, 2, 0));
+        panel.add(head);
+
+        for (PlatformApiService.ScheduleEntry e : entries)
+        {
+            JPanel row = new JPanel(new BorderLayout(6, 0));
+            row.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+            row.setBorder(new EmptyBorder(4, 7, 4, 7));
+            row.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+            String left = (e.typeLabel != null ? e.typeLabel + ": " : "") + (e.name != null ? e.name : "");
+            JLabel nameLbl = new JLabel(left);
+            nameLbl.setFont(READABLE_FONT);
+            nameLbl.setForeground(Color.WHITE);
+
+            JLabel metaLbl = new JLabel(e.hostUsername != null ? e.hostUsername : "");
+            metaLbl.setFont(READABLE_FONT_SMALL);
+            metaLbl.setForeground(new Color(150, 150, 150));
+
+            row.add(nameLbl, BorderLayout.WEST);
+            row.add(metaLbl, BorderLayout.EAST);
+            panel.add(row);
+            panel.add(Box.createVerticalStrut(3));
+        }
+        return true;
     }
 
     private JPanel raidRaceHeader(PlatformApiService.ClogRaceEvent event)
