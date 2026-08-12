@@ -1204,6 +1204,181 @@ public class PlatformApiService
         return new PlayerClog(obtained, total, items);
     }
 
+    /** One clog-race event's metadata. */
+    public static class ClogRaceEvent
+    {
+        public final String id;
+        public final String name;
+        public final String status;
+        public final String startTime;
+        public final String endTime;
+        public final String winnerTeamId;
+        public ClogRaceEvent(String id, String name, String status, String startTime, String endTime, String winnerTeamId)
+        {
+            this.id = id; this.name = name; this.status = status;
+            this.startTime = startTime; this.endTime = endTime; this.winnerTeamId = winnerTeamId;
+        }
+    }
+
+    /** One board slot (target collection-log item) in the current clog race. */
+    public static class ClogRaceBoardItem
+    {
+        public final String id;
+        public final String itemName;
+        public final int itemId;
+        public final String raid;
+        public final boolean isHardMode;
+        public final int sortOrder;
+        public ClogRaceBoardItem(String id, String itemName, int itemId, String raid, boolean isHardMode, int sortOrder)
+        {
+            this.id = id; this.itemName = itemName; this.itemId = itemId;
+            this.raid = raid; this.isHardMode = isHardMode; this.sortOrder = sortOrder;
+        }
+    }
+
+    /** One competing team in the clog race. */
+    public static class ClogRaceTeam
+    {
+        public final String teamId;
+        public final String name;
+        public ClogRaceTeam(String teamId, String name) { this.teamId = teamId; this.name = name; }
+    }
+
+    /** One board-item fill: a team obtaining a target item. */
+    public static class ClogRaceFill
+    {
+        public final String teamId;
+        public final String boardItemId;
+        public final String filledByRsn;
+        public final String method;
+        public final String filledAt;
+        public ClogRaceFill(String teamId, String boardItemId, String filledByRsn, String method, String filledAt)
+        {
+            this.teamId = teamId; this.boardItemId = boardItemId;
+            this.filledByRsn = filledByRsn; this.method = method; this.filledAt = filledAt;
+        }
+    }
+
+    /** One team's standing (fill count) in the clog race. */
+    public static class ClogRaceStanding
+    {
+        public final String teamId;
+        public final String name;
+        public final int count;
+        public final String reachedAt;
+        public ClogRaceStanding(String teamId, String name, int count, String reachedAt)
+        {
+            this.teamId = teamId; this.name = name; this.count = count; this.reachedAt = reachedAt;
+        }
+    }
+
+    /** The full current clog-race snapshot (event + board + teams + fills + standings) for the Raid Race tab. */
+    public static class ClogRace
+    {
+        public final ClogRaceEvent event;
+        public final List<ClogRaceBoardItem> board;
+        public final List<ClogRaceTeam> teams;
+        public final List<ClogRaceFill> fills;
+        public final List<ClogRaceStanding> standings;
+        public ClogRace(ClogRaceEvent event, List<ClogRaceBoardItem> board, List<ClogRaceTeam> teams,
+                         List<ClogRaceFill> fills, List<ClogRaceStanding> standings)
+        {
+            this.event = event; this.board = board; this.teams = teams;
+            this.fills = fills; this.standings = standings;
+        }
+    }
+
+    /**
+     * Fetch the clan's current clog race (event + board + teams + fills + standings) for the
+     * read-only Raid Race tab. Returns null when there is no current event (404) or on any
+     * request/parse failure.
+     */
+    public ClogRace fetchClogRace(String baseUrl, String apiKey, String clanSlug)
+    {
+        JsonObject root = getSync(baseUrl + "/clans/" + clanSlug + "/clog-events/current", apiKey);
+        if (root == null) return null;
+
+        try
+        {
+            ClogRaceEvent event = null;
+            if (root.has("event") && root.get("event").isJsonObject())
+            {
+                JsonObject e = root.getAsJsonObject("event");
+                event = new ClogRaceEvent(
+                    e.has("id") && !e.get("id").isJsonNull() ? e.get("id").getAsString() : null,
+                    e.has("name") && !e.get("name").isJsonNull() ? e.get("name").getAsString() : "",
+                    e.has("status") && !e.get("status").isJsonNull() ? e.get("status").getAsString() : null,
+                    e.has("startTime") && !e.get("startTime").isJsonNull() ? e.get("startTime").getAsString() : null,
+                    e.has("endTime") && !e.get("endTime").isJsonNull() ? e.get("endTime").getAsString() : null,
+                    e.has("winnerTeamId") && !e.get("winnerTeamId").isJsonNull() ? e.get("winnerTeamId").getAsString() : null);
+            }
+
+            List<ClogRaceBoardItem> board = new ArrayList<>();
+            if (root.has("board") && root.get("board").isJsonArray())
+            {
+                for (JsonElement el : root.getAsJsonArray("board"))
+                {
+                    JsonObject o = el.getAsJsonObject();
+                    board.add(new ClogRaceBoardItem(
+                        o.has("id") && !o.get("id").isJsonNull() ? o.get("id").getAsString() : null,
+                        o.has("itemName") && !o.get("itemName").isJsonNull() ? o.get("itemName").getAsString() : "",
+                        o.has("itemId") && !o.get("itemId").isJsonNull() ? o.get("itemId").getAsInt() : 0,
+                        o.has("raid") && !o.get("raid").isJsonNull() ? o.get("raid").getAsString() : null,
+                        o.has("isHardMode") && !o.get("isHardMode").isJsonNull() && o.get("isHardMode").getAsBoolean(),
+                        o.has("sortOrder") && !o.get("sortOrder").isJsonNull() ? o.get("sortOrder").getAsInt() : 0));
+                }
+            }
+
+            List<ClogRaceTeam> teams = new ArrayList<>();
+            if (root.has("teams") && root.get("teams").isJsonArray())
+            {
+                for (JsonElement el : root.getAsJsonArray("teams"))
+                {
+                    JsonObject o = el.getAsJsonObject();
+                    teams.add(new ClogRaceTeam(
+                        o.has("teamId") && !o.get("teamId").isJsonNull() ? o.get("teamId").getAsString() : null,
+                        o.has("name") && !o.get("name").isJsonNull() ? o.get("name").getAsString() : ""));
+                }
+            }
+
+            List<ClogRaceFill> fills = new ArrayList<>();
+            if (root.has("fills") && root.get("fills").isJsonArray())
+            {
+                for (JsonElement el : root.getAsJsonArray("fills"))
+                {
+                    JsonObject o = el.getAsJsonObject();
+                    fills.add(new ClogRaceFill(
+                        o.has("teamId") && !o.get("teamId").isJsonNull() ? o.get("teamId").getAsString() : null,
+                        o.has("boardItemId") && !o.get("boardItemId").isJsonNull() ? o.get("boardItemId").getAsString() : null,
+                        o.has("filledByRsn") && !o.get("filledByRsn").isJsonNull() ? o.get("filledByRsn").getAsString() : null,
+                        o.has("method") && !o.get("method").isJsonNull() ? o.get("method").getAsString() : null,
+                        o.has("filledAt") && !o.get("filledAt").isJsonNull() ? o.get("filledAt").getAsString() : null));
+                }
+            }
+
+            List<ClogRaceStanding> standings = new ArrayList<>();
+            if (root.has("standings") && root.get("standings").isJsonArray())
+            {
+                for (JsonElement el : root.getAsJsonArray("standings"))
+                {
+                    JsonObject o = el.getAsJsonObject();
+                    standings.add(new ClogRaceStanding(
+                        o.has("teamId") && !o.get("teamId").isJsonNull() ? o.get("teamId").getAsString() : null,
+                        o.has("name") && !o.get("name").isJsonNull() ? o.get("name").getAsString() : "",
+                        o.has("count") && !o.get("count").isJsonNull() ? o.get("count").getAsInt() : 0,
+                        o.has("reachedAt") && !o.get("reachedAt").isJsonNull() ? o.get("reachedAt").getAsString() : null));
+                }
+            }
+
+            return new ClogRace(event, board, teams, fills, standings);
+        }
+        catch (Exception ex)
+        {
+            log.debug("parse clog-race failed: {}", ex.getMessage());
+            return null;
+        }
+    }
+
     private static String encodePath(String s)
     {
         try { return java.net.URLEncoder.encode(s, "UTF-8").replace("+", "%20"); }
