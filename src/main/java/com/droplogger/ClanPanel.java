@@ -106,6 +106,20 @@ public class ClanPanel extends PluginPanel
     private java.util.function.Consumer<Object[]> onRequestRank; // {rankName, eligible(Boolean), missing(List)}
     private SpriteManager spriteManager; // in-game clan-rank icon sprites
 
+    // ── Raid Race tab (clog-race board/standings/countdown) ──
+    private final JPanel raidRaceContent = new ScrollableColumn();
+    private String selectedRaidTeamId;
+    private javax.swing.Timer raidRaceCountdown = null;
+    private PlatformApiService.ClogRace currentRaidRace = null; // cached so a standings-row click can rebuild without a refetch
+    private static final String[] RAID_RACE_ORDER = {"cox", "tob", "toa"};
+    private static final java.util.Map<String, String> RAID_RACE_LABELS = new java.util.LinkedHashMap<>();
+    static
+    {
+        RAID_RACE_LABELS.put("cox", "Chambers of Xeric");
+        RAID_RACE_LABELS.put("tob", "Theatre of Blood");
+        RAID_RACE_LABELS.put("toa", "Tombs of Amascut");
+    }
+
     // In-game clan-rank icon sprite per rank (the SpriteID.ClanRankIcons set — the same icons shown
     // in the Solus CC). The clan's icon-per-rank choice isn't exposed by the RuneLite API, so these
     // are mapped by hand; adjust each sprite id to the icon picked in the clan rank-title settings
@@ -2843,6 +2857,425 @@ public class ClanPanel extends PluginPanel
             // Render the obtained COUNT on the icon (in-game stack-number style) when > 1,
             // so "10 abyssal whips" reads straight off the grid like the real collection log.
             AsyncBufferedImage img = itemManager.getImage(it.itemId, it.quantity, it.quantity > 1);
+            label.setIcon(new ImageIcon(img));
+            img.onLoaded(() -> { label.setIcon(new ImageIcon(img)); label.revalidate(); label.repaint(); });
+        }
+        return label;
+    }
+
+    // ══════════════════════════════════════════
+    // Raid Race tab (board + standings + countdown)
+    // ══════════════════════════════════════════
+
+    /** Scrollable Raid Race tab shell; the body lives in raidRaceContent (filled by updateRaidRace). */
+    private JComponent buildRaidRaceTab()
+    {
+        JPanel tab = new JPanel(new BorderLayout());
+        tab.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        tab.setBorder(new EmptyBorder(10, 10, 10, 10));
+
+        raidRaceContent.setLayout(new BoxLayout(raidRaceContent, BoxLayout.Y_AXIS));
+        raidRaceContent.setBackground(ColorScheme.DARK_GRAY_COLOR);
+
+        JScrollPane scroll = new JScrollPane(raidRaceContent,
+            JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED, JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        scroll.setBorder(null);
+        scroll.getVerticalScrollBar().setUnitIncrement(12);
+        tab.add(scroll, BorderLayout.CENTER);
+
+        JLabel loading = new JLabel("No raid race is running right now.");
+        loading.setFont(READABLE_FONT_ITALIC);
+        loading.setForeground(new Color(100, 100, 100));
+        loading.setAlignmentX(Component.LEFT_ALIGNMENT);
+        raidRaceContent.add(loading);
+
+        return tab;
+    }
+
+    /** Re-render the Raid Race tab from a fresh (or cached, on re-select) snapshot. */
+    public void updateRaidRace(PlatformApiService.ClogRace race)
+    {
+        SwingUtilities.invokeLater(() ->
+        {
+            // Timer discipline: stop + null the prior tick before any rebuild (mirrors updateEvent's
+            // countdownTicker handling at ClanPanel.java ~3245-3249) so we never leak a running Timer.
+            if (raidRaceCountdown != null)
+            {
+                raidRaceCountdown.stop();
+                raidRaceCountdown = null;
+            }
+            currentRaidRace = race;
+            raidRaceContent.removeAll();
+
+            if (race == null || race.event == null)
+            {
+                JLabel none = new JLabel("No raid race is running right now.");
+                none.setFont(READABLE_FONT_ITALIC);
+                none.setForeground(new Color(100, 100, 100));
+                none.setAlignmentX(Component.LEFT_ALIGNMENT);
+                raidRaceContent.add(none);
+                raidRaceContent.revalidate();
+                raidRaceContent.repaint();
+                return;
+            }
+
+            PlatformApiService.ClogRaceEvent event = race.event;
+            boolean ended = "ended".equals(event.status);
+
+            // Default selection: winner (if ended and known), else the top standing, else the first team.
+            if (selectedRaidTeamId == null || !raidRaceTeamExists(race, selectedRaidTeamId))
+            {
+                if (ended && event.winnerTeamId != null)
+                {
+                    selectedRaidTeamId = event.winnerTeamId;
+                }
+                else if (race.standings != null && !race.standings.isEmpty())
+                {
+                    selectedRaidTeamId = race.standings.get(0).teamId;
+                }
+                else if (race.teams != null && !race.teams.isEmpty())
+                {
+                    selectedRaidTeamId = race.teams.get(0).teamId;
+                }
+            }
+
+            raidRaceContent.add(raidRaceHeader(event));
+            raidRaceContent.add(Box.createVerticalStrut(8));
+
+            if ("active".equals(event.status))
+            {
+                raidRaceContent.add(raidRaceCountdownLabel(event));
+                raidRaceContent.add(Box.createVerticalStrut(8));
+            }
+            else if (ended)
+            {
+                JLabel winner = raidRaceWinnerLabel(race);
+                if (winner != null)
+                {
+                    raidRaceContent.add(winner);
+                    raidRaceContent.add(Box.createVerticalStrut(8));
+                }
+            }
+
+            raidRaceContent.add(raidRaceStandingsPanel(race));
+            raidRaceContent.add(Box.createVerticalStrut(10));
+            raidRaceContent.add(raidRaceBoardPanel(race, selectedRaidTeamId));
+
+            raidRaceContent.revalidate();
+            raidRaceContent.repaint();
+        });
+    }
+
+    private boolean raidRaceTeamExists(PlatformApiService.ClogRace race, String teamId)
+    {
+        if (race.teams == null) return false;
+        for (PlatformApiService.ClogRaceTeam t : race.teams)
+        {
+            if (teamId.equals(t.teamId)) return true;
+        }
+        return false;
+    }
+
+    private JPanel raidRaceHeader(PlatformApiService.ClogRaceEvent event)
+    {
+        JPanel header = new JPanel();
+        header.setLayout(new BoxLayout(header, BoxLayout.Y_AXIS));
+        header.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        header.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        JPanel titleRow = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 6, 0));
+        titleRow.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        titleRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        JLabel title = new JLabel(event.name != null ? event.name : "Raid Race");
+        title.setFont(title.getFont().deriveFont(Font.BOLD, 16f));
+        title.setForeground(ACCENT_GOLD);
+        titleRow.add(title);
+        titleRow.add(raidRaceStatusChip(event.status));
+        header.add(titleRow);
+
+        if ("draft".equals(event.status))
+        {
+            header.add(clogNote("Drafting is live."));
+        }
+
+        return header;
+    }
+
+    private JLabel raidRaceStatusChip(String status)
+    {
+        String text;
+        Color color;
+        String s = status == null ? "" : status;
+        switch (s)
+        {
+            case "setup":
+                text = "Setup";
+                color = new Color(150, 150, 150);
+                break;
+            case "draft":
+                text = "Draft";
+                color = new Color(100, 149, 237);
+                break;
+            case "active":
+                text = "Active";
+                color = new Color(76, 175, 80);
+                break;
+            case "ended":
+                text = "Ended";
+                color = new Color(170, 90, 90);
+                break;
+            default:
+                text = status != null ? status : "Unknown";
+                color = new Color(150, 150, 150);
+                break;
+        }
+        JLabel chip = new JLabel(text);
+        chip.setFont(READABLE_FONT_SMALL.deriveFont(Font.BOLD));
+        chip.setForeground(Color.WHITE);
+        chip.setOpaque(true);
+        chip.setBackground(color);
+        chip.setBorder(new EmptyBorder(2, 8, 2, 8));
+        return chip;
+    }
+
+    /** Live "Ends in Hh Mm Ss" label for an active race, driven by a 1s Timer (same tick pattern as
+     *  renderCountdown, ClanPanel.java ~3092-3112), computed from event.endTime. */
+    private JLabel raidRaceCountdownLabel(PlatformApiService.ClogRaceEvent event)
+    {
+        JLabel timer = new JLabel();
+        timer.setFont(READABLE_FONT.deriveFont(Font.BOLD, 13f));
+        timer.setForeground(Color.WHITE);
+        timer.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        long endMs;
+        try
+        {
+            endMs = java.time.Instant.parse(event.endTime).toEpochMilli();
+        }
+        catch (Exception ex)
+        {
+            timer.setText("");
+            return timer;
+        }
+
+        Runnable tick = () ->
+        {
+            long left = endMs - System.currentTimeMillis();
+            if (left <= 0)
+            {
+                timer.setText("Ending…");
+                if (raidRaceCountdown != null) raidRaceCountdown.stop();
+                return;
+            }
+            long h = left / 3_600_000L;
+            long m = (left % 3_600_000L) / 60_000L;
+            long sec = (left % 60_000L) / 1000L;
+            timer.setText(String.format("Ends in %dh %02dm %02ds", h, m, sec));
+        };
+        tick.run();
+        raidRaceCountdown = new javax.swing.Timer(1000, ev -> tick.run());
+        raidRaceCountdown.start();
+        return timer;
+    }
+
+    /** "Winner: <name>" line for an ended race, or null when no winner can be determined. */
+    private JLabel raidRaceWinnerLabel(PlatformApiService.ClogRace race)
+    {
+        PlatformApiService.ClogRaceStanding winner = null;
+        if (race.event.winnerTeamId != null && race.standings != null)
+        {
+            for (PlatformApiService.ClogRaceStanding s : race.standings)
+            {
+                if (race.event.winnerTeamId.equals(s.teamId))
+                {
+                    winner = s;
+                    break;
+                }
+            }
+        }
+        if (winner == null && race.standings != null && !race.standings.isEmpty())
+        {
+            winner = race.standings.get(0);
+        }
+        if (winner == null) return null;
+
+        JLabel label = new JLabel("Winner: " + winner.name);
+        label.setFont(READABLE_FONT.deriveFont(Font.BOLD, 13f));
+        label.setForeground(ACCENT_GOLD);
+        label.setAlignmentX(Component.LEFT_ALIGNMENT);
+        return label;
+    }
+
+    /** Rank + team-name + count/total + progress-bar rows, one per standing, in API-sorted order. */
+    private JPanel raidRaceStandingsPanel(PlatformApiService.ClogRace race)
+    {
+        JPanel panel = new JPanel();
+        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        panel.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        panel.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        panel.add(clogTitle("Standings", ACCENT_GOLD, 13f));
+        panel.add(Box.createVerticalStrut(4));
+
+        int boardSize = race.board != null ? race.board.size() : 0;
+        if (race.standings == null || race.standings.isEmpty())
+        {
+            JLabel none = new JLabel("No standings yet");
+            none.setFont(READABLE_FONT_ITALIC);
+            none.setForeground(new Color(100, 100, 100));
+            none.setAlignmentX(Component.LEFT_ALIGNMENT);
+            panel.add(none);
+            return panel;
+        }
+
+        int rank = 1;
+        for (PlatformApiService.ClogRaceStanding standing : race.standings)
+        {
+            panel.add(raidRaceStandingRow(rank, standing, boardSize));
+            panel.add(Box.createVerticalStrut(3));
+            rank++;
+        }
+
+        return panel;
+    }
+
+    /** One clickable standings row; reuses buildClogProgressCard's "X / Y" card, highlighted when selected. */
+    private JPanel raidRaceStandingRow(int rank, PlatformApiService.ClogRaceStanding standing, int boardSize)
+    {
+        JPanel card = buildClogProgressCard(rank + ". " + standing.name, standing.count, boardSize);
+        boolean selected = standing.teamId.equals(selectedRaidTeamId);
+        if (selected)
+        {
+            card.setBackground(new Color(50, 45, 30));
+            card.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(ACCENT_GOLD, 1),
+                new EmptyBorder(5, 7, 5, 7)));
+            for (Component c : card.getComponents())
+            {
+                if (c instanceof JPanel) c.setBackground(card.getBackground());
+            }
+        }
+        card.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        makeCardClickable(card, () ->
+        {
+            selectedRaidTeamId = standing.teamId;
+            updateRaidRace(currentRaidRace);
+        });
+        return card;
+    }
+
+    /** For the selected team: board items grouped by raid (cox, tob, toa order), each raid a
+     *  "filled / total" header + a 5-wide icon grid (alpha-dim technique from iconCell). */
+    private JPanel raidRaceBoardPanel(PlatformApiService.ClogRace race, String teamId)
+    {
+        JPanel panel = new JPanel();
+        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        panel.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        panel.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        panel.add(clogTitle("Board", ACCENT_GOLD, 13f));
+        panel.add(Box.createVerticalStrut(4));
+
+        if (teamId == null || race.board == null || race.board.isEmpty())
+        {
+            JLabel none = new JLabel("No board items yet");
+            none.setFont(READABLE_FONT_ITALIC);
+            none.setForeground(new Color(100, 100, 100));
+            none.setAlignmentX(Component.LEFT_ALIGNMENT);
+            panel.add(none);
+            return panel;
+        }
+
+        // "Team filled boardItem" = any fill matching both teamId and boardItemId.
+        java.util.Set<String> filledIds = new java.util.HashSet<>();
+        java.util.Map<String, String> filledByRsn = new java.util.HashMap<>();
+        if (race.fills != null)
+        {
+            for (PlatformApiService.ClogRaceFill fill : race.fills)
+            {
+                if (teamId.equals(fill.teamId))
+                {
+                    filledIds.add(fill.boardItemId);
+                    filledByRsn.put(fill.boardItemId, fill.filledByRsn);
+                }
+            }
+        }
+
+        java.util.LinkedHashMap<String, java.util.List<PlatformApiService.ClogRaceBoardItem>> byRaid = new java.util.LinkedHashMap<>();
+        for (String raid : RAID_RACE_ORDER) byRaid.put(raid, new java.util.ArrayList<>());
+        for (PlatformApiService.ClogRaceBoardItem item : race.board)
+        {
+            byRaid.computeIfAbsent(item.raid, k -> new java.util.ArrayList<>()).add(item);
+        }
+
+        for (java.util.Map.Entry<String, java.util.List<PlatformApiService.ClogRaceBoardItem>> entry : byRaid.entrySet())
+        {
+            java.util.List<PlatformApiService.ClogRaceBoardItem> items = entry.getValue();
+            if (items.isEmpty()) continue; // omit raids with no board items
+
+            String label = RAID_RACE_LABELS.getOrDefault(entry.getKey(), entry.getKey());
+            int filled = 0;
+            for (PlatformApiService.ClogRaceBoardItem item : items)
+            {
+                if (filledIds.contains(item.id)) filled++;
+            }
+            panel.add(buildClogProgressCard(label, filled, items.size()));
+            panel.add(Box.createVerticalStrut(4));
+
+            JPanel grid = new JPanel(new GridLayout(0, 5, 3, 3));
+            grid.setBackground(ColorScheme.DARK_GRAY_COLOR);
+            for (PlatformApiService.ClogRaceBoardItem item : items)
+            {
+                boolean filledFlag = filledIds.contains(item.id);
+                grid.add(raidRaceIconCell(item, filledFlag, filledByRsn.get(item.id)));
+            }
+
+            JPanel holder = new JPanel(new BorderLayout());
+            holder.setBackground(ColorScheme.DARK_GRAY_COLOR);
+            holder.setAlignmentX(Component.LEFT_ALIGNMENT);
+            holder.add(grid, BorderLayout.NORTH);
+            panel.add(holder);
+            panel.add(Box.createVerticalStrut(8));
+        }
+
+        return panel;
+    }
+
+    /** A single board-item cell: local game icon, bright when this team filled it, faded when not.
+     *  Copies iconCell's alpha-dim technique (ClanPanel.java ~2822). NOTE: iconCell's own tooltip has
+     *  an em dash before "missing"; that punctuation is intentionally NOT copied here, this uses
+     *  " (missing)" instead. */
+    private JComponent raidRaceIconCell(PlatformApiService.ClogRaceBoardItem item, boolean filled, String filledByRsn)
+    {
+        final float alpha = filled ? 1.0f : 0.22f;
+        JLabel label = new JLabel()
+        {
+            @Override protected void paintComponent(Graphics g)
+            {
+                Graphics2D g2 = (Graphics2D) g.create();
+                g2.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, alpha));
+                super.paintComponent(g2);
+                g2.dispose();
+            }
+        };
+        label.setHorizontalAlignment(SwingConstants.CENTER);
+        label.setPreferredSize(new Dimension(36, 32));
+
+        String tooltip = item.itemName;
+        if (filled)
+        {
+            if (filledByRsn != null) tooltip += " (filled by " + filledByRsn + ")";
+        }
+        else
+        {
+            tooltip += " (missing)";
+        }
+        label.setToolTipText(tooltip);
+
+        if (itemManager != null && item.itemId > 0)
+        {
+            AsyncBufferedImage img = itemManager.getImage(item.itemId);
             label.setIcon(new ImageIcon(img));
             img.onLoaded(() -> { label.setIcon(new ImageIcon(img)); label.revalidate(); label.repaint(); });
         }
