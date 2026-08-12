@@ -111,6 +111,8 @@ public class ClanPanel extends PluginPanel
     private String selectedRaidTeamId;
     private javax.swing.Timer raidRaceCountdown = null;
     private PlatformApiService.ClogRace currentRaidRace = null; // cached so a standings-row click can rebuild without a refetch
+    private Runnable onLoadRaidRace;
+    private boolean raidRaceActive = false;
     private static final String[] RAID_RACE_ORDER = {"cox", "tob", "toa"};
     private static final java.util.Map<String, String> RAID_RACE_LABELS = new java.util.LinkedHashMap<>();
     static
@@ -400,11 +402,15 @@ public class ClanPanel extends PluginPanel
         // Ranks tab (which clan ranks YOU qualify for)
         tabbedPane.addTab("Ranks", buildRanksTab());
 
+        // Raid Race tab (live clog-race board/standings/countdown)
+        tabbedPane.addTab("Raid Race", buildRaidRaceTab());
+
         // Event tab intentionally NOT registered — the clan event feature isn't ready for public
         // release. buildEventTab()/renderRace()/etc. are kept (unused) for the WOM-backed rebuild.
         // Do NOT re-add addTab("Event", ...) without Ryan's go-ahead.
 
-        // Lazy-load roster on first Members open; (re)evaluate ranks whenever the Ranks tab opens.
+        // Lazy-load roster on first Members open; (re)evaluate ranks whenever the Ranks tab opens;
+        // load + poll the Raid Race board whenever that tab is selected (stops when deselected).
         tabbedPane.addChangeListener(e ->
         {
             int idx = tabbedPane.getSelectedIndex();
@@ -417,6 +423,11 @@ public class ClanPanel extends PluginPanel
             if (ranksActive && onLoadRanks != null)
             {
                 onLoadRanks.run();
+            }
+            raidRaceActive = "Raid Race".equals(title);
+            if (raidRaceActive && onLoadRaidRace != null)
+            {
+                onLoadRaidRace.run();
             }
         });
 
@@ -2025,6 +2036,8 @@ public class ClanPanel extends PluginPanel
     public void setOnLoadClog(java.util.function.Consumer<String> cb) { this.onLoadClog = cb; }
     public void setOnLoadCa(java.util.function.Consumer<String> cb) { this.onLoadCa = cb; }
     public void setOnLoadRanks(Runnable cb) { this.onLoadRanks = cb; }
+    public void setOnLoadRaidRace(Runnable cb) { this.onLoadRaidRace = cb; }
+    public boolean isRaidRaceActive() { return raidRaceActive; }
     public void setOnRequestRank(java.util.function.Consumer<Object[]> cb) { this.onRequestRank = cb; }
     public boolean isRanksActive() { return ranksActive; }
 

@@ -216,6 +216,7 @@ public class ClanManagementPlugin extends Plugin
     private NavigationButton navButton;
 
     private ScheduledFuture<?> refreshTask;
+    private ScheduledFuture<?> raidRaceTask; // 20s poll while the Raid Race tab is active; self-cancels on deselect
 
     // Track last killed NPC for correlating drops
     private String lastKilledNpc = "Unknown";
@@ -645,6 +646,15 @@ public class ClanManagementPlugin extends Plugin
                         + "Run /getkey in Discord and paste the new key into the plugin settings.", ""));
         });
 
+        // Raid Race tab: clog-race board/standings/countdown (public endpoint). Selecting the tab
+        // fetches immediately and (re)starts a 20s poll (see startRaidRacePoll) that self-cancels
+        // once the tab is no longer active, so it never refreshes in the background.
+        panel.setOnLoadRaidRace(() ->
+        {
+            executor.submit(this::fetchRaidRace);
+            startRaidRacePoll();
+        });
+
         panel.setOnLoadRanks(this::loadRanksWithMode);
         panel.setOnRequestRank(args ->
         {
@@ -739,6 +749,7 @@ public class ClanManagementPlugin extends Plugin
     protected void shutDown()
     {
         if (refreshTask != null) refreshTask.cancel(true);
+        if (raidRaceTask != null) raidRaceTask.cancel(true);
 
         if (fightTracker != null) fightTracker.reset();
 
@@ -2926,6 +2937,55 @@ public class ClanManagementPlugin extends Plugin
         int interval = 60;
         refreshTask = executor.scheduleAtFixedRate(
             this::refreshData, 10, interval, TimeUnit.SECONDS);
+    }
+
+    /** Runs on the executor (off EDT); pushes the result to the panel either way. */
+    private void fetchRaidRace()
+    {
+        if (!isPlatformConfigured())
+        {
+            panel.updateRaidRace(null);
+            return;
+        }
+        try
+        {
+            panel.updateRaidRace(platformApiService.fetchClogRace(getPlatformUrl(), getPlatformKey(), getPlatformSlug()));
+        }
+        catch (Exception ex)
+        {
+            log.debug("raid race load failed", ex);
+            panel.updateRaidRace(null);
+        }
+    }
+
+    /** Started when the Raid Race tab is selected (from setOnLoadRaidRace). Each tick checks
+     *  whether the tab is still active and cancels itself the moment it isn't, so the board never
+     *  polls in the background after the user leaves the tab. Cancels its OWN future (captured via
+     *  selfRef) rather than the raidRaceTask field, so a fast reselect that reassigns the field to a
+     *  newer task can't have this stale task cancel that newer one out from under it. */
+    private void startRaidRacePoll()
+    {
+        if (raidRaceTask != null)
+        {
+            raidRaceTask.cancel(false);
+        }
+
+        final java.util.concurrent.atomic.AtomicReference<ScheduledFuture<?>> selfRef = new java.util.concurrent.atomic.AtomicReference<>();
+        ScheduledFuture<?> future = executor.scheduleAtFixedRate(() ->
+        {
+            if (panel == null || !panel.isRaidRaceActive())
+            {
+                ScheduledFuture<?> self = selfRef.get();
+                if (self != null)
+                {
+                    self.cancel(false);
+                }
+                return;
+            }
+            fetchRaidRace();
+        }, 20, 20, TimeUnit.SECONDS);
+        selfRef.set(future);
+        raidRaceTask = future;
     }
 
     private void refreshData()
