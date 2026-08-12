@@ -112,6 +112,8 @@ public class ClanPanel extends PluginPanel
     private javax.swing.Timer raidRaceCountdown = null;
     private PlatformApiService.ClogRace currentRaidRace = null; // cached so a standings-row click can rebuild without a refetch
     private volatile PlatformApiService.Schedule currentSchedule = null; // latest unified schedule, rendered atop the Events tab
+    private volatile PlatformApiService.Signups currentSignups = null; // current open draft's signups
+    private Runnable onSignup; // fired by the "Sign up for the draft" button; plugin reads the local RSN
     private Runnable onLoadRaidRace;
     private boolean raidRaceActive = false;
 
@@ -2033,6 +2035,9 @@ public class ClanPanel extends PluginPanel
     public boolean isRaidRaceActive() { return raidRaceActive; }
     /** Store the latest unified schedule; it renders atop the Events tab on the next updateRaidRace. */
     public void setSchedule(PlatformApiService.Schedule schedule) { this.currentSchedule = schedule; }
+    /** Store the current open draft's signups; renders in the Events tab on the next updateRaidRace. */
+    public void setSignups(PlatformApiService.Signups signups) { this.currentSignups = signups; }
+    public void setOnSignup(Runnable cb) { this.onSignup = cb; }
     public void setOnRequestRank(java.util.function.Consumer<Object[]> cb) { this.onRequestRank = cb; }
     public boolean isRanksActive() { return ranksActive; }
 
@@ -2923,6 +2928,12 @@ public class ClanPanel extends PluginPanel
                 raidRaceContent.add(Box.createVerticalStrut(12));
             }
 
+            if (currentSignups != null && currentSignups.open)
+            {
+                raidRaceContent.add(raidRaceSignupPanel(currentSignups));
+                raidRaceContent.add(Box.createVerticalStrut(12));
+            }
+
             if (race == null || race.event == null)
             {
                 JLabel none = new JLabel("No clog race is running right now.");
@@ -2992,6 +3003,49 @@ public class ClanPanel extends PluginPanel
             if (teamId.equals(t.teamId)) return true;
         }
         return false;
+    }
+
+    /** The signup section for the current open draft: a count + a "Sign up for the draft" button
+     *  (fires onSignup, which reads the local RSN plugin-side) + the list of who has signed up. */
+    private JPanel raidRaceSignupPanel(PlatformApiService.Signups signups)
+    {
+        JPanel panel = new JPanel();
+        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        panel.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        panel.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        panel.add(clogTitle("Signups (" + signups.rsns.size() + ")", ACCENT_GOLD, 13f));
+        panel.add(Box.createVerticalStrut(4));
+
+        JButton signupBtn = new JButton("Sign up for the draft");
+        signupBtn.setAlignmentX(Component.LEFT_ALIGNMENT);
+        signupBtn.setFocusPainted(false);
+        signupBtn.addActionListener(e -> { if (onSignup != null) onSignup.run(); });
+        panel.add(signupBtn);
+        panel.add(Box.createVerticalStrut(6));
+
+        if (signups.rsns.isEmpty())
+        {
+            JLabel none = new JLabel("No signups yet");
+            none.setFont(READABLE_FONT_ITALIC);
+            none.setForeground(new Color(100, 100, 100));
+            none.setAlignmentX(Component.LEFT_ALIGNMENT);
+            panel.add(none);
+        }
+        else
+        {
+            for (String rsn : signups.rsns)
+            {
+                JLabel row = new JLabel(rsn);
+                row.setFont(READABLE_FONT);
+                row.setForeground(Color.WHITE);
+                row.setAlignmentX(Component.LEFT_ALIGNMENT);
+                row.setBorder(new EmptyBorder(2, 7, 2, 0));
+                panel.add(row);
+            }
+        }
+
+        return panel;
     }
 
     /** The unified event schedule (all types) at the top of the Events tab: a "Schedule" title and

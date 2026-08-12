@@ -1498,6 +1498,54 @@ public class PlatformApiService
         }
     }
 
+    /** The current open draft's signup list, for the Events tab signup section. */
+    public static class Signups
+    {
+        public final boolean open;
+        public final String eventName;
+        public final List<String> rsns;
+        public Signups(boolean open, String eventName, List<String> rsns)
+        {
+            this.open = open; this.eventName = eventName; this.rsns = rsns;
+        }
+    }
+
+    /** Fetch the current open draft's signups. Returns a closed (open=false) Signups on 404/failure. */
+    public Signups fetchSignups(String baseUrl, String apiKey, String clanSlug)
+    {
+        JsonObject root = getSync(baseUrl + "/clans/" + clanSlug + "/signups", apiKey);
+        if (root == null) return new Signups(false, null, new ArrayList<>());
+        try
+        {
+            boolean open = root.has("open") && !root.get("open").isJsonNull() && root.get("open").getAsBoolean();
+            if (!open) return new Signups(false, null, new ArrayList<>());
+            String eventName = jsonStr(root, "eventName");
+            List<String> rsns = new ArrayList<>();
+            if (root.has("signups") && root.get("signups").isJsonArray())
+            {
+                for (JsonElement el : root.getAsJsonArray("signups"))
+                {
+                    String rsn = jsonStr(el.getAsJsonObject(), "rsn");
+                    if (rsn != null) rsns.add(rsn);
+                }
+            }
+            return new Signups(true, eventName, rsns);
+        }
+        catch (Exception ex)
+        {
+            log.debug("parse signups failed: {}", ex.getMessage());
+            return new Signups(false, null, new ArrayList<>());
+        }
+    }
+
+    /** Sign up the given RSN for the current open draft (fire-and-forget; the poll refreshes the list). */
+    public void signup(String baseUrl, String apiKey, String clanSlug, String rsn)
+    {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("rsn", rsn);
+        postAsync(baseUrl + "/clans/" + clanSlug + "/signups", apiKey, payload, "Draft signup");
+    }
+
     private static String encodePath(String s)
     {
         try { return java.net.URLEncoder.encode(s, "UTF-8").replace("+", "%20"); }

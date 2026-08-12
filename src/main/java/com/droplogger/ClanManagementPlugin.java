@@ -656,6 +656,16 @@ public class ClanManagementPlugin extends Plugin
         });
 
         panel.setOnLoadRanks(this::loadRanksWithMode);
+        panel.setOnSignup(() ->
+        {
+            String rsn = getLocalPlayerName();
+            if (!isPlatformConfigured() || rsn == null || rsn.isEmpty()) return;
+            executor.submit(() ->
+            {
+                platformApiService.signup(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), rsn);
+                fetchRaidRace(); // refresh the signup list after signing up
+            });
+        });
         panel.setOnRequestRank(args ->
         {
             String rankName = (String) args[0];
@@ -2949,9 +2959,10 @@ public class ClanManagementPlugin extends Plugin
         }
         try
         {
-            // Fetch the unified schedule + the live clog race in the same cycle; setSchedule stores
-            // it and updateRaidRace renders both (schedule on top, clog detail below).
+            // Fetch the unified schedule + open-draft signups + the live clog race in the same cycle;
+            // the setters store them and updateRaidRace renders all three (schedule, signups, clog).
             panel.setSchedule(platformApiService.fetchSchedule(getPlatformUrl(), getPlatformKey(), getPlatformSlug()));
+            panel.setSignups(platformApiService.fetchSignups(getPlatformUrl(), getPlatformKey(), getPlatformSlug()));
             panel.updateRaidRace(platformApiService.fetchClogRace(getPlatformUrl(), getPlatformKey(), getPlatformSlug()));
         }
         catch (Exception ex)
