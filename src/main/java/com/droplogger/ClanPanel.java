@@ -403,7 +403,7 @@ public class ClanPanel extends PluginPanel
         tabbedPane.addTab("Ranks", buildRanksTab());
 
         // Raid Race tab (live clog-race board/standings/countdown)
-        tabbedPane.addTab("Raid Race", buildRaidRaceTab());
+        tabbedPane.addTab("Events", buildRaidRaceTab());
 
         // Event tab intentionally NOT registered — the clan event feature isn't ready for public
         // release. buildEventTab()/renderRace()/etc. are kept (unused) for the WOM-backed rebuild.
@@ -424,7 +424,7 @@ public class ClanPanel extends PluginPanel
             {
                 onLoadRanks.run();
             }
-            raidRaceActive = "Raid Race".equals(title);
+            raidRaceActive = "Events".equals(title);
             if (raidRaceActive && onLoadRaidRace != null)
             {
                 onLoadRaidRace.run();
