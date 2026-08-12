@@ -1226,13 +1226,14 @@ public class PlatformApiService
         public final String id;
         public final String itemName;
         public final int itemId;
-        public final String raid;
+        public final String source;
+        public final String tab;
         public final boolean isHardMode;
         public final int sortOrder;
-        public ClogRaceBoardItem(String id, String itemName, int itemId, String raid, boolean isHardMode, int sortOrder)
+        public ClogRaceBoardItem(String id, String itemName, int itemId, String source, String tab, boolean isHardMode, int sortOrder)
         {
             this.id = id; this.itemName = itemName; this.itemId = itemId;
-            this.raid = raid; this.isHardMode = isHardMode; this.sortOrder = sortOrder;
+            this.source = source; this.tab = tab; this.isHardMode = isHardMode; this.sortOrder = sortOrder;
         }
     }
 
@@ -1323,7 +1324,8 @@ public class PlatformApiService
                         o.has("id") && !o.get("id").isJsonNull() ? o.get("id").getAsString() : null,
                         o.has("itemName") && !o.get("itemName").isJsonNull() ? o.get("itemName").getAsString() : "",
                         o.has("itemId") && !o.get("itemId").isJsonNull() ? o.get("itemId").getAsInt() : 0,
-                        o.has("raid") && !o.get("raid").isJsonNull() ? o.get("raid").getAsString() : null,
+                        o.has("source") && !o.get("source").isJsonNull() ? o.get("source").getAsString() : null,
+                        o.has("tab") && !o.get("tab").isJsonNull() ? o.get("tab").getAsString() : null,
                         o.has("isHardMode") && !o.get("isHardMode").isJsonNull() && o.get("isHardMode").getAsBoolean(),
                         o.has("sortOrder") && !o.get("sortOrder").isJsonNull() ? o.get("sortOrder").getAsInt() : 0));
                 }

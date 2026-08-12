@@ -113,14 +113,6 @@ public class ClanPanel extends PluginPanel
     private PlatformApiService.ClogRace currentRaidRace = null; // cached so a standings-row click can rebuild without a refetch
     private Runnable onLoadRaidRace;
     private boolean raidRaceActive = false;
-    private static final String[] RAID_RACE_ORDER = {"cox", "tob", "toa"};
-    private static final java.util.Map<String, String> RAID_RACE_LABELS = new java.util.LinkedHashMap<>();
-    static
-    {
-        RAID_RACE_LABELS.put("cox", "Chambers of Xeric");
-        RAID_RACE_LABELS.put("tob", "Theatre of Blood");
-        RAID_RACE_LABELS.put("toa", "Tombs of Amascut");
-    }
 
     // In-game clan-rank icon sprite per rank (the SpriteID.ClanRankIcons set — the same icons shown
     // in the Solus CC). The clan's icon-per-rank choice isn't exposed by the RuneLite API, so these
@@ -3178,8 +3170,8 @@ public class ClanPanel extends PluginPanel
         return card;
     }
 
-    /** For the selected team: board items grouped by raid (cox, tob, toa order), each raid a
-     *  "filled / total" header + a 5-wide icon grid (alpha-dim technique from iconCell). */
+    /** For the selected team: board items grouped by their own source (host-selected boss/raid),
+     *  each source a "filled / total" header + a 5-wide icon grid (alpha-dim technique from iconCell). */
     private JPanel raidRaceBoardPanel(PlatformApiService.ClogRace race, String teamId)
     {
         JPanel panel = new JPanel();
@@ -3215,19 +3207,35 @@ public class ClanPanel extends PluginPanel
             }
         }
 
-        java.util.LinkedHashMap<String, java.util.List<PlatformApiService.ClogRaceBoardItem>> byRaid = new java.util.LinkedHashMap<>();
-        for (String raid : RAID_RACE_ORDER) byRaid.put(raid, new java.util.ArrayList<>());
+        // Group into contiguous sections by (tab, source): the board is already ordered by
+        // sortOrder, so a run of items sharing the same tab+source forms one section, in the
+        // exact order they first appear. The source IS the display label now (no fixed raid map).
+        java.util.List<java.util.List<PlatformApiService.ClogRaceBoardItem>> sections = new java.util.ArrayList<>();
+        java.util.List<String> sectionLabels = new java.util.ArrayList<>();
+        String lastTab = null;
+        String lastSource = null;
         for (PlatformApiService.ClogRaceBoardItem item : race.board)
         {
-            byRaid.computeIfAbsent(item.raid, k -> new java.util.ArrayList<>()).add(item);
+            boolean sameSection = !sections.isEmpty()
+                && java.util.Objects.equals(item.tab, lastTab)
+                && java.util.Objects.equals(item.source, lastSource);
+            if (!sameSection)
+            {
+                sections.add(new java.util.ArrayList<>());
+                sectionLabels.add(item.source != null && !item.source.isEmpty() ? item.source
+                    : (item.tab != null && !item.tab.isEmpty() ? item.tab : "Unknown"));
+                lastTab = item.tab;
+                lastSource = item.source;
+            }
+            sections.get(sections.size() - 1).add(item);
         }
 
-        for (java.util.Map.Entry<String, java.util.List<PlatformApiService.ClogRaceBoardItem>> entry : byRaid.entrySet())
+        for (int sectionIdx = 0; sectionIdx < sections.size(); sectionIdx++)
         {
-            java.util.List<PlatformApiService.ClogRaceBoardItem> items = entry.getValue();
-            if (items.isEmpty()) continue; // omit raids with no board items
+            java.util.List<PlatformApiService.ClogRaceBoardItem> items = sections.get(sectionIdx);
+            if (items.isEmpty()) continue; // omit sections with no board items
 
-            String label = RAID_RACE_LABELS.getOrDefault(entry.getKey(), entry.getKey());
+            String label = sectionLabels.get(sectionIdx);
             int filled = 0;
             for (PlatformApiService.ClogRaceBoardItem item : items)
             {
