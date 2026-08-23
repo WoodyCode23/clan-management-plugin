@@ -1,7 +1,10 @@
 package com.droplogger;
 
 import com.google.gson.*;
-import java.io.FileWriter;
+import java.io.FileOutputStream;
+import java.io.OutputStreamWriter;
+import java.io.Writer;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 /**
@@ -53,7 +56,7 @@ public final class RankExport {
             }
             ro.add("groups", groups); ranks.add(ro);
         }
-        try (FileWriter w = new FileWriter("build/ranks-export.json")) {
+        try (Writer w = new OutputStreamWriter(new FileOutputStream("build/ranks-export.json"), StandardCharsets.UTF_8)) {
             new GsonBuilder().setPrettyPrinting().create().toJson(ranks, w);
         }
         System.out.println("RANK_EXPORT: " + ranks.size() + " ranks -> build/ranks-export.json");
