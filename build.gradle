@@ -45,3 +45,9 @@ task sweep(type: JavaExec) {
     classpath = sourceSets.test.runtimeClasspath
     mainClass = 'com.droplogger.PbSweep'
 }
+
+// Migration: export the hardcoded rank tree to build/ranks-export.json. Run: gradlew exportRanks
+task exportRanks(type: JavaExec) {
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.droplogger.RankExport'
+}
