@@ -81,6 +81,51 @@ public interface ClanManagementConfig extends Config
     )
     default boolean chatConfirmation() { return true; }
 
+    // ── Screenshots to Discord ──
+
+    @ConfigSection(
+        name = "Screenshots",
+        description = "Opt-in — post your drops/clogs, personal bests and deaths to your clan's Discord with a message of your choosing.",
+        position = 2
+    )
+    String screenshotSection = "screenshots";
+
+    @ConfigItem(
+        keyName = "sendScreenshotsToDiscord",
+        name = "Send screenshots to Discord",
+        description = "Off by default. When on, your drops/clogs, personal bests and deaths are posted to the channels your clan admin set up, each with the message you enter below.",
+        section = screenshotSection,
+        position = 0
+    )
+    default boolean sendScreenshotsToDiscord() { return false; }
+
+    @ConfigItem(
+        keyName = "dropPhrase",
+        name = "Drops / clogs message",
+        description = "Posted with your drop and collection-log screenshots (like Dink's custom message). Leave blank for none.",
+        section = screenshotSection,
+        position = 1
+    )
+    default String dropPhrase() { return ""; }
+
+    @ConfigItem(
+        keyName = "pbPhrase",
+        name = "Personal best message",
+        description = "Posted with your personal-best screenshots. Leave blank for none.",
+        section = screenshotSection,
+        position = 2
+    )
+    default String pbPhrase() { return ""; }
+
+    @ConfigItem(
+        keyName = "deathPhrase",
+        name = "Death message",
+        description = "Posted with your death screenshots. Leave blank for none.",
+        section = screenshotSection,
+        position = 3
+    )
+    default String deathPhrase() { return ""; }
+
     // Admin access is role-based: a personal API key whose Discord user has an admin role
     // unlocks the Admin tab (bootstrap `permissions`). The old shared "Admin API Key" is gone.
 }

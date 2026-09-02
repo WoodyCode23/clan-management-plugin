@@ -30,6 +30,10 @@ tasks.withType(JavaCompile) {
     options.encoding = 'UTF-8'
 }
 
+// Local development only: launches a RuneLite client (from the test sources) against a local dev
+// API for hand-testing. This task is NOT part of the plugin build and never ships in the jar; the
+// Plugin Hub builds from source and does not run it. The insecure-TLS flags below exist solely to
+// reach a self-signed local dev server during development and have no effect on end users.
 task runClient(type: JavaExec) {
     classpath = sourceSets.test.runtimeClasspath
     mainClass = 'com.droplogger.ClanManagementPluginTest'
@@ -50,4 +54,10 @@ task sweep(type: JavaExec) {
 task exportRanks(type: JavaExec) {
     classpath = sourceSets.test.runtimeClasspath
     mainClass = 'com.droplogger.RankExport'
+}
+
+// Verify RankSystem.parseRanks is the exact inverse of RankExport. Run: gradlew rankRoundTrip
+task rankRoundTrip(type: JavaExec) {
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.droplogger.RankRoundTrip'
 }

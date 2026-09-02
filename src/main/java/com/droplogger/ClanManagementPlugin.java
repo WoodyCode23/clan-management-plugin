@@ -14,6 +14,7 @@ import net.runelite.api.WorldType;
 import net.runelite.api.EnumComposition;
 import net.runelite.api.MenuAction;
 import net.runelite.api.StructComposition;
+import net.runelite.api.events.ActorDeath;
 import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.ItemContainerChanged;
@@ -189,6 +190,151 @@ public class ClanManagementPlugin extends Plugin
 
     @Inject
     private SpriteManager spriteManager;
+
+    // ── Bingo/clog-event team dots in clan chat ──
+    @Inject
+    private net.runelite.client.game.ChatIconManager chatIconManager;
+    private final java.util.Map<String, String> teamColorByRsn = new java.util.HashMap<>(); // normalized name -> "#RRGGBB"
+    private final java.util.Map<String, Integer> teamIconIdByColor = new java.util.concurrent.ConcurrentHashMap<>(); // color -> ChatIconManager icon id
+    private volatile long teamRosterLoadedAtMs = 0;
+
+    private static String normalizeName(String s)
+    {
+        if (s == null) return "";
+        return s.toLowerCase().replace(' ', ' ').replace('_', ' ').replace('-', ' ').replaceAll(" +", " ").trim();
+    }
+
+    // Rebuild the name->team-colour map from the current draft (throttled to 5 min). Off-thread fetch.
+    private void refreshTeamRosterIfStale()
+    {
+        if (System.currentTimeMillis() - teamRosterLoadedAtMs < 5 * 60_000L) return;
+        teamRosterLoadedAtMs = System.currentTimeMillis();
+        executor.submit(() ->
+        {
+            try
+            {
+                if (!isPlatformConfigured()) { synchronized (teamColorByRsn) { teamColorByRsn.clear(); } return; }
+                // Only tag clan chat while a clog event is actually running. Once it ends (status
+                // "ended") or there is no current event, drop the roster so old team colours stop
+                // appearing next to names in chat.
+                PlatformApiService.ClogRace race = platformApiService.fetchClogRace(getPlatformUrl(), getPlatformKey(), getPlatformSlug());
+                String evStatus = race != null && race.event != null ? race.event.status : null;
+                if (evStatus == null || evStatus.equals("ended"))
+                {
+                    synchronized (teamColorByRsn) { teamColorByRsn.clear(); }
+                    return;
+                }
+                com.google.gson.JsonObject draft = boardDataService.fetchDraft(getPlatformUrl(), getPlatformSlug(), getPlatformKey());
+                java.util.Map<String, String> map = new java.util.HashMap<>();
+                if (draft != null && draft.has("teams") && draft.get("teams").isJsonArray())
+                {
+                    java.util.Map<String, String> colorByTeam = new java.util.HashMap<>();
+                    for (com.google.gson.JsonElement el : draft.getAsJsonArray("teams"))
+                    {
+                        com.google.gson.JsonObject t = el.getAsJsonObject();
+                        String color = t.has("color") && !t.get("color").isJsonNull() ? t.get("color").getAsString() : null;
+                        if (color == null) continue;
+                        colorByTeam.put(t.get("id").getAsString(), color);
+                        if (t.has("captain1") && !t.get("captain1").isJsonNull()) map.put(normalizeName(t.get("captain1").getAsString()), color);
+                        if (t.has("captain2") && !t.get("captain2").isJsonNull()) map.put(normalizeName(t.get("captain2").getAsString()), color);
+                    }
+                    java.util.Map<String, String> rsnByPool = new java.util.HashMap<>();
+                    if (draft.has("pool") && draft.get("pool").isJsonArray())
+                        for (com.google.gson.JsonElement el : draft.getAsJsonArray("pool"))
+                        { com.google.gson.JsonObject p = el.getAsJsonObject(); rsnByPool.put(p.get("id").getAsString(), p.get("rsn").getAsString()); }
+                    if (draft.has("picks") && draft.get("picks").isJsonArray())
+                        for (com.google.gson.JsonElement el : draft.getAsJsonArray("picks"))
+                        {
+                            com.google.gson.JsonObject pk = el.getAsJsonObject();
+                            String rsn = rsnByPool.get(pk.get("poolId").getAsString());
+                            String color = colorByTeam.get(pk.get("teamId").getAsString());
+                            if (rsn != null && color != null) map.put(normalizeName(rsn), color);
+                        }
+                }
+                synchronized (teamColorByRsn) { teamColorByRsn.clear(); teamColorByRsn.putAll(map); }
+                registerTeamColorIcons(new java.util.HashSet<>(map.values()));
+            }
+            catch (Exception ex) { log.debug("team roster refresh failed", ex); }
+        });
+    }
+
+    // Pre-register a small filled dot per team colour, ON THE CLIENT THREAD and ahead of time.
+    // ChatIconManager assigns the <img=> index only on a later tick (its own clientThread.invokeLater
+    // -> refreshIcons), so registration and index-resolution MUST be separate steps.
+    private void registerTeamColorIcons(java.util.Collection<String> colors)
+    {
+        if (colors.isEmpty()) return;
+        clientThread.invokeLater(() ->
+        {
+            for (String color : colors)
+            {
+                if (color == null || teamIconIdByColor.containsKey(color)) continue;
+                try
+                {
+                    java.awt.Color c = java.awt.Color.decode(color);
+                    java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(12, 12, java.awt.image.BufferedImage.TYPE_INT_ARGB);
+                    java.awt.Graphics2D g = img.createGraphics();
+                    g.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
+                    g.setColor(c);
+                    g.fillOval(1, 2, 9, 9);
+                    g.dispose();
+                    teamIconIdByColor.put(color, chatIconManager.registerChatIcon(img));
+                }
+                catch (Exception ex) { log.debug("team icon register failed for {}", color, ex); }
+            }
+        });
+    }
+
+    // Resolve the already-registered dot's chat <img=> index for a colour (-1 until it's ready).
+    private int teamIconIndex(String color)
+    {
+        Integer id = teamIconIdByColor.get(color);
+        return id == null ? -1 : chatIconManager.chatIconIndex(id);
+    }
+
+    // Prepend a team-colour dot to clan-chat lines (typed messages + drop broadcasts) for anyone on a
+    // bingo/clog-event team, so friend vs enemy team is obvious at a glance. Defensive: never throws.
+    private void tagClanChatTeam(ChatMessage event)
+    {
+        try
+        {
+            ChatMessageType t = event.getType();
+            boolean typed = t == ChatMessageType.CLAN_CHAT || t == ChatMessageType.CLAN_GUEST_CHAT || t == ChatMessageType.FRIENDSCHAT;
+            boolean broadcast = t == ChatMessageType.CLAN_MESSAGE || t == ChatMessageType.CLAN_GUEST_MESSAGE || t == ChatMessageType.FRIENDSCHATNOTIFICATION;
+            if (!typed && !broadcast) return;
+            refreshTeamRosterIfStale();
+            if (teamColorByRsn.isEmpty()) return;
+            net.runelite.api.MessageNode node = event.getMessageNode();
+            if (node == null) return;
+
+            if (typed)
+            {
+                String color = teamColorByRsn.get(normalizeName(Text.removeTags(event.getName())));
+                if (color == null) return;
+                int idx = teamIconIndex(color);
+                if (idx < 0) return;
+                String cur = node.getName() == null ? "" : node.getName();
+                String tag = "<img=" + idx + ">";
+                if (!cur.contains(tag)) { node.setName(tag + cur); client.refreshChat(); }
+            }
+            else
+            {
+                String msg = node.getValue() == null ? "" : node.getValue();
+                String plainNorm = normalizeName(Text.removeTags(msg));
+                for (java.util.Map.Entry<String, String> e : teamColorByRsn.entrySet())
+                {
+                    if (e.getKey().isEmpty() || !plainNorm.contains(e.getKey())) continue;
+                    int idx = teamIconIndex(e.getValue());
+                    if (idx < 0) return;
+                    String tag = "<img=" + idx + ">";
+                    if (!msg.contains(tag)) { node.setValue(tag + " " + msg); client.refreshChat(); }
+                    return;
+                }
+            }
+        }
+        catch (Exception ex) { log.debug("team dot tag failed", ex); }
+    }
+
 
     @Inject
     private ScheduledExecutorService executor;
@@ -532,7 +678,7 @@ public class ClanManagementPlugin extends Plugin
             javax.swing.SwingUtilities.invokeLater(this::setupAdminPanel);
         }
 
-        log.info("Bootstrap config loaded from platform");
+        log.debug("Bootstrap config loaded from platform");
     }
 
     /** Re-fetch announcements and refresh both the home display and the admin management list. */
@@ -635,15 +781,21 @@ public class ClanManagementPlugin extends Plugin
         }));
         // Loud auth-failure warning: a bad/mispasted API key otherwise fails silently while the
         // panel looks fine (e.g. a member's kills never syncing). At most one warning per 5 min.
+        // Only warn when the logged-in account is actually a clan member: lots of people play mains
+        // + alts, and a non-clan alt gets expected "not a member" (403) rejections that must NOT be
+        // mistaken for a bad key or spammed to chat.
         platformApiService.setOnAuthFailure(() ->
         {
             long now = System.currentTimeMillis();
             if (now - lastAuthWarnAt < 5 * 60_000) return;
-            lastAuthWarnAt = now;
             clientThread.invokeLater(() ->
+            {
+                if (!localPlayerInClan()) return; // on a non-clan alt: their key isn't the problem, stay silent
+                lastAuthWarnAt = System.currentTimeMillis();
                 client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
                     "[" + getClanName() + "] Your API key was REJECTED. Drops/times are NOT syncing. "
-                        + "Run /getkey in Discord and paste the new key into the plugin settings.", ""));
+                        + "Run /getkey in Discord and paste the new key into the plugin settings.", "");
+            });
         });
 
         // Raid Race tab: clog-race board/standings/countdown (public endpoint). Selecting the tab
@@ -656,14 +808,28 @@ public class ClanManagementPlugin extends Plugin
         });
 
         panel.setOnLoadRanks(this::loadRanksWithMode);
-        panel.setOnSignup(() ->
+        // Lazily fetch one event's signups when its card is expanded, then push them back to the panel.
+        panel.setOnFetchEventSignups(eventId ->
         {
-            String rsn = getLocalPlayerName();
-            if (!isPlatformConfigured() || rsn == null || rsn.isEmpty()) return;
+            if (!isPlatformConfigured() || eventId == null) return;
             executor.submit(() ->
             {
-                platformApiService.signup(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), rsn);
-                fetchRaidRace(); // refresh the signup list after signing up
+                PlatformApiService.Signups s = platformApiService.fetchSignups(
+                    getPlatformUrl(), getPlatformKey(), getPlatformSlug(), eventId);
+                panel.setEventSignups(eventId, s);
+            });
+        });
+        // Sign the local player up for one specific event, then refresh that event's list.
+        panel.setOnSignupForEvent(eventId ->
+        {
+            String rsn = getLocalPlayerName();
+            if (!isPlatformConfigured() || eventId == null || rsn == null || rsn.isEmpty()) return;
+            executor.submit(() ->
+            {
+                platformApiService.signup(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), rsn, eventId);
+                PlatformApiService.Signups s = platformApiService.fetchSignups(
+                    getPlatformUrl(), getPlatformKey(), getPlatformSlug(), eventId);
+                panel.setEventSignups(eventId, s);
             });
         });
         panel.setOnRequestRank(args ->
@@ -699,7 +865,7 @@ public class ClanManagementPlugin extends Plugin
             hiscoreV2BatchFetched = false;
             File cacheFile = getHiscoreCacheFile();
             if (cacheFile.exists()) cacheFile.delete();
-            log.info("Hiscore cache cleared — next view will batch-fetch");
+            log.debug("Hiscore cache cleared — next view will batch-fetch");
         });
         panel.setOnRefreshDropsTab(() -> executor.submit(this::refreshDropsTab));
         panel.setOnFetchPlayerDrops((rsn) -> executor.submit(() -> fetchPlayerDrops(rsn)));
@@ -786,7 +952,7 @@ public class ClanManagementPlugin extends Plugin
 
         if ("apiKey".equals(event.getKey()))
         {
-            log.info("API key changed, refreshing platform data...");
+            log.debug("API key changed, refreshing platform data...");
             serverConfigLoaded = false;
             executor.submit(this::refreshData);
         }
@@ -857,7 +1023,7 @@ public class ClanManagementPlugin extends Plugin
         else if (clogDebounceTicksRemaining == 0)
         {
             clogDebounceTicksRemaining = -1;
-            log.info("Clog debounce fired: {} raw events, {} unique items collected", clogRawEventCount, clogSyncItems.size());
+            log.debug("Clog debounce fired: {} raw events, {} unique items collected", clogRawEventCount, clogSyncItems.size());
             uploadCollectionLog();
         }
 
@@ -937,7 +1103,16 @@ public class ClanManagementPlugin extends Plugin
     @Subscribe
     public void onChatMessage(ChatMessage event)
     {
-        if (event.getType() != ChatMessageType.GAMEMESSAGE)
+        tagClanChatTeam(event); // bingo/clog-event team dot in clan chat
+
+        // Combat achievement live completion — track the instant it's earned, not just when the CA
+        // interface is opened. Runs on ANY chat type (the CA message need not be a GAMEMESSAGE).
+        detectCombatAchievement(Text.removeTags(event.getMessage() == null ? "" : event.getMessage()));
+
+        // Raid completions (CoX raid-complete/Team size/Duration, ToB/ToA times) arrive as
+        // FRIENDSCHATNOTIFICATION, not GAMEMESSAGE. Accept both so the time-bearing line is seen.
+        ChatMessageType chatType = event.getType();
+        if (chatType != ChatMessageType.GAMEMESSAGE && chatType != ChatMessageType.FRIENDSCHATNOTIFICATION)
         {
             return;
         }
@@ -1017,8 +1192,29 @@ public class ClanManagementPlugin extends Plugin
         DropEntry drop = new DropEntry(petName, 0, boss, pbDetector.getLastKillCount(),
             wp.getX(), wp.getY(), wp.getPlane(), playerName, -1);
         withScreenshot(true, screenshot ->
-            platformApiService.submitDrop(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), drop, screenshot));
+            platformApiService.submitDrop(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), drop, screenshot,
+                config.sendScreenshotsToDiscord(), config.dropPhrase()));
         log.debug("Duplicate pet logged: {} from {}", petName, boss);
+    }
+
+    /**
+     * Opt-in death screenshots. Only when the player enabled "Send screenshots to Discord" do we
+     * capture their death frame and forward it (with their caption) to the clan's deaths webhook.
+     * Nothing is captured or sent when the toggle is off. Fires only for the local player's death.
+     */
+    @Subscribe
+    public void onActorDeath(ActorDeath event)
+    {
+        if (!config.sendScreenshotsToDiscord()) return;
+        if (client.getLocalPlayer() == null || event.getActor() != client.getLocalPlayer()) return;
+        if (!isPlatformConfigured() || !localPlayerInClan()) return;
+
+        String rsn = client.getLocalPlayer().getName();
+        if (rsn == null || rsn.isEmpty()) return;
+
+        withScreenshot(true, screenshot ->
+            platformApiService.submitDeath(getPlatformUrl(), getPlatformKey(), getPlatformSlug(),
+                rsn, null, screenshot, config.deathPhrase()));
     }
 
     @Subscribe
@@ -1027,7 +1223,7 @@ public class ClanManagementPlugin extends Plugin
         // Adventure log Counters page (group 741) — bulk PB sync
         if (event.getGroupId() == JOURNALSCROLL_GROUP && isPlatformConfigured() && config.enableSpeedTimes())
         {
-            log.info("Adventure log Counters page detected (group 741), scheduling PB parse");
+            log.debug("Adventure log Counters page detected (group 741), scheduling PB parse");
             // Defer by several ticks so widget text has time to populate
             adventureLogPbTicksRemaining = ADVENTURE_LOG_PB_DELAY_TICKS;
         }
@@ -1224,7 +1420,7 @@ public class ClanManagementPlugin extends Plugin
             }
 
             clogItemCategoryMap = map;
-            log.info("Built collection log category map: {} unique item IDs, {} catalog entries",
+            log.debug("Built collection log category map: {} unique item IDs, {} catalog entries",
                 map.size(), catalogItems.size());
 
             String catBaseUrl = getPlatformUrl();
@@ -1359,7 +1555,7 @@ public class ClanManagementPlugin extends Plugin
         BossCategory cat = BossCategory.find(group, 1);
         String bossKey = cat != null ? cat.getKey() : group;
 
-        log.info("Collection log PB detected: {} — {} ({}ms, key={})", bossName, timeStr, timeMs, bossKey);
+        log.debug("Collection log PB detected: {} — {} ({}ms, key={})", bossName, timeStr, timeMs, bossKey);
 
         executor.submit(() -> platformApiService.submitPb(
             getPlatformUrl(),
@@ -1435,7 +1631,7 @@ public class ClanManagementPlugin extends Plugin
             Widget[] dynChildren = w.getDynamicChildren();
             if (dynChildren != null && dynChildren.length > 10)
             {
-                log.info("Adventure log: found {} dynamic children in widget 741.{}", dynChildren.length, child);
+                log.debug("Adventure log: found {} dynamic children in widget 741.{}", dynChildren.length, child);
                 children = dynChildren;
                 break;
             }
@@ -1443,7 +1639,7 @@ public class ClanManagementPlugin extends Plugin
             Widget[] statChildren = w.getStaticChildren();
             if (statChildren != null && statChildren.length > 10)
             {
-                log.info("Adventure log: found {} static children in widget 741.{}", statChildren.length, child);
+                log.debug("Adventure log: found {} static children in widget 741.{}", statChildren.length, child);
                 children = statChildren;
                 break;
             }
@@ -1466,17 +1662,6 @@ public class ClanManagementPlugin extends Plugin
         sectionHeaders.add("Skilling Bosses");
         sectionHeaders.add("Raids");
 
-        // Log ALL widget children for debugging
-        StringBuilder allText = new StringBuilder("Adventure log ALL children:\n");
-        for (int i = 0; i < children.length; i++)
-        {
-            String t = children[i].getText();
-            if (t != null && !t.isEmpty())
-            {
-                allText.append("[").append(i).append("] '").append(Text.removeTags(t).trim()).append("'\n");
-            }
-        }
-        log.info(allText.toString());
 
         List<PbEntry> parsedPbs = new ArrayList<>();
         String currentBoss = null;
@@ -1589,7 +1774,7 @@ public class ClanManagementPlugin extends Plugin
             return;
         }
 
-        log.info("Adventure log PBs parsed: {} entries for {}", parsedPbs.size(), rsn);
+        log.debug("Adventure log PBs parsed: {} entries for {}", parsedPbs.size(), rsn);
 
         // Show chat confirmation
         final int pbCount = parsedPbs.size();
@@ -1611,7 +1796,7 @@ public class ClanManagementPlugin extends Plugin
                 BossCategory cat = BossCategory.find(group, pb.teamSize);
                 String bossKey = cat != null ? cat.getKey() : group;
 
-                log.info("Adventure log PB: '{}' → raw='{}' → group='{}' → key='{}' (size={}, time={}ms)",
+                log.debug("Adventure log PB: '{}' → raw='{}' → group='{}' → key='{}' (size={}, time={}ms)",
                     pb.bossName, rawKey, group, bossKey, pb.teamSize, pb.timeMs);
 
                 platformApiService.submitPb(
@@ -1627,7 +1812,7 @@ public class ClanManagementPlugin extends Plugin
                 );
                 submitted++;
             }
-            log.info("Submitted {} PBs to platform for {}", submitted, playerName);
+            log.debug("Submitted {} PBs to platform for {}", submitted, playerName);
             final int finalSubmitted = submitted;
             clientThread.invokeLater(() ->
                 client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
@@ -1680,7 +1865,7 @@ public class ClanManagementPlugin extends Plugin
         {
             client.menuAction(-1, SEARCH_TOGGLE_PACKED, MenuAction.CC_OP, 1, -1, "Search", null);
             client.runScript(2240);
-            log.info("Collection log auto-search triggered");
+            log.debug("Collection log auto-search triggered");
         }
         catch (Exception e)
         {
@@ -1725,7 +1910,7 @@ public class ClanManagementPlugin extends Plugin
                     response.close();
                     if (response.isSuccessful())
                     {
-                        log.info("Collection log synced: {} items for {}", count, rsn);
+                        log.debug("Collection log synced: {} items for {}", count, rsn);
                         panel.setClogSyncStatus("Synced " + count + " items");
                         clientThread.invokeLater(() -> client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
                             "[" + getClanName() + "] Collection log synced: " + clogObtainedCount + "/" + clogTotalCount + " unlocked", ""));
@@ -1886,7 +2071,8 @@ public class ClanManagementPlugin extends Plugin
                     wp.getX(), wp.getY(), wp.getPlane(), playerName, unlockItemId
                 );
                 withScreenshot(true, screenshot ->
-                    platformApiService.submitDrop(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), unlockDrop, screenshot));
+                    platformApiService.submitDrop(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), unlockDrop, screenshot,
+                        config.sendScreenshotsToDiscord(), config.dropPhrase()));
                 log.debug("Clog-unlock drop logged: {} from {}", itemName, unlockSource);
             }
         }
@@ -1924,7 +2110,7 @@ public class ClanManagementPlugin extends Plugin
         // phase/split lines from other plugins that slipped past the message filter.
         if (completion.getTimeSeconds() < 15)
         {
-            log.info("Ignoring implausible completion time {}s for {} (phase/split line?)",
+            log.debug("Ignoring implausible completion time {}s for {} (phase/split line?)",
                 completion.getTimeSeconds(), group);
             return;
         }
@@ -1959,7 +2145,7 @@ public class ClanManagementPlugin extends Plugin
         boolean allClanMembers = partySize == 1 || !isGroupContent || validateClanMembership(partyMembers);
         if (!allClanMembers)
         {
-            log.info("Not all party members in clan chat — PB will be submitted as unverified");
+            log.debug("Not all party members in clan chat — PB will be submitted as unverified");
             if (config.chatConfirmation())
             {
                 clientThread.invokeLater(() ->
@@ -1991,7 +2177,7 @@ public class ClanManagementPlugin extends Plugin
         String categoryKey = bossCategory.getKey();
         String sizeLabel = bossCategory.getSizeLabel();
 
-        log.info("Completion time: {} {} — {} (key={}, party: {})",
+        log.debug("Completion time: {} {} — {} (key={}, party: {})",
             formattedTime, categoryName, sizeLabel, categoryKey, rsns);
 
         final int finalPartySize = partySize;
@@ -2038,7 +2224,8 @@ public class ClanManagementPlugin extends Plugin
                     if (firstMember)
                     {
                         clanRank = platformApiService.submitPbSync(getPlatformUrl(), getPlatformKey(), getPlatformSlug(),
-                            member.trim(), categoryKey, finalPartySize, timeMs, source, teamMembers, screenshot, isNewPb);
+                            member.trim(), categoryKey, finalPartySize, timeMs, source, teamMembers, screenshot, isNewPb,
+                            config.sendScreenshotsToDiscord(), config.pbPhrase());
                         firstMember = false;
                     }
                     else
@@ -2163,7 +2350,7 @@ public class ClanManagementPlugin extends Plugin
             String normalized = Text.toJagexName(partyMember).toLowerCase();
             if (!clanNames.contains(normalized))
             {
-                log.info("Party member {} is not in clan chat", partyMember);
+                log.debug("Party member {} is not in clan chat", partyMember);
                 return false;
             }
         }
@@ -2269,7 +2456,8 @@ public class ClanManagementPlugin extends Plugin
                 wp.getX(), wp.getY(), wp.getPlane(), playerName, itemId);
 
             withScreenshot(true, screenshot ->
-                platformApiService.submitDrop(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), drop, screenshot));
+                platformApiService.submitDrop(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), drop, screenshot,
+                    config.sendScreenshotsToDiscord(), config.dropPhrase()));
             log.debug("Rare drop logged: {} x{} from {}", itemName, stack.getQuantity(), source);
         }
     }
@@ -2307,6 +2495,31 @@ public class ClanManagementPlugin extends Plugin
      * player's current filter is present at once. Sync is per-task upsert, so any filter is safe —
      * an "All" filter syncs everything in one open, a narrower filter just updates a subset.
      */
+    // Matches the in-game CA completion message, e.g.
+    //   "Congratulations, you've completed a Hard combat achievement task: Peach Conjurer."
+    // (also the shorter "combat task:" wording). Group 1 is the task name; the server matches it to
+    // the catalog by name.
+    private static final java.util.regex.Pattern CA_COMPLETION_PATTERN = java.util.regex.Pattern.compile(
+        "you've completed an? .+? combat (?:achievement )?task: (.+?)\\.?$");
+
+    // Live-track a combat achievement the instant it's earned, rather than only when the player opens
+    // the CA interface. Submits just that one task as completed; the server upserts it without touching
+    // the player's other tasks and handles the Discord/activity announce.
+    private void detectCombatAchievement(String message)
+    {
+        if (message == null || !isPlatformConfigured()) return;
+        java.util.regex.Matcher m = CA_COMPLETION_PATTERN.matcher(message);
+        if (!m.find()) return;
+        String task = m.group(1).trim();
+        if (task.isEmpty()) return;
+        String rsn = client.getLocalPlayer() != null ? client.getLocalPlayer().getName() : null;
+        if (rsn == null || rsn.isEmpty()) return;
+        final String fRsn = rsn;
+        executor.submit(() -> platformApiService.syncCombatAchievements(
+            getPlatformUrl(), getPlatformKey(), getPlatformSlug(), fRsn,
+            java.util.Collections.singletonList(new PlatformApiService.CaTask(task, true))));
+    }
+
     private void readCombatAchievements()
     {
         if (!isPlatformConfigured()) return;
@@ -2335,7 +2548,7 @@ public class ClanManagementPlugin extends Plugin
         final int fCompleted = completed;
         executor.submit(() -> platformApiService.syncCombatAchievements(
             getPlatformUrl(), getPlatformKey(), getPlatformSlug(), fRsn, fTasks));
-        log.info("Synced {} combat achievements ({} complete) for {}", tasks.size(), fCompleted, fRsn);
+        log.debug("Synced {} combat achievements ({} complete) for {}", tasks.size(), fCompleted, fRsn);
         // readCombatAchievements runs on the client thread (it reads the CA interface widgets), so
         // the confirmation can post directly.
         client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
@@ -2460,6 +2673,17 @@ public class ClanManagementPlugin extends Plugin
                 }
             }
             rankCaDone = done;
+            // Server-managed rank tree (data, not code). Parse + swap the active tree; on any
+            // failure keep the plugin's bundled default so ranks still evaluate offline.
+            try
+            {
+                String ranksJson = platformApiService.fetchRanks(getPlatformUrl(), getPlatformKey(), getPlatformSlug());
+                if (ranksJson != null) RankSystem.setRanks(RankSystem.parseRanks(ranksJson));
+            }
+            catch (Exception ex)
+            {
+                log.warn("Server rank tree unavailable; using bundled default", ex);
+            }
             evaluateAndShowRanks();
         });
     }
@@ -2473,9 +2697,14 @@ public class ClanManagementPlugin extends Plugin
             panel.showAdminAssignedRank(rankAssigned, rankMode);
             return;
         }
-        final boolean clogOnly = "clog_only".equals(rankMode);
+        final boolean modeClogOnly = "clog_only".equals(rankMode);
         clientThread.invokeLater(() ->
         {
+            // Group Ironmen prove item requirements by collection log, not current possession:
+            // teammates can hold shared items, so possession is unreliable but the clog is proof.
+            String at = readAccountType();
+            boolean clogOnly = modeClogOnly
+                || "gim".equals(at) || "hcgim".equals(at) || "unranked_gim".equals(at);
             RankSystem.PlayerSnapshot snap = buildRankSnapshot(clogOnly);
             java.util.List<RankSystem.RankStatus> results = RankSystem.evaluateAll(snap, rankHeld);
             panel.showRanks(results, snap.itemIds, rankMode);
@@ -2843,7 +3072,7 @@ public class ClanManagementPlugin extends Plugin
         client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
             "[" + getClanName() + "] Diaries & quests " + verb + " (" + diaryTotal + "/48 diaries, "
                 + complete + " quests, " + qp + " QP)", "");
-        log.info("Achievements {} for {}: {} diaries, {} quests, {} QP", verb, rsn, diaryTotal, complete, qp);
+        log.debug("Achievements {} for {}: {} diaries, {} quests, {} QP", verb, rsn, diaryTotal, complete, qp);
     }
 
     /** Is one region's tier complete? (client thread; index into a DIARY_* varbit array) */
@@ -2959,10 +3188,9 @@ public class ClanManagementPlugin extends Plugin
         }
         try
         {
-            // Fetch the unified schedule + open-draft signups + the live clog race in the same cycle;
-            // the setters store them and updateRaidRace renders all three (schedule, signups, clog).
+            // Fetch the unified schedule + the live clog race in the same cycle. Per-event signups
+            // are fetched lazily when an event card is expanded (panel.onFetchEventSignups), not here.
             panel.setSchedule(platformApiService.fetchSchedule(getPlatformUrl(), getPlatformKey(), getPlatformSlug()));
-            panel.setSignups(platformApiService.fetchSignups(getPlatformUrl(), getPlatformKey(), getPlatformSlug()));
             panel.updateRaidRace(platformApiService.fetchClogRace(getPlatformUrl(), getPlatformKey(), getPlatformSlug()));
         }
         catch (Exception ex)
@@ -3055,7 +3283,7 @@ public class ClanManagementPlugin extends Plugin
             {
                 serverConfigLoaded = true;
                 panel.setConnected(true);
-                log.info("Platform connected — clan={}", getClanName());
+                log.debug("Platform connected — clan={}", getClanName());
 
                 // Auto-load drops tab on first config load
                 executor.submit(this::refreshDropsTab);
@@ -3141,7 +3369,7 @@ public class ClanManagementPlugin extends Plugin
                 hiscoreV2BatchFetched = true;
                 saveHiscoreCacheV2ToDisk();
                 panel.setRecentCategories(new java.util.LinkedHashSet<>(hiscoreCacheV2.keySet()), new java.util.LinkedHashMap<>(hiscoreCacheV2));
-                log.info("Batch-fetched speed times from platform API: {} categories", allTimes.size());
+                log.debug("Batch-fetched speed times from platform API: {} categories", allTimes.size());
             }
         }
         catch (Exception e)
@@ -3582,7 +3810,7 @@ public class ClanManagementPlugin extends Plugin
                     hiscoreCacheV2.put(entry.getKey(), entries);
                 }
                 panel.setRecentCategories(new java.util.LinkedHashSet<>(hiscoreCacheV2.keySet()), new java.util.LinkedHashMap<>(hiscoreCacheV2));
-                log.info("Loaded hiscore cache from disk: {} categories", hiscoreCacheV2.size());
+                log.debug("Loaded hiscore cache from disk: {} categories", hiscoreCacheV2.size());
             }
         }
         catch (Exception e)
@@ -3638,7 +3866,7 @@ public class ClanManagementPlugin extends Plugin
 
                 if (cachedLeaderboard != null || cachedRecentDrops != null)
                 {
-                    log.info("Loaded drops cache from disk");
+                    log.debug("Loaded drops cache from disk");
                 }
             }
         }
@@ -3860,6 +4088,6 @@ public class ClanManagementPlugin extends Plugin
             adminPanel.setActiveEvent(activeEventType, activeEventDisplayName, activeEventEndTime);
         }
 
-        log.info("Admin panel enabled");
+        log.debug("Admin panel enabled");
     }
 }

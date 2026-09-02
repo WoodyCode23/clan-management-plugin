@@ -82,6 +82,11 @@ public class ClanPanel extends PluginPanel
     private javax.swing.Timer countdownTicker = null;
     private boolean eventLoaded = false;
     private final JPanel eventContent = new JPanel();
+    // Event tab team view: default to the local player's team; toggle to peek at every team.
+    private boolean showAllEventTeams = false;
+    private com.google.gson.JsonObject lastEventDraft;
+    private com.google.gson.JsonObject lastEventRace;
+    private String lastEventLocalName;
     private java.util.function.Consumer<String> onSelectMember;
     private boolean platformAdmin = false;
     private java.util.function.Consumer<Object[]> onSetRankOverride; // {rsn, mode, assignedRank}
@@ -112,8 +117,14 @@ public class ClanPanel extends PluginPanel
     private javax.swing.Timer raidRaceCountdown = null;
     private PlatformApiService.ClogRace currentRaidRace = null; // cached so a standings-row click can rebuild without a refetch
     private volatile PlatformApiService.Schedule currentSchedule = null; // latest unified schedule, rendered atop the Events tab
-    private volatile PlatformApiService.Signups currentSignups = null; // current open draft's signups
-    private Runnable onSignup; // fired by the "Sign up for the draft" button; plugin reads the local RSN
+    // Per-event signups: each event in the schedule is an expandable card that lazily fetches its own
+    // signup list (nested + paginated under the event) instead of one flat signup section.
+    private java.util.function.Consumer<String> onFetchEventSignups; // fetch signups for an eventId (on expand)
+    private java.util.function.Consumer<String> onSignupForEvent;    // sign the local player up for one eventId
+    private final java.util.Map<String, PlatformApiService.Signups> eventSignups = new java.util.HashMap<>();
+    private final java.util.Map<String, Integer> eventSignupPage = new java.util.HashMap<>();
+    private final java.util.Set<String> expandedEvents = new java.util.HashSet<>();
+    private static final int SIGNUP_PAGE_SIZE = 10;
     private Runnable onLoadRaidRace;
     private boolean raidRaceActive = false;
 
@@ -1517,7 +1528,7 @@ public class ClanPanel extends PluginPanel
         setRow.setAlignmentX(Component.LEFT_ALIGNMENT);
         setRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
         JComboBox<String> rankCombo = new JComboBox<>();
-        for (RankSystem.Rank r : RankSystem.RANKS) rankCombo.addItem(r.name);
+        for (RankSystem.Rank r : RankSystem.ranks()) rankCombo.addItem(r.name);
         rankCombo.setFont(READABLE_FONT_SMALL);
         rankCombo.setBackground(new Color(30, 30, 30));
         rankCombo.setForeground(Color.WHITE);
@@ -2035,9 +2046,18 @@ public class ClanPanel extends PluginPanel
     public boolean isRaidRaceActive() { return raidRaceActive; }
     /** Store the latest unified schedule; it renders atop the Events tab on the next updateRaidRace. */
     public void setSchedule(PlatformApiService.Schedule schedule) { this.currentSchedule = schedule; }
-    /** Store the current open draft's signups; renders in the Events tab on the next updateRaidRace. */
-    public void setSignups(PlatformApiService.Signups signups) { this.currentSignups = signups; }
-    public void setOnSignup(Runnable cb) { this.onSignup = cb; }
+    public void setOnFetchEventSignups(java.util.function.Consumer<String> cb) { this.onFetchEventSignups = cb; }
+    public void setOnSignupForEvent(java.util.function.Consumer<String> cb) { this.onSignupForEvent = cb; }
+    /** Cache one event's signups (from the plugin's async fetch) and re-render the Events tab. The
+     *  expand + page state live in fields, so the rebuild preserves what the user had open. */
+    public void setEventSignups(String eventId, PlatformApiService.Signups signups)
+    {
+        SwingUtilities.invokeLater(() ->
+        {
+            eventSignups.put(eventId, signups);
+            updateRaidRace(currentRaidRace);
+        });
+    }
     public void setOnRequestRank(java.util.function.Consumer<Object[]> cb) { this.onRequestRank = cb; }
     public boolean isRanksActive() { return ranksActive; }
 
@@ -2928,11 +2948,8 @@ public class ClanPanel extends PluginPanel
                 raidRaceContent.add(Box.createVerticalStrut(12));
             }
 
-            if (currentSignups != null && currentSignups.open)
-            {
-                raidRaceContent.add(raidRaceSignupPanel(currentSignups));
-                raidRaceContent.add(Box.createVerticalStrut(12));
-            }
+            // Signups now live nested inside each event card in the schedule above (per-event,
+            // expandable + paginated), so there is no longer a separate flat signup section here.
 
             if (race == null || race.event == null)
             {
@@ -3005,49 +3022,6 @@ public class ClanPanel extends PluginPanel
         return false;
     }
 
-    /** The signup section for the current open draft: a count + a "Sign up for the draft" button
-     *  (fires onSignup, which reads the local RSN plugin-side) + the list of who has signed up. */
-    private JPanel raidRaceSignupPanel(PlatformApiService.Signups signups)
-    {
-        JPanel panel = new JPanel();
-        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
-        panel.setBackground(ColorScheme.DARK_GRAY_COLOR);
-        panel.setAlignmentX(Component.LEFT_ALIGNMENT);
-
-        panel.add(clogTitle("Signups (" + signups.rsns.size() + ")", ACCENT_GOLD, 13f));
-        panel.add(Box.createVerticalStrut(4));
-
-        JButton signupBtn = new JButton("Sign up for the draft");
-        signupBtn.setAlignmentX(Component.LEFT_ALIGNMENT);
-        signupBtn.setFocusPainted(false);
-        signupBtn.addActionListener(e -> { if (onSignup != null) onSignup.run(); });
-        panel.add(signupBtn);
-        panel.add(Box.createVerticalStrut(6));
-
-        if (signups.rsns.isEmpty())
-        {
-            JLabel none = new JLabel("No signups yet");
-            none.setFont(READABLE_FONT_ITALIC);
-            none.setForeground(new Color(100, 100, 100));
-            none.setAlignmentX(Component.LEFT_ALIGNMENT);
-            panel.add(none);
-        }
-        else
-        {
-            for (String rsn : signups.rsns)
-            {
-                JLabel row = new JLabel(rsn);
-                row.setFont(READABLE_FONT);
-                row.setForeground(Color.WHITE);
-                row.setAlignmentX(Component.LEFT_ALIGNMENT);
-                row.setBorder(new EmptyBorder(2, 7, 2, 0));
-                panel.add(row);
-            }
-        }
-
-        return panel;
-    }
-
     /** The unified event schedule (all types) at the top of the Events tab: a "Schedule" title and
      *  Live / Upcoming / Past buckets, each a short list of "Type: name" rows with the host. */
     private JPanel raidRaceSchedulePanel(PlatformApiService.Schedule schedule)
@@ -3088,26 +3062,186 @@ public class ClanPanel extends PluginPanel
 
         for (PlatformApiService.ScheduleEntry e : entries)
         {
-            JPanel row = new JPanel(new BorderLayout(6, 0));
-            row.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-            row.setBorder(new EmptyBorder(4, 7, 4, 7));
-            row.setAlignmentX(Component.LEFT_ALIGNMENT);
-
-            String left = (e.typeLabel != null ? e.typeLabel + ": " : "") + (e.name != null ? e.name : "");
-            JLabel nameLbl = new JLabel(left);
-            nameLbl.setFont(READABLE_FONT);
-            nameLbl.setForeground(Color.WHITE);
-
-            JLabel metaLbl = new JLabel(e.hostUsername != null ? e.hostUsername : "");
-            metaLbl.setFont(READABLE_FONT_SMALL);
-            metaLbl.setForeground(new Color(150, 150, 150));
-
-            row.add(nameLbl, BorderLayout.WEST);
-            row.add(metaLbl, BorderLayout.EAST);
-            panel.add(row);
+            panel.add(buildEventCard(e));
             panel.add(Box.createVerticalStrut(3));
         }
         return true;
+    }
+
+    /** One expandable event card: header (type: name + host, click to expand) with the event's own
+     *  paginated signup list nested inside. Collapsed by default; expanding lazily fetches signups. */
+    private JPanel buildEventCard(PlatformApiService.ScheduleEntry e)
+    {
+        final String eventId = e.id;
+        final boolean expanded = eventId != null && expandedEvents.contains(eventId);
+
+        JPanel card = new JPanel()
+        {
+            @Override public Dimension getMaximumSize() { return new Dimension(Integer.MAX_VALUE, getPreferredSize().height); }
+        };
+        card.setLayout(new BoxLayout(card, BoxLayout.Y_AXIS));
+        card.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+        card.setBorder(new EmptyBorder(2, 0, 2, 0));
+        card.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        JPanel header = new JPanel(new BorderLayout(4, 0));
+        header.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+        header.setBorder(new EmptyBorder(4, 7, 4, 7));
+        header.setAlignmentX(Component.LEFT_ALIGNMENT);
+        header.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+        header.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+
+        JLabel caret = new JLabel(expanded ? "–" : "+"); // – open / + closed
+        caret.setFont(READABLE_FONT.deriveFont(Font.BOLD, 14f));
+        caret.setForeground(new Color(150, 150, 150));
+        caret.setBorder(new EmptyBorder(0, 0, 0, 5));
+        header.add(caret, BorderLayout.WEST);
+
+        // Name goes in the flex CENTER so a long event name truncates to the panel width (with the
+        // full text on hover) instead of overflowing the tab; host (if any) sits on the right.
+        String title = (e.typeLabel != null ? e.typeLabel + ": " : "") + (e.name != null ? e.name : "");
+        JLabel nameLbl = new JLabel(title);
+        nameLbl.setFont(READABLE_FONT);
+        nameLbl.setForeground(Color.WHITE);
+        nameLbl.setToolTipText(title);
+        header.add(nameLbl, BorderLayout.CENTER);
+
+        if (e.hostUsername != null && !e.hostUsername.isEmpty())
+        {
+            JLabel metaLbl = new JLabel(e.hostUsername);
+            metaLbl.setFont(READABLE_FONT_SMALL);
+            metaLbl.setForeground(new Color(150, 150, 150));
+            metaLbl.setBorder(new EmptyBorder(0, 5, 0, 0));
+            header.add(metaLbl, BorderLayout.EAST);
+        }
+        card.add(header);
+
+        if (expanded)
+        {
+            JPanel body = new JPanel();
+            body.setLayout(new BoxLayout(body, BoxLayout.Y_AXIS));
+            body.setBackground(ColorScheme.DARK_GRAY_COLOR);
+            body.setBorder(new EmptyBorder(2, 12, 4, 6));
+            body.setAlignmentX(Component.LEFT_ALIGNMENT);
+            buildEventSignupBody(body, eventId);
+            card.add(body);
+        }
+
+        java.awt.event.MouseAdapter toggle = new java.awt.event.MouseAdapter()
+        {
+            @Override public void mousePressed(java.awt.event.MouseEvent ev)
+            {
+                if (eventId == null) return;
+                if (expandedEvents.contains(eventId))
+                {
+                    expandedEvents.remove(eventId);
+                }
+                else
+                {
+                    expandedEvents.add(eventId);
+                    // Lazily fetch this event's signups the first time it's opened.
+                    if (!eventSignups.containsKey(eventId) && onFetchEventSignups != null) onFetchEventSignups.accept(eventId);
+                }
+                updateRaidRace(currentRaidRace);
+            }
+        };
+        header.addMouseListener(toggle);
+        caret.addMouseListener(toggle);
+        nameLbl.addMouseListener(toggle);
+        return card;
+    }
+
+    /** The signups nested inside an expanded event card: a count, a "Sign up" button, and the
+     *  paginated list (SIGNUP_PAGE_SIZE per page). Shows "Loading" until the async fetch lands. */
+    private void buildEventSignupBody(JPanel body, String eventId)
+    {
+        PlatformApiService.Signups s = eventId != null ? eventSignups.get(eventId) : null;
+
+        if (s == null)
+        {
+            body.add(eventBodyNote("Loading signups…"));
+            return;
+        }
+        if (!s.open)
+        {
+            body.add(eventBodyNote("Signups are not open for this event."));
+            return;
+        }
+
+        JLabel count = new JLabel("Signups (" + s.rsns.size() + ")");
+        count.setFont(READABLE_FONT.deriveFont(Font.BOLD));
+        count.setForeground(ACCENT_GOLD);
+        count.setAlignmentX(Component.LEFT_ALIGNMENT);
+        body.add(count);
+        body.add(Box.createVerticalStrut(3));
+
+        JButton signupBtn = new JButton("Sign up");
+        signupBtn.setAlignmentX(Component.LEFT_ALIGNMENT);
+        signupBtn.setFocusPainted(false);
+        signupBtn.addActionListener(ev -> { if (onSignupForEvent != null && eventId != null) onSignupForEvent.accept(eventId); });
+        body.add(signupBtn);
+        body.add(Box.createVerticalStrut(4));
+
+        if (s.rsns.isEmpty())
+        {
+            body.add(eventBodyNote("No signups yet"));
+            return;
+        }
+
+        int total = s.rsns.size();
+        int pages = (total + SIGNUP_PAGE_SIZE - 1) / SIGNUP_PAGE_SIZE;
+        int page = Math.max(0, Math.min(eventSignupPage.getOrDefault(eventId, 0), pages - 1));
+        eventSignupPage.put(eventId, page);
+        int from = page * SIGNUP_PAGE_SIZE;
+        int to = Math.min(from + SIGNUP_PAGE_SIZE, total);
+
+        for (int i = from; i < to; i++)
+        {
+            JLabel row = new JLabel((i + 1) + ". " + s.rsns.get(i));
+            row.setFont(READABLE_FONT);
+            row.setForeground(Color.WHITE);
+            row.setAlignmentX(Component.LEFT_ALIGNMENT);
+            row.setBorder(new EmptyBorder(1, 4, 1, 0));
+            body.add(row);
+        }
+
+        if (pages > 1)
+        {
+            body.add(Box.createVerticalStrut(4));
+            JPanel nav = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 4, 0));
+            nav.setBackground(ColorScheme.DARK_GRAY_COLOR);
+            nav.setAlignmentX(Component.LEFT_ALIGNMENT);
+            nav.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
+
+            final int fpage = page;
+            JButton prev = new JButton("<");
+            prev.setEnabled(fpage > 0);
+            prev.setFocusPainted(false);
+            prev.addActionListener(ev -> { eventSignupPage.put(eventId, fpage - 1); updateRaidRace(currentRaidRace); });
+            nav.add(prev);
+
+            JLabel pageLbl = new JLabel((from + 1) + "-" + to + " of " + total);
+            pageLbl.setFont(READABLE_FONT_SMALL);
+            pageLbl.setForeground(new Color(150, 150, 150));
+            nav.add(pageLbl);
+
+            JButton next = new JButton(">");
+            next.setEnabled(fpage < pages - 1);
+            next.setFocusPainted(false);
+            next.addActionListener(ev -> { eventSignupPage.put(eventId, fpage + 1); updateRaidRace(currentRaidRace); });
+            nav.add(next);
+
+            body.add(nav);
+        }
+    }
+
+    private JLabel eventBodyNote(String text)
+    {
+        JLabel l = new JLabel(text);
+        l.setFont(READABLE_FONT_ITALIC);
+        l.setForeground(new Color(120, 120, 120));
+        l.setAlignmentX(Component.LEFT_ALIGNMENT);
+        return l;
     }
 
     private JPanel raidRaceHeader(PlatformApiService.ClogRaceEvent event)
@@ -3513,6 +3647,21 @@ public class ClanPanel extends PluginPanel
             label.setIcon(new ImageIcon(img));
             img.onLoaded(() -> { label.setIcon(new ImageIcon(img)); label.revalidate(); label.repaint(); });
         }
+
+        // Show WHO got the drop right under the icon, not just in the tooltip.
+        if (filled && filledByRsn != null && !filledByRsn.isEmpty())
+        {
+            JPanel cell = new JPanel(new BorderLayout());
+            cell.setOpaque(false);
+            cell.setToolTipText(tooltip);
+            cell.add(label, BorderLayout.CENTER);
+            JLabel who = new JLabel(filledByRsn, SwingConstants.CENTER);
+            who.setFont(who.getFont().deriveFont(9f));
+            who.setForeground(new Color(160, 160, 160));
+            who.setToolTipText(filledByRsn);
+            cell.add(who, BorderLayout.SOUTH);
+            return cell;
+        }
         return label;
     }
 
@@ -3909,6 +4058,9 @@ public class ClanPanel extends PluginPanel
         SwingUtilities.invokeLater(() ->
         {
             eventContent.removeAll();
+            lastEventDraft = draft;
+            lastEventRace = race;
+            lastEventLocalName = localPlayerName;
             if (countdownTicker != null)
             {
                 countdownTicker.stop();
@@ -3942,11 +4094,8 @@ public class ClanPanel extends PluginPanel
                     renderedRace = true;
                 }
             }
-            // A COMPLETED draft is history, not an event — hide it entirely. The section
-            // comes back on its own the moment a new draft is created (setup/live).
-            boolean draftDone = draft != null
-                && "complete".equals(draft.getAsJsonObject("event").get("status").getAsString());
-            if (draft == null || draftDone)
+            // No draft at all — nothing more to show (a race above may already have rendered).
+            if (draft == null)
             {
                 if (!renderedRace)
                 {
@@ -3956,6 +4105,8 @@ public class ClanPanel extends PluginPanel
                 eventContent.repaint();
                 return;
             }
+            // A completed draft still renders below, focused on the local player's team, so members
+            // land on their own roster once the draft finishes (until a new draft replaces it).
 
             com.google.gson.JsonObject event = draft.getAsJsonObject("event");
             com.google.gson.JsonArray teams = draft.getAsJsonArray("teams");
@@ -4042,13 +4193,26 @@ public class ClanPanel extends PluginPanel
             }
             eventContent.add(Box.createVerticalStrut(6));
 
+            if (myTeamId != null && teams.size() > 1)
+            {
+                JButton teamsToggle = new JButton(showAllEventTeams ? "Show only my team" : "Peek at all teams");
+                teamsToggle.setFont(READABLE_FONT_SMALL);
+                teamsToggle.setFocusPainted(false);
+                teamsToggle.setMargin(new Insets(2, 8, 2, 8));
+                teamsToggle.setAlignmentX(Component.LEFT_ALIGNMENT);
+                teamsToggle.addActionListener(e -> { showAllEventTeams = !showAllEventTeams; updateEvent(lastEventDraft, lastEventRace, lastEventLocalName); });
+                eventContent.add(teamsToggle);
+                eventContent.add(Box.createVerticalStrut(4));
+            }
+
             for (com.google.gson.JsonElement el : teams)
             {
                 com.google.gson.JsonObject t = el.getAsJsonObject();
                 String tid = t.get("id").getAsString();
                 boolean mine = tid.equals(myTeamId);
-                // During a live draft show only YOUR team in detail; show all once complete.
-                if (!mine && myTeamId != null && !"complete".equals(status)) continue;
+                // Show only YOUR team when you're on one, during the draft AND after it completes,
+                // so the panel becomes your team's view. Spectators with no team see every team.
+                if (!mine && myTeamId != null && !showAllEventTeams) continue;
 
                 Color teamColor;
                 try { teamColor = Color.decode(t.get("color").getAsString()); }

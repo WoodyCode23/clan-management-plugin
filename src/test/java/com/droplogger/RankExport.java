@@ -13,13 +13,13 @@ import java.util.List;
  * Writes build/ranks-export.json, which is then seeded into the API via PUT /clans/solus/ranks.
  */
 public final class RankExport {
-    private static JsonObject check(RankSystem.Check c) {
+    static JsonObject check(RankSystem.Check c) {
         JsonObject o = new JsonObject();
         o.addProperty("kind", c.kind.name());
         if (c.label != null) o.addProperty("label", c.label);
         switch (c.kind) {
-            case ITEMS: o.add("names", arr(c.names)); o.addProperty("k", c.value); break;
-            case ITEMS_PREFIX: o.add("prefixes", arr(c.names)); o.addProperty("k", c.value); break;
+            case ITEMS: o.add("names", arr(c.names)); o.addProperty("k", c.value); if (c.alts != null && !c.alts.isEmpty()) o.add("alts", arr(c.alts)); break;
+            case ITEMS_PREFIX: o.add("prefixes", arr(c.names)); o.addProperty("k", c.value); if (c.alts != null && !c.alts.isEmpty()) o.add("alts", arr(c.alts)); break;
             case SKILL: o.addProperty("skill", c.key); o.addProperty("level", c.value); break;
             case TOTAL: o.addProperty("min", c.value); break;
             case TOTAL_XP: o.addProperty("xp", c.value); break;
@@ -29,7 +29,7 @@ public final class RankExport {
             case DIARY: o.addProperty("tier", c.key); o.addProperty("count", c.value); break;
             case BOSS_KC: o.addProperty("boss", c.key); o.addProperty("count", c.value); if (c.key != null) o.addProperty("key", c.key); break;
             case CLOG: o.addProperty("count", c.value); break;
-            case CLOG_SLOT: o.add("names", arr(c.names)); break;
+            case CLOG_SLOT: o.add("names", arr(c.names)); if (c.alts != null && !c.alts.isEmpty()) o.add("alts", arr(c.alts)); break;
             case UNLOCK: o.addProperty("key", c.key); break;
             case RANK: o.addProperty("rankId", c.key); if (c.label != null) o.addProperty("name", c.label); break;
             case ALL: o.add("children", children(c.children)); break;

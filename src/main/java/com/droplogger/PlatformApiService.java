@@ -67,7 +67,8 @@ public class PlatformApiService
     /**
      * Submit a drop to the platform API.
      */
-    public void submitDrop(String baseUrl, String apiKey, String clanSlug, DropEntry drop, String screenshotB64)
+    public void submitDrop(String baseUrl, String apiKey, String clanSlug, DropEntry drop, String screenshotB64,
+                           boolean discordShare, String phrase)
     {
         JsonObject payload = new JsonObject();
         payload.addProperty("rsn", drop.getPlayerName());
@@ -87,8 +88,42 @@ public class PlatformApiService
         {
             payload.addProperty("screenshot", screenshotB64);
         }
+        // Per-player opt-in: only when discordShare is true does the server post this drop to the
+        // clan's Discord. phrase is the player's own caption (Dink-style), shown above the embed.
+        payload.addProperty("discordShare", discordShare);
+        if (discordShare && phrase != null && !phrase.trim().isEmpty())
+        {
+            payload.addProperty("phrase", phrase.trim());
+        }
 
         postAsync(baseUrl + "/clans/" + clanSlug + "/drops", apiKey, payload, "Platform drop");
+    }
+
+    /**
+     * Report a death to the platform (Discord-only, opt-in). Called solely when the player enabled
+     * "Send screenshots to Discord", so this is always a consented post. The server forwards the
+     * screenshot + caption to the clan's deaths webhook; nothing is stored.
+     */
+    public void submitDeath(String baseUrl, String apiKey, String clanSlug,
+                            String rsn, String cause, String screenshotB64, String phrase)
+    {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("rsn", rsn);
+        addAccountHash(payload);
+        if (cause != null && !cause.trim().isEmpty())
+        {
+            payload.addProperty("cause", cause.trim());
+        }
+        if (screenshotB64 != null)
+        {
+            payload.addProperty("screenshot", screenshotB64);
+        }
+        if (phrase != null && !phrase.trim().isEmpty())
+        {
+            payload.addProperty("phrase", phrase.trim());
+        }
+
+        postAsync(baseUrl + "/clans/" + clanSlug + "/deaths", apiKey, payload, "Platform death");
     }
 
     /**
@@ -140,7 +175,8 @@ public class PlatformApiService
      */
     public int submitPbSync(String baseUrl, String apiKey, String clanSlug,
                             String rsn, String bossKey, int teamSize, int timeMs, String source,
-                            String teamMembers, String screenshotB64, boolean announce)
+                            String teamMembers, String screenshotB64, boolean announce,
+                            boolean discordShare, String phrase)
     {
         JsonObject payload = new JsonObject();
         payload.addProperty("rsn", rsn);
@@ -157,6 +193,12 @@ public class PlatformApiService
         if (screenshotB64 != null)
         {
             payload.addProperty("screenshot", screenshotB64);
+        }
+        // Per-player opt-in for the Discord PB evidence post + the local player's caption.
+        payload.addProperty("discordShare", discordShare);
+        if (discordShare && phrase != null && !phrase.trim().isEmpty())
+        {
+            payload.addProperty("phrase", phrase.trim());
         }
 
         Request request = new Request.Builder()
@@ -183,6 +225,29 @@ public class PlatformApiService
      * Fastest clan-verified (live) time in ms for a category + team size, or 0 if none recorded.
      * Used to decide whether a non-personal-best completion is still a new clan PB worth submitting.
      */
+    /** Fetch the server-managed rank tree (GET /clans/:slug/ranks) as raw JSON.
+     *  Returns null on any failure so the caller falls back to the plugin's bundled default tree. */
+    public String fetchRanks(String baseUrl, String apiKey, String clanSlug)
+    {
+        try
+        {
+            HttpUrl url = HttpUrl.parse(baseUrl + "/clans/" + clanSlug + "/ranks");
+            if (url == null) return null;
+            Request request = new Request.Builder().url(url)
+                .header("Authorization", "Bearer " + apiKey).get().build();
+            try (Response response = httpClient.newCall(request).execute())
+            {
+                if (!response.isSuccessful() || response.body() == null) return null;
+                return response.body().string();
+            }
+        }
+        catch (Exception ex)
+        {
+            log.warn("fetchRanks failed", ex);
+            return null;
+        }
+    }
+
     public int fetchClanBestTimeMs(String baseUrl, String apiKey, String clanSlug, String categoryKey, int teamSize)
     {
         try
@@ -853,7 +918,10 @@ public class PlatformApiService
 
     private void checkAuth(int statusCode)
     {
-        if ((statusCode == 401 || statusCode == 403) && onAuthFailure != null)
+        // Only 401 (unauthenticated) means the API key is bad. A 403 is a VALID key that is simply
+        // forbidden from this action — e.g. submitting a team-mate who is not on the clan roster, or
+        // playing a non-clan alt — which must NOT surface as "your key was rejected".
+        if (statusCode == 401 && onAuthFailure != null)
         {
             onAuthFailure.run();
         }
@@ -1513,7 +1581,19 @@ public class PlatformApiService
     /** Fetch the current open draft's signups. Returns a closed (open=false) Signups on 404/failure. */
     public Signups fetchSignups(String baseUrl, String apiKey, String clanSlug)
     {
-        JsonObject root = getSync(baseUrl + "/clans/" + clanSlug + "/signups", apiKey);
+        return parseSignups(getSync(baseUrl + "/clans/" + clanSlug + "/signups", apiKey));
+    }
+
+    /** Fetch signups for a SPECIFIC event (the Events tab nests each event's list under it). A
+     *  non-draft or closed event returns a closed (open=false) Signups. */
+    public Signups fetchSignups(String baseUrl, String apiKey, String clanSlug, String eventId)
+    {
+        String url = baseUrl + "/clans/" + clanSlug + "/signups?eventId=" + encodePath(eventId);
+        return parseSignups(getSync(url, apiKey));
+    }
+
+    private Signups parseSignups(JsonObject root)
+    {
         if (root == null) return new Signups(false, null, new ArrayList<>());
         try
         {
@@ -1543,6 +1623,15 @@ public class PlatformApiService
     {
         JsonObject payload = new JsonObject();
         payload.addProperty("rsn", rsn);
+        postAsync(baseUrl + "/clans/" + clanSlug + "/signups", apiKey, payload, "Draft signup");
+    }
+
+    /** Sign up the local player for a SPECIFIC event (per-event signup from the Events tab). */
+    public void signup(String baseUrl, String apiKey, String clanSlug, String rsn, String eventId)
+    {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("rsn", rsn);
+        payload.addProperty("eventId", eventId);
         postAsync(baseUrl + "/clans/" + clanSlug + "/signups", apiKey, payload, "Draft signup");
     }
 

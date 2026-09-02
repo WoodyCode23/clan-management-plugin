@@ -1,5 +1,9 @@
 package com.droplogger;
 
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -37,12 +41,18 @@ public final class RankSystem
         public final int value;             // SKILL level / TOTAL min / DIARY count / BOSS_KC count / ITEMS k
         public final List<Check> children;  // ALL/ANY
         public final int need;              // ANY: how many children
+        // ITEMS only: also-accepted item names that satisfy the check but are hidden from members
+        // (a higher-tier upgrade counting for a lesser requirement). Empty unless set from server JSON.
+        public List<String> alts = java.util.Collections.emptyList();
 
         private Check(Kind kind, String label, List<String> names, String key, int value, List<Check> children, int need)
         {
             this.kind = kind; this.label = label; this.names = names; this.key = key;
             this.value = value; this.children = children; this.need = need;
         }
+
+        /** Fluent setter for ITEMS also-accepted alternates (used by the server-JSON parser). */
+        public Check withAlts(List<String> a) { this.alts = a != null ? a : java.util.Collections.emptyList(); return this; }
 
         public static Check item(String name) { return items(name, 1, name); }
         /** Own k of the listed item names (k = names.length means "all", k = 1 means "any"). */
@@ -147,16 +157,24 @@ public final class RankSystem
         {
             case ITEMS:
             {
+                // Accepted = the listed names plus any hidden alternates (upgrades that also count).
+                // Count distinct accepted items owned so a name and its alt aren't double-counted.
+                java.util.Set<String> accept = new java.util.HashSet<>();
+                for (String n : c.names) accept.add(n.toLowerCase());
+                for (String a : c.alts) accept.add(a.toLowerCase());
                 int have = 0;
-                for (String n : c.names) if (s.ownedItems.contains(n.toLowerCase())) have++;
+                for (String a : accept) if (s.ownedItems.contains(a)) have++;
                 return have >= c.value;
             }
             case ITEMS_PREFIX:
             {
+                // Named prefixes plus any also-accepted alternates (matched the same way, by prefix).
+                java.util.Set<String> prefixes = new java.util.HashSet<>();
+                for (String p : c.names) prefixes.add(p.toLowerCase());
+                for (String a : c.alts) prefixes.add(a.toLowerCase());
                 int have = 0;
-                for (String p : c.names)
+                for (String pl : prefixes)
                 {
-                    String pl = p.toLowerCase();
                     for (String owned : s.ownedItems) if (owned.startsWith(pl)) { have++; break; }
                 }
                 return have >= c.value;
@@ -185,6 +203,7 @@ public final class RankSystem
                 return s.combatLevel >= c.value;
             case CLOG_SLOT:
                 for (String n : c.names) if (s.clogObtained.contains(n.toLowerCase())) return true;
+                for (String a : c.alts) if (s.clogObtained.contains(a.toLowerCase())) return true;
                 return false;
             case ALL:
                 for (Check ch : c.children) if (!evalCheck(ch, s)) return false;
@@ -228,7 +247,7 @@ public final class RankSystem
 
     public static String nameOf(String id)
     {
-        for (Rank r : RANKS) if (r.id.equals(id)) return r.name;
+        for (Rank r : ranks()) if (r.id.equals(id)) return r.name;
         return id;
     }
 
@@ -269,7 +288,7 @@ public final class RankSystem
             while (grew)
             {
                 grew = false;
-                for (Rank r : RANKS)
+                for (Rank r : ranks())
                 {
                     if (!granted.contains(r.id)) continue;
                     for (String req : r.requires) if (granted.add(req)) grew = true;
@@ -285,7 +304,7 @@ public final class RankSystem
         {
             changed = false;
             out = new ArrayList<>();
-            for (Rank r : RANKS)
+            for (Rank r : ranks())
             {
                 RankStatus rs = evaluate(r, s);
                 if (granted != null && granted.contains(r.id))
@@ -496,7 +515,87 @@ public final class RankSystem
     // via WiseOldMan (through the clan API); CA tiers via varbits and named CA tasks via the synced
     // completion list (members must have opened their CA list once for task data to exist).
 
+    // The hardcoded default tree (built in the static block below) is the fallback. The ACTIVE tree
+    // is normally fetched from the server (GET /clans/:slug/ranks) and set via setRanks(); if that
+    // fails or is empty we fall back to the default. Callers use ranks(), not RANKS, except the
+    // static builder itself.
     public static final List<Rank> RANKS = new ArrayList<>();
+    private static volatile List<Rank> active = null;
+
+    /** The active rank tree: the server-fetched one if set, else the hardcoded default. */
+    public static List<Rank> ranks() { return active != null ? active : RANKS; }
+
+    /** Replace the active tree (from the server). Null/empty reverts to the hardcoded default. */
+    public static void setRanks(List<Rank> r) { active = (r != null && !r.isEmpty()) ? r : null; }
+
+    /** Parse the server rank JSON (the `{ "ranks": [...] }` body, or a raw array) into Rank objects.
+     *  Mirrors the RankExport serializer. Throws on malformed input; caller falls back to default. */
+    public static List<Rank> parseRanks(String json)
+    {
+        JsonElement root = new JsonParser().parse(json);
+        JsonArray arr = root.isJsonObject() ? root.getAsJsonObject().getAsJsonArray("ranks") : root.getAsJsonArray();
+        List<Rank> out = new ArrayList<>();
+        for (JsonElement re : arr)
+        {
+            JsonObject ro = re.getAsJsonObject();
+            List<String> requires = new ArrayList<>();
+            if (ro.has("requires")) for (JsonElement q : ro.getAsJsonArray("requires")) requires.add(q.getAsString());
+            List<Group> groups = new ArrayList<>();
+            for (JsonElement ge : ro.getAsJsonArray("groups"))
+            {
+                JsonObject go = ge.getAsJsonObject();
+                List<Check> opts = new ArrayList<>();
+                for (JsonElement oe : go.getAsJsonArray("options")) opts.add(parseCheck(oe.getAsJsonObject()));
+                groups.add(new Group(go.get("label").getAsString(), go.get("need").getAsInt(), opts));
+            }
+            out.add(new Rank(ro.get("id").getAsString(), ro.get("name").getAsString(),
+                ro.get("path").getAsString(), ro.get("desc").getAsString(), requires, groups));
+        }
+        return out;
+    }
+
+    private static String[] strs(JsonArray a) { String[] s = new String[a.size()]; for (int i = 0; i < a.size(); i++) s[i] = a.get(i).getAsString(); return s; }
+    private static Check[] checks(JsonArray a) { Check[] c = new Check[a.size()]; for (int i = 0; i < a.size(); i++) c[i] = parseCheck(a.get(i).getAsJsonObject()); return c; }
+    private static String lbl(JsonObject o) { return o.has("label") ? o.get("label").getAsString() : null; }
+
+    private static Check parseCheck(JsonObject o)
+    {
+        String kind = o.get("kind").getAsString();
+        switch (kind)
+        {
+            case "ITEMS": {
+                Check c = Check.items(lbl(o), o.get("k").getAsInt(), strs(o.getAsJsonArray("names")));
+                if (o.has("alts")) c.withAlts(Arrays.asList(strs(o.getAsJsonArray("alts"))));
+                return c;
+            }
+            case "ITEMS_PREFIX": {
+                Check c = Check.itemsPrefix(lbl(o), o.get("k").getAsInt(), strs(o.getAsJsonArray("prefixes")));
+                if (o.has("alts")) c.withAlts(Arrays.asList(strs(o.getAsJsonArray("alts"))));
+                return c;
+            }
+            case "SKILL": return Check.skill(lbl(o), o.get("skill").getAsString(), o.get("level").getAsInt());
+            case "TOTAL": return Check.total(o.get("min").getAsInt());
+            case "TOTAL_XP": return Check.totalXp(o.get("xp").getAsInt(), lbl(o));
+            case "COMBAT_LEVEL": return Check.combat(o.get("level").getAsInt());
+            case "CA_TIER": return Check.caTier(o.get("tier").getAsString());
+            case "CA_TASK": return Check.caTask(o.get("task").getAsString());
+            case "DIARY": return Check.diary(o.get("tier").getAsString(), o.get("count").getAsInt());
+            case "BOSS_KC": return o.has("key")
+                ? Check.kc(lbl(o), o.get("count").getAsInt(), o.get("key").getAsString())
+                : Check.kc(o.get("boss").getAsString(), o.get("count").getAsInt());
+            case "CLOG": return Check.clog(o.get("count").getAsInt());
+            case "CLOG_SLOT": {
+                Check c = Check.clogSlot(lbl(o), strs(o.getAsJsonArray("names")));
+                if (o.has("alts")) c.withAlts(Arrays.asList(strs(o.getAsJsonArray("alts"))));
+                return c;
+            }
+            case "UNLOCK": return Check.unlock(lbl(o), o.get("key").getAsString());
+            case "RANK": return Check.rank(o.get("rankId").getAsString(), o.has("name") ? o.get("name").getAsString() : o.get("rankId").getAsString());
+            case "ALL": return Check.all(lbl(o), checks(o.getAsJsonArray("children")));
+            case "ANY": return Check.any(lbl(o), o.get("need").getAsInt(), checks(o.getAsJsonArray("children")));
+            default: throw new IllegalArgumentException("Unknown check kind: " + kind);
+        }
+    }
 
     private static Check moonSet()
     {

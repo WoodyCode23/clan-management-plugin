@@ -24,11 +24,11 @@ public class PbDetector
     // "Theatre of Blood completion time: 23:45.60" — the room time. The "total completion
     // time" line (includes downtime) is NOT board-comparable and must not match.
     private static final Pattern TOB_TIME = Pattern.compile(
-        "Theatre of Blood(?!.*total).*?completion time: ((\\d+:)?\\d+:\\d+(?:\\.\\d+)?)", Pattern.CASE_INSENSITIVE);
+        "Theatre of Blood.*?(?<!total )completion time: ((\\d+:)?\\d+:\\d+(?:\\.\\d+)?)", Pattern.CASE_INSENSITIVE);
 
     // "Tombs of Amascut...completion time: 23:45.60" — same total-time exclusion as ToB.
     private static final Pattern TOA_TIME = Pattern.compile(
-        "Tombs of Amascut(?!.*total).*?completion time: ((\\d+:)?\\d+:\\d+(?:\\.\\d+)?)", Pattern.CASE_INSENSITIVE);
+        "Tombs of Amascut.*?(?<!total )completion time: ((\\d+:)?\\d+:\\d+(?:\\.\\d+)?)", Pattern.CASE_INSENSITIVE);
 
     // "Hallowed Sepulchre completion time: 5:30.00"
     private static final Pattern SEP_TIME = Pattern.compile(
@@ -254,8 +254,8 @@ public class PbDetector
         // Only the whole-kill / whole-raid message may count.
         String lowerAll = cleanedMessage.toLowerCase();
         if (lowerAll.contains("phase") || lowerAll.contains("split") || lowerAll.contains("section")
-            || lowerAll.contains("level complete") || lowerAll.contains("olm duration")
-            || lowerAll.contains("wave")
+            || lowerAll.contains("level complete") || (lowerAll.contains("olm duration") && !lowerAll.contains("team size")) /* keep the real CoX completion line, which carries 'Team size:' plus 'Olm duration:' */
+            || (lowerAll.contains("wave") && !lowerAll.contains("completion time")) /* keep the real ToB completion, which shares a message with the last wave line */
             // Nightmare plugin phase lines: "Phosani's Nightmare P4 boss complete! Duration: 0:08.40"
             || lowerAll.contains("boss complete"))
         {
