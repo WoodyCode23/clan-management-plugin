@@ -86,25 +86,6 @@ public class ClanManagementPlugin extends Plugin
     private static final Pattern COLLECTION_LOG_PATTERN =
         Pattern.compile("New item added to your collection log: (.+)");
 
-    // Pets aren't loot-table items (they arrive via a clog unlock, not LootReceived), so they're
-    // matched by name here and posted as drops too. Add new pets to this set as they release.
-    private static final Set<String> PET_NAMES = new HashSet<>(Arrays.asList(
-        "abyssal orphan", "abyssal protector", "baby chinchompa", "baby mole", "baron",
-        "beaver", "bloodhound", "butch", "callisto cub", "chompy chick", "giant squirrel",
-        "great blue heron", "hellpuppy", "heron", "herbi", "huberte", "ikkle hydra",
-        "jal-nib-rek", "kalphite princess", "lil' creator", "lil' zik", "lil'viathan",
-        "little nightmare", "muphin", "nexling", "nid", "noon", "olmlet",
-        "pet chaos elemental", "pet dagannoth prime", "pet dagannoth rex", "pet dagannoth supreme",
-        "pet dark core", "pet general graardor", "pet k'ril tsutsaroth", "pet kraken",
-        "pet kree'arra", "pet penance queen", "pet smoke devil", "pet snakeling", "pet zilyana",
-        "phoenix", "prince black dragon", "quetzin", "rift guardian", "rock golem", "rocky",
-        "scorpia's offspring", "scurry", "skotos", "smol heredit", "smolcano", "sraracha",
-        "tangleroot", "tiny tempor", "tumeken's guardian", "tzrek-jad", "venenatis spiderling",
-        "vet'ion jr.", "vorki", "wisp", "youngllef",
-        // 2025-2026 pets
-        "yami", "bran", "dom", "moxi"
-    ));
-
     // A DUPLICATE pet ("You have a funny feeling like you would have been followed") fires no
     // clog unlock and no loot event — the only identification is the boss context from the
     // kill-count line. Keys must match the boss name as it appears in KC chat messages.
@@ -1147,10 +1128,16 @@ public class ClanManagementPlugin extends Plugin
         // "Valuable drop" chat line — that gives the real monster (no more "Unknown") + item IDs,
         // so we can post only collection-log / whitelisted items rather than every valuable drop.
 
-        // ── Collection Log Detection (for clan drop log) ──
-        if (config.enableDrops())
+        // ── Collection Log Detection ── Run whenever EITHER Clog Sync or Drops is on. The handler
+        // submits the unlock to the clan activity feed when Clog Sync is on, and posts it to the drop
+        // feed (with screenshot) when Drops is on. These are independent toggles — a member can sync
+        // their collection log without using the drop feed — so this must NOT be gated on Drops alone.
+        if (config.enableClogSync() || config.enableDrops())
         {
             handleCollectionLogEntry(cleanedMessage);
+        }
+        if (config.enableDrops())
+        {
             handleDuplicatePet(cleanedMessage);
         }
 
@@ -2003,9 +1990,15 @@ public class ClanManagementPlugin extends Plugin
 
         final String pRsn = playerName;
         final String pItem = itemName;
-        executor.submit(() -> platformApiService.submitCollectionLogEntry(
-            getPlatformUrl(), getPlatformKey(), getPlatformSlug(), pRsn, pItem
-        ));
+        // Activity-feed / clog-leaderboard submit is gated on Clog Sync (its own toggle), independent
+        // of the drop-feed post below (Drops). This is the fix for live unlocks silently not posting
+        // when a member had Clog Sync on but Track Drops off.
+        if (config.enableClogSync())
+        {
+            executor.submit(() -> platformApiService.submitCollectionLogEntry(
+                getPlatformUrl(), getPlatformKey(), getPlatformSlug(), pRsn, pItem
+            ));
+        }
 
         // A new unique can flip a rank requirement — this is one of the few moments the
         // Ranks tab re-renders (with tab open/manual refresh and first bank open).
@@ -2041,18 +2034,9 @@ public class ClanManagementPlugin extends Plugin
 
             int unlockValue = unlockItemId > 0 ? itemManager.getItemPrice(unlockItemId) : 0;
 
-            // Only post NOTABLE unlocks: pets, clan-whitelisted items, or anything worth at least
-            // the clan's min drop value. This keeps trash secondaries/currency (araxyte venom sack,
-            // hallowed mark) out of the feed even on first unlock.
-            boolean isPet = PET_NAMES.contains(itemName.toLowerCase());
-            boolean notable = isPet
-                || (unlockItemId > 0 && isPostableDrop(unlockItemId))
-                || unlockValue >= fetchedMinDropValue;
-            if (!notable)
-            {
-                log.debug("Skipping low-value clog unlock {} (value {})", itemName, unlockValue);
-            }
-            else
+            // Post EVERY collection-log unlock to the shared drops/clog feed with a screenshot (no
+            // value filter). The "New item added to your collection log" message only fires once per
+            // NEW unique, so this is per-unlock, never per-kill, and cannot re-fire for repeats.
             {
                 // Only stamp a KC if this unlock came from the boss the KC counter belongs to.
                 // Pets often arrive with NO loot event (recentKill=false, e.g. Nexling) — fall
