@@ -96,31 +96,37 @@ public class BoardDataService
     {
         String p = "monthly".equals(period) ? "month" : "yearly".equals(period) ? "year" : "all";
 
-        Map<String, long[]> byRsn = new LinkedHashMap<>(); // rsn -> [points, value, drops]
+        Map<String, double[]> byRsn = new LinkedHashMap<>(); // rsn -> [points, value, drops]
         Map<String, String> typeByRsn = new LinkedHashMap<>(); // rsn -> account type (for the game-mode filter)
         mergeBoard(base, slug, key, "points", p, byRsn, 0, typeByRsn);
         mergeBoard(base, slug, key, "value", p, byRsn, 1, typeByRsn);
         mergeBoard(base, slug, key, "count", p, byRsn, 2, typeByRsn);
 
         List<Map<String, Object>> players = new ArrayList<>();
-        for (Map.Entry<String, long[]> e : byRsn.entrySet())
+        for (Map.Entry<String, double[]> e : byRsn.entrySet())
         {
             Map<String, Object> player = new LinkedHashMap<>();
             player.put("rsn", e.getKey());
-            player.put("points", (int) e.getValue()[0]);
-            player.put("value", e.getValue()[1]);
+            player.put("points", e.getValue()[0]);           // keep decimals; the panel formats to 1dp
+            player.put("value", (long) e.getValue()[1]);
             player.put("drops", (int) e.getValue()[2]);
             player.put("accountType", typeByRsn.get(e.getKey())); // null until the API carries it
             players.add(player);
         }
-        players.sort((a, b) -> Integer.compare((int) b.get("points"), (int) a.get("points")));
+        players.sort((a, b) -> Double.compare(((Number) b.get("points")).doubleValue(), ((Number) a.get("points")).doubleValue()));
         int rank = 1;
         for (Map<String, Object> player : players) player.put("rank", rank++);
         return players;
     }
 
+    /** Format clan points for display: up to 1 decimal, drop a trailing ".0" (68.2 -> "68.2", 68.0 -> "68"). */
+    private static String fmtPts(double p)
+    {
+        return p == Math.rint(p) ? String.valueOf((long) p) : String.format("%.1f", p);
+    }
+
     private void mergeBoard(String base, String slug, String key, String board, String period,
-                            Map<String, long[]> byRsn, int idx, Map<String, String> typeByRsn) throws IOException
+                            Map<String, double[]> byRsn, int idx, Map<String, String> typeByRsn) throws IOException
     {
         Map<String, String> q = new LinkedHashMap<>();
         q.put("board", board);
@@ -132,8 +138,8 @@ public class BoardDataService
         {
             JsonObject e = el.getAsJsonObject();
             String rsn = str(e, "rsn");
-            long v = e.has("value") ? e.get("value").getAsLong() : 0L;
-            byRsn.computeIfAbsent(rsn, k -> new long[3])[idx] = v;
+            double v = e.has("value") ? e.get("value").getAsDouble() : 0.0;
+            byRsn.computeIfAbsent(rsn, k -> new double[3])[idx] = v;
             if (e.has("accountType") && !e.get("accountType").isJsonNull())
             {
                 typeByRsn.putIfAbsent(rsn, e.get("accountType").getAsString());
@@ -172,7 +178,7 @@ public class BoardDataService
             drop.put("value", d.has("value") ? d.get("value").getAsLong() : 0L);
             drop.put("monster", str(d, "monsterName"));
             drop.put("kc", d.has("killCount") && !d.get("killCount").isJsonNull() ? d.get("killCount").getAsInt() : 0);
-            drop.put("points", d.has("points") ? d.get("points").getAsInt() : 0);
+            drop.put("points", d.has("points") ? d.get("points").getAsDouble() : 0.0);
             drop.put("timestamp", str(d, "createdAt"));
             drops.add(drop);
         }
@@ -191,7 +197,7 @@ public class BoardDataService
             Map<String, String> item = new LinkedHashMap<>();
             item.put("item", str(d, "itemName"));
             item.put("source", d.has("source") && !d.get("source").isJsonNull() ? d.get("source").getAsString() : "");
-            item.put("points", d.has("points") && !d.get("points").isJsonNull() ? String.valueOf(d.get("points").getAsInt()) : "0");
+            item.put("points", d.has("points") && !d.get("points").isJsonNull() ? fmtPts(d.get("points").getAsDouble()) : "0");
             item.put("dropRate", "");
             item.put("kph", "");
             item.put("category", d.has("category") && !d.get("category").isJsonNull() ? d.get("category").getAsString() : "");
