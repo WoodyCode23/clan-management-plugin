@@ -2056,7 +2056,7 @@ public class ClanManagementPlugin extends Plugin
                 );
                 withScreenshot(true, screenshot ->
                     platformApiService.submitDrop(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), unlockDrop, screenshot,
-                        config.sendScreenshotsToDiscord(), config.dropPhrase()));
+                        config.sendScreenshotsToDiscord(), config.dropPhrase(), true /* fromClog: post every clog unlock */));
                 log.debug("Clog-unlock drop logged: {} from {}", itemName, unlockSource);
             }
         }

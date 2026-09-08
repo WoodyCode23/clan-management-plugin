@@ -70,6 +70,14 @@ public class PlatformApiService
     public void submitDrop(String baseUrl, String apiKey, String clanSlug, DropEntry drop, String screenshotB64,
                            boolean discordShare, String phrase)
     {
+        submitDrop(baseUrl, apiKey, clanSlug, drop, screenshotB64, discordShare, phrase, false);
+    }
+
+    // fromClog = this "drop" is a collection-log unlock; the server posts it to the feed regardless
+    // of its notable-value gate (every clog unlock is worth posting).
+    public void submitDrop(String baseUrl, String apiKey, String clanSlug, DropEntry drop, String screenshotB64,
+                           boolean discordShare, String phrase, boolean fromClog)
+    {
         JsonObject payload = new JsonObject();
         payload.addProperty("rsn", drop.getPlayerName());
         addAccountHash(payload);
@@ -95,6 +103,7 @@ public class PlatformApiService
         {
             payload.addProperty("phrase", phrase.trim());
         }
+        if (fromClog) payload.addProperty("fromClog", true);
 
         postAsync(baseUrl + "/clans/" + clanSlug + "/drops", apiKey, payload, "Platform drop");
     }
