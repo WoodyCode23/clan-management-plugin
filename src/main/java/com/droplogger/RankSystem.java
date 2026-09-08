@@ -29,7 +29,7 @@ import java.util.Set;
  */
 public final class RankSystem
 {
-    public enum Kind { ITEMS, ITEMS_PREFIX, SKILL, TOTAL, CA_TIER, CA_TASK, DIARY, BOSS_KC, ALL, ANY, RANK, TOTAL_XP, CLOG, UNLOCK, COMBAT_LEVEL, CLOG_SLOT }
+    public enum Kind { ITEMS, ITEMS_PREFIX, SKILL, TOTAL, CA_TIER, CA_TASK, DIARY, BOSS_KC, ALL, ANY, RANK, TOTAL_XP, CLOG, UNLOCK, COMBAT_LEVEL, CLOG_SLOT, QUEST, DIARY_REGION }
 
     /** A single requirement check (leaf or composite). */
     public static final class Check
@@ -86,6 +86,12 @@ public final class RankSystem
         /** Any of the named collection-log slots has been obtained. Read from the synced clog set (a
          *  permanent unlock/proof), NOT current bank possession, so it is exempt from the clog-tightening. */
         public static Check clogSlot(String label, String... names) { return new Check(Kind.CLOG_SLOT, label, Arrays.asList(names), null, 0, null, 0); }
+        /** As clogSlot, but requires the obtained QUANTITY of one listed slot to reach qty (qty>1); qty<=1 keeps the plain obtained-once behaviour. */
+        public static Check clogSlotQty(String label, int qty, String... names) { return new Check(Kind.CLOG_SLOT, label, Arrays.asList(names), null, qty, null, 0); }
+        /** Own k of the listed quests as FINISHED (k = names.length means "all", k = 1 means "any"). */
+        public static Check quest(String label, int k, String... quests) { return new Check(Kind.QUEST, label, Arrays.asList(quests), null, k, null, 0); }
+        /** A specific achievement-diary region+tier complete (e.g. region "Ardougne", tier "elite"). */
+        public static Check diaryRegion(String label, String region, String tier) { return new Check(Kind.DIARY_REGION, label, null, region + ":" + tier, 0, null, 0); }
     }
 
     /** A requirement group: need N of the option checks satisfied. */
@@ -122,6 +128,9 @@ public final class RankSystem
         public final Set<String> caDone = new HashSet<>();          // lowercased completed CA task names
         public final Set<String> caTiersComplete = new HashSet<>(); // lowercased tiers fully complete
         public final Map<String, Integer> diaryComplete = new HashMap<>(); // tier(lower) -> # regions complete
+        public final Set<String> questsComplete = new HashSet<>();  // lowercased FINISHED quest names (QUEST checks)
+        public final Set<String> diaryRegionsComplete = new HashSet<>(); // lowercased "region:tier" done (DIARY_REGION checks)
+        public final Map<String, Integer> clogQty = new HashMap<>(); // lowercased clog item name -> obtained quantity (CLOG_SLOT qty)
         public final Map<String, Integer> kc = new HashMap<>();     // lowercased boss -> kc
         public final Set<String> ranksHeld = new HashSet<>();       // rank ids already earned/qualified
     }
@@ -202,10 +211,28 @@ public final class RankSystem
             case COMBAT_LEVEL:
                 return s.combatLevel >= c.value;
             case CLOG_SLOT:
+                if (c.value > 1)
+                {
+                    // Quantity requirement: one listed name (or alt) must be OBTAINED at least c.value times.
+                    for (String n : c.names) if (s.clogQty.getOrDefault(n.toLowerCase(), 0) >= c.value) return true;
+                    for (String a : c.alts) if (s.clogQty.getOrDefault(a.toLowerCase(), 0) >= c.value) return true;
+                    return false;
+                }
                 for (String n : c.names) if (s.clogObtained.contains(n.toLowerCase())) return true;
                 for (String a : c.alts) if (s.clogObtained.contains(a.toLowerCase())) return true;
                 return false;
+            case QUEST:
+            {
+                int have = 0;
+                for (String q : c.names) if (s.questsComplete.contains(q.toLowerCase())) have++;
+                return have >= c.value;
+            }
+            case DIARY_REGION:
+                return s.diaryRegionsComplete.contains(c.key.toLowerCase());
             case ALL:
+                // Fail closed if empty: a composite whose children were ALL unknown kinds (skipped by
+                // the graceful parser) must not count as vacuously met. ANY already fails closed via need>=1.
+                if (c.children.isEmpty()) return false;
                 for (Check ch : c.children) if (!evalCheck(ch, s)) return false;
                 return true;
             case ANY:
@@ -545,7 +572,7 @@ public final class RankSystem
             {
                 JsonObject go = ge.getAsJsonObject();
                 List<Check> opts = new ArrayList<>();
-                for (JsonElement oe : go.getAsJsonArray("options")) opts.add(parseCheck(oe.getAsJsonObject()));
+                for (JsonElement oe : go.getAsJsonArray("options")) { Check parsed = parseCheck(oe.getAsJsonObject()); if (parsed != null) opts.add(parsed); }
                 groups.add(new Group(go.get("label").getAsString(), go.get("need").getAsInt(), opts));
             }
             out.add(new Rank(ro.get("id").getAsString(), ro.get("name").getAsString(),
@@ -555,7 +582,7 @@ public final class RankSystem
     }
 
     private static String[] strs(JsonArray a) { String[] s = new String[a.size()]; for (int i = 0; i < a.size(); i++) s[i] = a.get(i).getAsString(); return s; }
-    private static Check[] checks(JsonArray a) { Check[] c = new Check[a.size()]; for (int i = 0; i < a.size(); i++) c[i] = parseCheck(a.get(i).getAsJsonObject()); return c; }
+    private static Check[] checks(JsonArray a) { List<Check> c = new ArrayList<>(); for (int i = 0; i < a.size(); i++) { Check ck = parseCheck(a.get(i).getAsJsonObject()); if (ck != null) c.add(ck); } return c.toArray(new Check[0]); }
     private static String lbl(JsonObject o) { return o.has("label") ? o.get("label").getAsString() : null; }
 
     private static Check parseCheck(JsonObject o)
@@ -585,15 +612,22 @@ public final class RankSystem
                 : Check.kc(o.get("boss").getAsString(), o.get("count").getAsInt());
             case "CLOG": return Check.clog(o.get("count").getAsInt());
             case "CLOG_SLOT": {
-                Check c = Check.clogSlot(lbl(o), strs(o.getAsJsonArray("names")));
+                Check c = o.has("qty") && !o.get("qty").isJsonNull()
+                    ? Check.clogSlotQty(lbl(o), o.get("qty").getAsInt(), strs(o.getAsJsonArray("names")))
+                    : Check.clogSlot(lbl(o), strs(o.getAsJsonArray("names")));
                 if (o.has("alts")) c.withAlts(Arrays.asList(strs(o.getAsJsonArray("alts"))));
                 return c;
             }
+            case "QUEST": return Check.quest(lbl(o), o.get("k").getAsInt(), strs(o.getAsJsonArray("quests")));
+            case "DIARY_REGION": return Check.diaryRegion(lbl(o), o.get("region").getAsString(), o.get("tier").getAsString());
             case "UNLOCK": return Check.unlock(lbl(o), o.get("key").getAsString());
             case "RANK": return Check.rank(o.get("rankId").getAsString(), o.has("name") ? o.get("name").getAsString() : o.get("rankId").getAsString());
             case "ALL": return Check.all(lbl(o), checks(o.getAsJsonArray("children")));
             case "ANY": return Check.any(lbl(o), o.get("need").getAsInt(), checks(o.getAsJsonArray("children")));
-            default: throw new IllegalArgumentException("Unknown check kind: " + kind);
+            // Forward-compatibility: an unknown kind (added by a newer server/GUI than this client)
+            // is SKIPPED, not fatal. Every caller filters these nulls out, so an older plugin quietly
+            // ignores checks it does not understand instead of crashing the whole rank tree.
+            default: return null;
         }
     }
 

@@ -2773,6 +2773,21 @@ public class ClanManagementPlugin extends Plugin
         s.diaryComplete.put("medium", countDiaries(DIARY_MEDIUM));
         s.diaryComplete.put("hard", countDiaries(DIARY_HARD));
         s.diaryComplete.put("elite", countDiaries(DIARY_ELITE));
+        // Per-region diary completion for DIARY_REGION checks ("region:tier", lowercased).
+        for (int i = 0; i < DIARY_REGIONS.length; i++)
+        {
+            if (diaryTierDone(DIARY_EASY, i)) s.diaryRegionsComplete.add((DIARY_REGIONS[i] + ":easy").toLowerCase());
+            if (diaryTierDone(DIARY_MEDIUM, i)) s.diaryRegionsComplete.add((DIARY_REGIONS[i] + ":medium").toLowerCase());
+            if (diaryTierDone(DIARY_HARD, i)) s.diaryRegionsComplete.add((DIARY_REGIONS[i] + ":hard").toLowerCase());
+            if (diaryTierDone(DIARY_ELITE, i)) s.diaryRegionsComplete.add((DIARY_REGIONS[i] + ":elite").toLowerCase());
+        }
+        // Finished quests for QUEST checks (lowercased names; skip miniquests/RFD subquests).
+        for (net.runelite.api.Quest q : net.runelite.api.Quest.values())
+        {
+            if (NON_QUEST_ENTRIES.contains(q.name())) continue;
+            try { if (q.getState(client) == net.runelite.api.QuestState.FINISHED) s.questsComplete.add(q.getName().toLowerCase()); }
+            catch (Exception ignored) { /* a quest's varbit may be unavailable this version */ }
+        }
         // Completed CA tasks (fetched from our server in loadRanksWithMode).
         s.caDone.addAll(rankCaDone);
 
@@ -2817,7 +2832,12 @@ public class ClanManagementPlugin extends Plugin
         // ownership tightening above (these are permanent unlocks/proofs, not held items).
         synchronized (clogSyncItems)
         {
-            for (ClogItem ci : clogSyncItems.values()) s.clogObtained.add(ci.name.toLowerCase());
+            for (ClogItem ci : clogSyncItems.values())
+            {
+                String key = ci.name.toLowerCase();
+                s.clogObtained.add(key);
+                s.clogQty.merge(key, ci.quantity, Integer::max); // for CLOG_SLOT quantity checks
+            }
         }
         // Ornate pool of Rejuvenation (persisted flag) proves the TzKal stat-restoration req.
         if (seenOrnatePool || Boolean.TRUE.equals(configManager.getConfiguration("droplogger", "seenOrnatePool", Boolean.class)))
