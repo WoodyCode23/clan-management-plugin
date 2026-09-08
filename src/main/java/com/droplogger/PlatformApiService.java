@@ -334,6 +334,18 @@ public class PlatformApiService
         postAsync(baseUrl + "/clans/" + clanSlug + "/combat-achievements/bulk", apiKey, payload, "Platform CA sync");
     }
 
+    /** Sync the player's purchased Slayer Rewards unlocks (names read from the shop scan). Replaces the set. */
+    public void syncSlayerUnlocks(String baseUrl, String apiKey, String clanSlug, String rsn, java.util.List<String> unlocks)
+    {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("rsn", rsn);
+        addAccountHash(payload);
+        JsonArray arr = new JsonArray();
+        for (String u : unlocks) arr.add(u);
+        payload.add("unlocks", arr);
+        postAsync(baseUrl + "/clans/" + clanSlug + "/slayer-unlocks/bulk", apiKey, payload, "Platform slayer-unlocks sync");
+    }
+
     /**
      * Sync this player's Achievement Diary + Quest standing (counts read from the in-game varbits /
      * Quest states). The server stores one summary row per player and shows it on the Achievements

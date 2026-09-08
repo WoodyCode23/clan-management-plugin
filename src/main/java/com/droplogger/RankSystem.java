@@ -29,7 +29,7 @@ import java.util.Set;
  */
 public final class RankSystem
 {
-    public enum Kind { ITEMS, ITEMS_PREFIX, SKILL, TOTAL, CA_TIER, CA_TASK, DIARY, BOSS_KC, ALL, ANY, RANK, TOTAL_XP, CLOG, UNLOCK, COMBAT_LEVEL, CLOG_SLOT, QUEST, DIARY_REGION }
+    public enum Kind { ITEMS, ITEMS_PREFIX, SKILL, TOTAL, CA_TIER, CA_TASK, DIARY, BOSS_KC, ALL, ANY, RANK, TOTAL_XP, CLOG, UNLOCK, COMBAT_LEVEL, CLOG_SLOT, QUEST, DIARY_REGION, SLAYER_UNLOCK }
 
     /** A single requirement check (leaf or composite). */
     public static final class Check
@@ -92,6 +92,8 @@ public final class RankSystem
         public static Check quest(String label, int k, String... quests) { return new Check(Kind.QUEST, label, Arrays.asList(quests), null, k, null, 0); }
         /** A specific achievement-diary region+tier complete (e.g. region "Ardougne", tier "elite"). */
         public static Check diaryRegion(String label, String region, String tier) { return new Check(Kind.DIARY_REGION, label, null, region + ":" + tier, 0, null, 0); }
+        /** A Slayer Rewards shop unlock is purchased (e.g. "Bigger and Badder"). Read from the shop scan. */
+        public static Check slayerUnlock(String label, String unlock) { return new Check(Kind.SLAYER_UNLOCK, label, null, unlock, 0, null, 0); }
     }
 
     /** A requirement group: need N of the option checks satisfied. */
@@ -131,6 +133,7 @@ public final class RankSystem
         public final Set<String> questsComplete = new HashSet<>();  // lowercased FINISHED quest names (QUEST checks)
         public final Set<String> diaryRegionsComplete = new HashSet<>(); // lowercased "region:tier" done (DIARY_REGION checks)
         public final Map<String, Integer> clogQty = new HashMap<>(); // lowercased clog item name -> obtained quantity (CLOG_SLOT qty)
+        public final Set<String> slayerUnlocks = new HashSet<>();   // lowercased purchased Slayer-rewards unlock names (SLAYER_UNLOCK)
         public final Map<String, Integer> kc = new HashMap<>();     // lowercased boss -> kc
         public final Set<String> ranksHeld = new HashSet<>();       // rank ids already earned/qualified
     }
@@ -229,6 +232,8 @@ public final class RankSystem
             }
             case DIARY_REGION:
                 return s.diaryRegionsComplete.contains(c.key.toLowerCase());
+            case SLAYER_UNLOCK:
+                return s.slayerUnlocks.contains(c.key.toLowerCase());
             case ALL:
                 // Fail closed if empty: a composite whose children were ALL unknown kinds (skipped by
                 // the graceful parser) must not count as vacuously met. ANY already fails closed via need>=1.
@@ -620,6 +625,7 @@ public final class RankSystem
             }
             case "QUEST": return Check.quest(lbl(o), o.get("k").getAsInt(), strs(o.getAsJsonArray("quests")));
             case "DIARY_REGION": return Check.diaryRegion(lbl(o), o.get("region").getAsString(), o.get("tier").getAsString());
+            case "SLAYER_UNLOCK": return Check.slayerUnlock(lbl(o), o.get("unlock").getAsString());
             case "UNLOCK": return Check.unlock(lbl(o), o.get("key").getAsString());
             case "RANK": return Check.rank(o.get("rankId").getAsString(), o.has("name") ? o.get("name").getAsString() : o.get("rankId").getAsString());
             case "ALL": return Check.all(lbl(o), checks(o.getAsJsonArray("children")));

@@ -485,6 +485,7 @@ public class ClanManagementPlugin extends Plugin
     // Adventure log PB sync state
     private int adventureLogPbTicksRemaining = -1;
     private int caReadTicksRemaining = -1; // ticks until we read the CA task interface after it opens
+    private int slayerReadTicksRemaining = -1; // ticks until we read the Slayer Rewards shop after it opens
     private static final int GIM_SIDEPANEL_GROUP = 726; // InterfaceID.GIM_SIDEPANEL (gameval)
     private int gimReadTicksRemaining = -1; // ticks until we read the GIM group panel after it opens
     private boolean gimGroupReported = false; // once per session
@@ -492,6 +493,10 @@ public class ClanManagementPlugin extends Plugin
     private static final int CA_COMPLETE_COLOR = 0x0DC10D;
     private static final int CA_TASK_NAME_COMPONENT = 10; // component 715,10 holds the task-name column
     private static final int JOURNALSCROLL_GROUP = 741;
+    private static final int SLAYER_REWARDS_GROUP = 426; // the Slayer Rewards shop interface
+    // Status sprites on each Slayer Rewards unlock row: OWNED vs not. (May change if Jagex reworks the
+    // shop art — verified 2026-09: owned=8384, locked=8382.)
+    private static final int SLAYER_UNLOCK_OWNED_SPRITE = 8384;
     private static final int ADVENTURE_LOG_PB_DELAY_TICKS = 3;
     // Matches: "Fastest kill: 0:46.80", "Fastest run - (Team size: Solo): 13:52.80",
     //          "Fastest Overall time - (Team size: 2 player): 25:40.80",
@@ -986,6 +991,17 @@ public class ClanManagementPlugin extends Plugin
             readCombatAchievements();
         }
 
+        // Read the Slayer Rewards shop a few ticks after it opens (its unlock rows populate late).
+        if (slayerReadTicksRemaining > 0)
+        {
+            slayerReadTicksRemaining--;
+        }
+        else if (slayerReadTicksRemaining == 0)
+        {
+            slayerReadTicksRemaining = -1;
+            readSlayerUnlocks();
+        }
+
         if (gimReadTicksRemaining > 0)
         {
             gimReadTicksRemaining--;
@@ -1219,6 +1235,12 @@ public class ClanManagementPlugin extends Plugin
         if (event.getGroupId() == InterfaceID.CA_TASKS && isPlatformConfigured() && config.enableClogSync())
         {
             caReadTicksRemaining = 4;
+        }
+
+        // Sync Slayer Rewards unlocks whenever the player opens the Slayer rewards shop (group 426).
+        if (event.getGroupId() == SLAYER_REWARDS_GROUP && isPlatformConfigured() && config.enableClogSync())
+        {
+            slayerReadTicksRemaining = 4;
         }
 
         // GIM Group side panel (interface 726): read the group's member list for automatic team
@@ -2543,6 +2565,46 @@ public class ClanManagementPlugin extends Plugin
             "[" + getClanName() + "] Combat achievements synced (" + fCompleted + "/" + tasks.size() + " complete)", "");
     }
 
+    // Read the Slayer Rewards shop (group 426) and sync which unlocks the player owns. Each unlock is a
+    // row where a status sprite is immediately followed by the name text; owned = SLAYER_UNLOCK_OWNED_SPRITE.
+    private void readSlayerUnlocks()
+    {
+        if (!isPlatformConfigured()) return;
+        String rsn = client.getLocalPlayer() != null ? client.getLocalPlayer().getName() : null;
+        if (rsn == null || rsn.isEmpty()) return;
+
+        java.util.Set<String> owned = new java.util.LinkedHashSet<>();
+        for (int c = 0; c < 90; c++)
+        {
+            net.runelite.api.widgets.Widget list = client.getWidget(SLAYER_REWARDS_GROUP, c);
+            if (list == null) continue;
+            net.runelite.api.widgets.Widget[] dyn = list.getDynamicChildren();
+            if (dyn == null || dyn.length < 2) continue;
+            for (int i = 0; i + 1 < dyn.length; i++)
+            {
+                net.runelite.api.widgets.Widget status = dyn[i];
+                if (status == null || status.getSpriteId() != SLAYER_UNLOCK_OWNED_SPRITE) continue;
+                net.runelite.api.widgets.Widget nameW = dyn[i + 1];
+                if (nameW == null) continue;
+                String name = nameW.getText();
+                if (name != null && !name.trim().isEmpty()) owned.add(name.trim());
+            }
+        }
+        if (owned.isEmpty()) return; // shop not populated / nothing owned — don't wipe on an empty read
+
+        // Persist for offline rank evaluation (buildRankSnapshot reads this back). "|" separates names
+        // since an unlock can contain a comma-free apostrophe (e.g. "Absolutely Slayin'").
+        configManager.setConfiguration("droplogger", "slayerUnlocks", String.join("|", owned));
+
+        final String fRsn = rsn;
+        final java.util.List<String> fOwned = new java.util.ArrayList<>(owned);
+        executor.submit(() -> platformApiService.syncSlayerUnlocks(
+            getPlatformUrl(), getPlatformKey(), getPlatformSlug(), fRsn, fOwned));
+        log.debug("Synced {} Slayer unlocks for {}", fOwned.size(), fRsn);
+        client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+            "[" + getClanName() + "] Slayer unlocks synced (" + fOwned.size() + ")", "");
+    }
+
     /**
      * Read the GIM Group side panel (interface 726) and report its texts for automatic team
      * detection (client thread). The exact component layout isn't documented, so this walks every
@@ -2804,6 +2866,13 @@ public class ClanManagementPlugin extends Plugin
         }
         // Completed CA tasks (fetched from our server in loadRanksWithMode).
         s.caDone.addAll(rankCaDone);
+        // Slayer Rewards unlocks: read from the last shop scan cached in config (the shop must be open
+        // to scan, so this persists it for offline rank evaluation, same as the achievement signature).
+        String slayerCsv = configManager.getConfiguration("droplogger", "slayerUnlocks");
+        if (slayerCsv != null && !slayerCsv.isEmpty())
+        {
+            for (String u : slayerCsv.split("\\|")) if (!u.trim().isEmpty()) s.slayerUnlocks.add(u.trim().toLowerCase());
+        }
 
         if (clogOnly)
         {
