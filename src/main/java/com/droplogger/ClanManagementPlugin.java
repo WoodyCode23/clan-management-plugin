@@ -2640,6 +2640,10 @@ public class ClanManagementPlugin extends Plugin
         if (!isPlatformConfigured() || client.getLocalPlayer() == null) { panel.showRanks(null, null, "default"); return; }
         String rsn = client.getLocalPlayer().getName();
         if (rsn == null || rsn.isEmpty()) { panel.showRanks(null, null, "default"); return; }
+        // Read the account type on the client thread (varbit), then do the network work off-thread.
+        clientThread.invokeLater(() ->
+        {
+        final String acctType = readAccountType();
         executor.submit(() ->
         {
             PlatformApiService.RankMode rm = platformApiService.fetchRankMode(
@@ -2665,14 +2669,24 @@ public class ClanManagementPlugin extends Plugin
             // failure keep the plugin's bundled default so ranks still evaluate offline.
             try
             {
-                String ranksJson = platformApiService.fetchRanks(getPlatformUrl(), getPlatformKey(), getPlatformSlug());
-                if (ranksJson != null) RankSystem.setRanks(RankSystem.parseRanks(ranksJson));
+                // GIM accounts evaluate against their own rank tree; fall back to the default tree if
+                // the GIM tree has not been set up yet, so a GIM is never left with no ranks.
+                boolean isGim = "gim".equals(acctType) || "hcgim".equals(acctType) || "unranked_gim".equals(acctType);
+                String ranksJson = platformApiService.fetchRanks(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), isGim ? "gim" : null);
+                java.util.List<RankSystem.Rank> parsed = ranksJson != null ? RankSystem.parseRanks(ranksJson) : null;
+                if (isGim && (parsed == null || parsed.isEmpty()))
+                {
+                    String defJson = platformApiService.fetchRanks(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), null);
+                    if (defJson != null) parsed = RankSystem.parseRanks(defJson);
+                }
+                if (parsed != null && !parsed.isEmpty()) RankSystem.setRanks(parsed);
             }
             catch (Exception ex)
             {
                 log.warn("Server rank tree unavailable; using bundled default", ex);
             }
             evaluateAndShowRanks();
+        });
         });
     }
 

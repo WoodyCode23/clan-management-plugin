@@ -229,10 +229,19 @@ public class PlatformApiService
      *  Returns null on any failure so the caller falls back to the plugin's bundled default tree. */
     public String fetchRanks(String baseUrl, String apiKey, String clanSlug)
     {
+        return fetchRanks(baseUrl, apiKey, clanSlug, null);
+    }
+
+    /** Fetch a specific rank-tree variant ("default" or "gim"); null/blank = default. */
+    public String fetchRanks(String baseUrl, String apiKey, String clanSlug, String variant)
+    {
         try
         {
-            HttpUrl url = HttpUrl.parse(baseUrl + "/clans/" + clanSlug + "/ranks");
-            if (url == null) return null;
+            HttpUrl base = HttpUrl.parse(baseUrl + "/clans/" + clanSlug + "/ranks");
+            if (base == null) return null;
+            HttpUrl.Builder ub = base.newBuilder();
+            if (variant != null && !variant.isEmpty()) ub.addQueryParameter("variant", variant);
+            HttpUrl url = ub.build();
             Request request = new Request.Builder().url(url)
                 .header("Authorization", "Bearer " + apiKey).get().build();
             try (Response response = httpClient.newCall(request).execute())
