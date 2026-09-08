@@ -2926,6 +2926,18 @@ public class ClanPanel extends PluginPanel
     }
 
     /** Re-render the Raid Race tab from a fresh (or cached, on re-select) snapshot. */
+    /** Attach a mouse listener to a component and every descendant, so a click anywhere on a composite
+     *  header (its labels included) triggers it. Swing delivers a click only to the deepest component,
+     *  not the parent, so a single listener on the header row alone would miss its child labels. */
+    private void addClickListenerDeep(java.awt.Component c, java.awt.event.MouseListener l)
+    {
+        c.addMouseListener(l);
+        if (c instanceof java.awt.Container)
+        {
+            for (java.awt.Component child : ((java.awt.Container) c).getComponents()) addClickListenerDeep(child, l);
+        }
+    }
+
     public void updateRaidRace(PlatformApiService.ClogRace race)
     {
         SwingUtilities.invokeLater(() ->
@@ -2983,29 +2995,69 @@ public class ClanPanel extends PluginPanel
                 }
             }
 
-            raidRaceContent.add(raidRaceHeader(event));
-            raidRaceContent.add(Box.createVerticalStrut(8));
+            // Collapsible race detail: the header (caret + title/meta) toggles the countdown,
+            // standings, board and contributions body, matching the other collapsible sections in the
+            // panel. Open by default so the live race shows, but it can be collapsed like the rest.
+            JPanel raceCard = new JPanel();
+            raceCard.setLayout(new BoxLayout(raceCard, BoxLayout.Y_AXIS));
+            raceCard.setBackground(ColorScheme.DARK_GRAY_COLOR);
+            raceCard.setAlignmentX(Component.LEFT_ALIGNMENT);
 
+            final JLabel raceCaret = new JLabel("-"); // "-" open, "+" collapsed (matches buildCollapsiblePbSection)
+            raceCaret.setFont(READABLE_FONT.deriveFont(Font.BOLD, 14f));
+            raceCaret.setForeground(new Color(150, 150, 150));
+            raceCaret.setPreferredSize(new Dimension(11, 16));
+            JPanel raceCaretWrap = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 5, 1));
+            raceCaretWrap.setBackground(ColorScheme.DARK_GRAY_COLOR);
+            raceCaretWrap.add(raceCaret);
+
+            JPanel raceHeaderRow = new JPanel(new BorderLayout(6, 0));
+            raceHeaderRow.setBackground(ColorScheme.DARK_GRAY_COLOR);
+            raceHeaderRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+            raceHeaderRow.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+            raceHeaderRow.add(raceCaretWrap, BorderLayout.WEST);
+            raceHeaderRow.add(raidRaceHeader(event), BorderLayout.CENTER);
+            raceCard.add(raceHeaderRow);
+
+            JPanel raceBody = new JPanel();
+            raceBody.setLayout(new BoxLayout(raceBody, BoxLayout.Y_AXIS));
+            raceBody.setBackground(ColorScheme.DARK_GRAY_COLOR);
+            raceBody.setAlignmentX(Component.LEFT_ALIGNMENT);
+            raceBody.add(Box.createVerticalStrut(8));
             if ("active".equals(event.status))
             {
-                raidRaceContent.add(raidRaceCountdownLabel(event));
-                raidRaceContent.add(Box.createVerticalStrut(8));
+                raceBody.add(raidRaceCountdownLabel(event));
+                raceBody.add(Box.createVerticalStrut(8));
             }
             else if (ended)
             {
                 JLabel winner = raidRaceWinnerLabel(race);
                 if (winner != null)
                 {
-                    raidRaceContent.add(winner);
-                    raidRaceContent.add(Box.createVerticalStrut(8));
+                    raceBody.add(winner);
+                    raceBody.add(Box.createVerticalStrut(8));
                 }
             }
+            raceBody.add(raidRaceStandingsPanel(race));
+            raceBody.add(Box.createVerticalStrut(10));
+            raceBody.add(raidRaceBoardPanel(race, selectedRaidTeamId));
+            raceBody.add(Box.createVerticalStrut(10));
+            raceBody.add(raidRaceContributionsPanel(race, selectedRaidTeamId));
+            raceCard.add(raceBody);
 
-            raidRaceContent.add(raidRaceStandingsPanel(race));
-            raidRaceContent.add(Box.createVerticalStrut(10));
-            raidRaceContent.add(raidRaceBoardPanel(race, selectedRaidTeamId));
-            raidRaceContent.add(Box.createVerticalStrut(10));
-            raidRaceContent.add(raidRaceContributionsPanel(race, selectedRaidTeamId));
+            java.awt.event.MouseAdapter raceToggle = new java.awt.event.MouseAdapter()
+            {
+                @Override public void mousePressed(java.awt.event.MouseEvent ev)
+                {
+                    boolean show = !raceBody.isVisible();
+                    raceBody.setVisible(show);
+                    raceCaret.setText(show ? "-" : "+");
+                    raceCard.revalidate(); raceCard.repaint();
+                    raidRaceContent.revalidate(); raidRaceContent.repaint();
+                }
+            };
+            addClickListenerDeep(raceHeaderRow, raceToggle); // whole header row toggles, not just the caret
+            raidRaceContent.add(raceCard);
 
             raidRaceContent.revalidate();
             raidRaceContent.repaint();
