@@ -292,6 +292,12 @@ public class PlatformApiService
     public void syncCombatAchievements(String baseUrl, String apiKey, String clanSlug,
                                        String rsn, java.util.List<CaTask> tasks)
     {
+        syncCombatAchievements(baseUrl, apiKey, clanSlug, rsn, tasks, null);
+    }
+
+    public void syncCombatAchievements(String baseUrl, String apiKey, String clanSlug,
+                                       String rsn, java.util.List<CaTask> tasks, String screenshotB64)
+    {
         JsonObject payload = new JsonObject();
         payload.addProperty("rsn", rsn);
         addAccountHash(payload);
@@ -304,6 +310,9 @@ public class PlatformApiService
             arr.add(o);
         }
         payload.add("tasks", arr);
+        // Live single-task completions carry a screenshot for the Discord post; the interface-scan
+        // backfill passes null (no live moment). Server attaches it to the CA announcement.
+        if (screenshotB64 != null) payload.addProperty("screenshot", screenshotB64);
         postAsync(baseUrl + "/clans/" + clanSlug + "/combat-achievements/bulk", apiKey, payload, "Platform CA sync");
     }
 
@@ -323,7 +332,7 @@ public class PlatformApiService
         }
     }
 
-    public void syncAchievementSummary(String baseUrl, String apiKey, String clanSlug, String rsn,
+    public boolean syncAchievementSummary(String baseUrl, String apiKey, String clanSlug, String rsn,
                                        int questPoints, int questsComplete, int questsTotal,
                                        int diaryEasy, int diaryMedium, int diaryHard, int diaryElite,
                                        java.util.List<DiaryRegion> diaries, java.util.List<String> questsMissing,
@@ -362,7 +371,23 @@ public class PlatformApiService
             for (String q : questsMissing) arr.add(q);
             payload.add("questsMissing", arr);
         }
-        postAsync(baseUrl + "/clans/" + clanSlug + "/achievement-summary", apiKey, payload, "Achievement summary sync");
+        // Synchronous so the caller can gate its chat message on the server actually accepting the
+        // sync: a non-roster alt (or any rejection) returns false and is NOT announced as "updated".
+        Request request = new Request.Builder()
+            .url(baseUrl + "/clans/" + clanSlug + "/achievement-summary")
+            .header("Authorization", "Bearer " + apiKey)
+            .post(RequestBody.create(JSON, gson.toJson(payload)))
+            .build();
+        try (Response response = httpClient.newCall(request).execute())
+        {
+            checkAuth(response.code());
+            return response.isSuccessful();
+        }
+        catch (Exception e)
+        {
+            log.debug("Achievement summary sync failed", e);
+            return false;
+        }
     }
 
     /**

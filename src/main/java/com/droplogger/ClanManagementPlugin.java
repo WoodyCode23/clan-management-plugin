@@ -2499,9 +2499,13 @@ public class ClanManagementPlugin extends Plugin
         String rsn = client.getLocalPlayer() != null ? client.getLocalPlayer().getName() : null;
         if (rsn == null || rsn.isEmpty()) return;
         final String fRsn = rsn;
-        executor.submit(() -> platformApiService.syncCombatAchievements(
-            getPlatformUrl(), getPlatformKey(), getPlatformSlug(), fRsn,
-            java.util.Collections.singletonList(new PlatformApiService.CaTask(task, true))));
+        final String fTask = task;
+        // A live CA completion is worth a screenshot (like drops/PBs). Capture one when the player has
+        // the screenshots toggle on; withScreenshot passes null when off, so the sync still records.
+        withScreenshot(config.sendScreenshotsToDiscord(), screenshot ->
+            platformApiService.syncCombatAchievements(
+                getPlatformUrl(), getPlatformKey(), getPlatformSlug(), fRsn,
+                java.util.Collections.singletonList(new PlatformApiService.CaTask(fTask, true)), screenshot));
     }
 
     private void readCombatAchievements()
@@ -2684,11 +2688,11 @@ public class ClanManagementPlugin extends Plugin
         final boolean modeClogOnly = "clog_only".equals(rankMode);
         clientThread.invokeLater(() ->
         {
-            // Group Ironmen prove item requirements by collection log, not current possession:
-            // teammates can hold shared items, so possession is unreliable but the clog is proof.
-            String at = readAccountType();
-            boolean clogOnly = modeClogOnly
-                || "gim".equals(at) || "hcgim".equals(at) || "unranked_gim".equals(at);
+            // Item requirements evaluate by ACTUAL possession for every account type, GIMs included.
+            // Proving by collection log was gameable for groups (trade an item to a teammate, they log
+            // the slot, trade it back), so possession is the honest check. Only the manual clog-only
+            // mode forces clog proof now.
+            boolean clogOnly = modeClogOnly;
             RankSystem.PlayerSnapshot snap = buildRankSnapshot(clogOnly);
             java.util.List<RankSystem.RankStatus> results = RankSystem.evaluateAll(snap, rankHeld);
             panel.showRanks(results, snap.itemIds, rankMode);
@@ -3044,19 +3048,28 @@ public class ClanManagementPlugin extends Plugin
             log.debug("Achievements unchanged for {} - skipping sync", rsn);
             return;
         }
-        configManager.setConfiguration("droplogger", sigKey, sig);
-
-        executor.submit(() -> platformApiService.syncAchievementSummary(
-            getPlatformUrl(), getPlatformKey(), getPlatformSlug(), rsn,
-            fQp, fComplete, fTotal, diaryEasy, diaryMedium, diaryHard, diaryElite,
-            diaryDetail, questsMissing, accountType));
-
         final int diaryTotal = diaryEasy + diaryMedium + diaryHard + diaryElite;
         final String verb = prev == null ? "synced" : "updated"; // first import vs a later change
-        client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
-            "[" + getClanName() + "] Diaries & quests " + verb + " (" + diaryTotal + "/48 diaries, "
-                + complete + " quests, " + qp + " QP)", "");
-        log.debug("Achievements {} for {}: {} diaries, {} quests, {} QP", verb, rsn, diaryTotal, complete, qp);
+        executor.submit(() ->
+        {
+            boolean ok = platformApiService.syncAchievementSummary(
+                getPlatformUrl(), getPlatformKey(), getPlatformSlug(), rsn,
+                fQp, fComplete, fTotal, diaryEasy, diaryMedium, diaryHard, diaryElite,
+                diaryDetail, questsMissing, accountType);
+            if (!ok)
+            {
+                // Server rejected it (e.g. this character isn't on the clan roster). Don't persist the
+                // signature or announce — otherwise a non-clan alt shows a misleading "updated for
+                // <alt>" and never retries once the reading settles.
+                log.debug("Achievement sync not accepted for {} - not announcing", rsn);
+                return;
+            }
+            configManager.setConfiguration("droplogger", sigKey, sig);
+            clientThread.invokeLater(() -> client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+                "[" + getClanName() + "] Diaries & quests " + verb + " (" + diaryTotal + "/48 diaries, "
+                    + fComplete + " quests, " + fQp + " QP)", ""));
+            log.debug("Achievements {} for {}: {} diaries, {} quests, {} QP", verb, rsn, diaryTotal, fComplete, fQp);
+        });
     }
 
     /** Is one region's tier complete? (client thread; index into a DIARY_* varbit array) */
