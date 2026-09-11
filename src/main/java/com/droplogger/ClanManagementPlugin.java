@@ -26,6 +26,7 @@ import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.InventoryID;
 import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.Skill;
+import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.Item;
 import net.runelite.api.ItemComposition;
 import net.runelite.api.ItemContainer;
@@ -3086,14 +3087,46 @@ public class ClanManagementPlugin extends Plugin
     // seen (in a POH) persist a flag so it survives sessions; the rank snapshot reads it as an unlock.
     private static final int ORNATE_POOL_OBJECT_ID = 29241;
     private boolean seenOrnatePool;
+
+    /**
+     * Accounts that can stand in someone ELSE's house, where seeing a pool proves nothing about
+     * owning one. Solo irons (ironman / hardcore / ultimate) cannot enter another player's POH at
+     * all, so for them the sighting IS the proof and demanding build mode would be busywork.
+     * Group irons can visit their team's houses, and mains can visit anyone's, so both must prove it.
+     */
+    private boolean canEnterOtherPlayersHouses()
+    {
+        String type = readAccountType();
+        if (type == null) return true; // unknown: assume the permissive account, demand the proof
+        switch (type)
+        {
+            case "ironman":
+            case "hardcore":
+            case "ultimate":
+                return false;
+            default:
+                return true; // regular, gim, hcgim, unranked_gim
+        }
+    }
+
     @Subscribe
     public void onGameObjectSpawned(net.runelite.api.events.GameObjectSpawned event)
     {
-        if (!seenOrnatePool && event.getGameObject().getId() == ORNATE_POOL_OBJECT_ID)
+        if (seenOrnatePool || event.getGameObject().getId() != ORNATE_POOL_OBJECT_ID)
         {
-            seenOrnatePool = true;
-            try { configManager.setConfiguration("droplogger", "seenOrnatePool", true); } catch (Exception ignored) {}
+            return;
         }
+        // Build mode is only possible in your OWN house, so it is the one unambiguous proof of
+        // ownership. Required only for accounts that could be standing in someone else's house.
+        if (canEnterOtherPlayersHouses() && client.getVarbitValue(VarbitID.POH_BUILDING_MODE) != 1)
+        {
+            return;
+        }
+        seenOrnatePool = true;
+        // Deliberately a NEW config key. The old "seenOrnatePool" was set by seeing ANY pool in ANY
+        // house and persists forever, so reusing it would carry every existing false pass straight
+        // through this fix. Starting a fresh key makes everyone re-prove it.
+        try { configManager.setConfiguration("droplogger", "seenOwnOrnatePool", true); } catch (Exception ignored) {}
     }
 
     /** Build a snapshot of the local player's state for clan-rank validation. Client thread only.
@@ -3208,7 +3241,7 @@ public class ClanManagementPlugin extends Plugin
             }
         }
         // Ornate pool of Rejuvenation (persisted flag) proves the TzKal stat-restoration req.
-        if (seenOrnatePool || Boolean.TRUE.equals(configManager.getConfiguration("droplogger", "seenOrnatePool", Boolean.class)))
+        if (seenOrnatePool || Boolean.TRUE.equals(configManager.getConfiguration("droplogger", "seenOwnOrnatePool", Boolean.class)))
             s.unlocks.add("ornate pool");
         RankSystem.expandOwned(s.ownedItems); // own Ultor → Berserker ring (i) ticks, etc.
 
