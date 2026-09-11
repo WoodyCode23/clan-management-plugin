@@ -2,9 +2,11 @@ package com.droplogger;
 
 import com.google.inject.Provides;
 import lombok.extern.slf4j.Slf4j;
+import net.runelite.api.Actor;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
 import net.runelite.api.NPC;
+import net.runelite.api.NPCComposition;
 import net.runelite.api.Player;
 import net.runelite.api.clan.ClanChannel;
 import net.runelite.api.clan.ClanChannelMember;
@@ -15,6 +17,7 @@ import net.runelite.api.EnumComposition;
 import net.runelite.api.MenuAction;
 import net.runelite.api.StructComposition;
 import net.runelite.api.events.ActorDeath;
+import net.runelite.api.events.InteractingChanged;
 import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.ItemContainerChanged;
@@ -54,6 +57,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.reflect.TypeToken;
 
 import javax.inject.Inject;
+import java.lang.ref.WeakReference;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.FileReader;
@@ -350,6 +354,12 @@ public class ClanManagementPlugin extends Plugin
     private String lastKilledNpc = "Unknown";
     private int lastKillCount = 0;
     private long lastKillTime = 0;
+
+    // Death cause: the last actor we interacted with, used to name our killer. See identifyKiller().
+    private WeakReference<Actor> lastTarget = new WeakReference<>(null);
+    private static final String ATTACK_OPTION = "Attack";
+    // How far a boss may have drifted from our corpse and still be a believable killer.
+    private static final int KILLER_SEARCH_RADIUS = 15;
 
     private PbDetector pbDetector;
     private FightTracker fightTracker;
@@ -1209,6 +1219,9 @@ public class ClanManagementPlugin extends Plugin
     @Subscribe
     public void onActorDeath(ActorDeath event)
     {
+        // Whatever we were fighting is no longer a candidate killer once it is the one dying.
+        if (event.getActor() == lastTarget.get()) lastTarget = new WeakReference<>(null);
+
         if (!config.sendScreenshotsToDiscord()) return;
         if (client.getLocalPlayer() == null || event.getActor() != client.getLocalPlayer()) return;
         if (!isPlatformConfigured() || !localPlayerInClan()) return;
@@ -1216,9 +1229,94 @@ public class ClanManagementPlugin extends Plugin
         String rsn = client.getLocalPlayer().getName();
         if (rsn == null || rsn.isEmpty()) return;
 
+        // Resolve the killer NOW, on the client thread and on the death tick. The screenshot callback
+        // runs a frame later and off this thread, by which point the killer may have wandered off or
+        // despawned — and actor reads are client-thread-only anyway.
+        String cause = identifyKiller();
+
         withScreenshot(true, screenshot ->
             platformApiService.submitDeath(getPlatformUrl(), getPlatformKey(), getPlatformSlug(),
-                rsn, null, screenshot, config.deathPhrase()));
+                rsn, cause, screenshot, config.deathPhrase()));
+    }
+
+    /**
+     * Remember the last thing the player interacted with, so a death can name it. A WeakReference so
+     * remembering an actor never keeps a despawned NPC from being collected.
+     */
+    @Subscribe
+    public void onInteractingChanged(InteractingChanged event)
+    {
+        if (event.getSource() == client.getLocalPlayer() && event.getTarget() != null)
+        {
+            lastTarget = new WeakReference<>(event.getTarget());
+        }
+    }
+
+    /**
+     * Infer who killed us, following Dink's approach: prefer the last thing we interacted with while
+     * it is still targeting us, then anything attackable that is, then the last thing we fought if it
+     * is still nearby. Returns null rather than guessing, and the post then simply omits the cause.
+     * Client thread only.
+     */
+    private String identifyKiller()
+    {
+        Player me = client.getLocalPlayer();
+        if (me == null) return null;
+        Actor last = lastTarget.get();
+
+        // 1. What we were fighting, still on us. The common PvM case.
+        if (isKillerCandidate(me, last) && last.getInteracting() == me) return nameOf(last);
+
+        // 2. Anything attackable currently targeting us — covers dying to something we never clicked,
+        //    like an aggressive NPC or a second boss phase spawn.
+        for (NPC npc : client.getTopLevelWorldView().npcs())
+        {
+            if (npc.getInteracting() == me && isAttackableNpc(npc)) return nameOf(npc);
+        }
+
+        // 3. Some bosses drop their target on the tick they kill you, so fall back to the last thing
+        //    we fought while it is still in the room. Naming the boss you were standing on is right
+        //    far more often than it is wrong.
+        if (isAttackableNpc(last) && me.getWorldLocation() != null && last.getWorldLocation() != null
+            && last.getWorldLocation().distanceTo(me.getWorldLocation()) <= KILLER_SEARCH_RADIUS)
+        {
+            return nameOf(last);
+        }
+        return null;
+    }
+
+    /** An actor we would be willing to blame: an attackable NPC, or a player when PvP is possible. */
+    private boolean isKillerCandidate(Player me, Actor actor)
+    {
+        if (actor == null || actor == me) return false;
+        if (actor instanceof Player) return inPvpArea();
+        return isAttackableNpc(actor);
+    }
+
+    /** True for NPCs that can actually fight back, which filters out pets, shopkeepers and scenery. */
+    private boolean isAttackableNpc(Actor actor)
+    {
+        if (!(actor instanceof NPC)) return false;
+        NPCComposition comp = ((NPC) actor).getTransformedComposition();
+        if (comp == null) return false;
+        for (String action : comp.getActions())
+        {
+            if (ATTACK_OPTION.equals(action)) return true;
+        }
+        return false;
+    }
+
+    /** Only blame another player where one could actually have killed us. */
+    private boolean inPvpArea()
+    {
+        return client.getVarbitValue(VarbitID.INSIDE_WILDERNESS) > 0
+            || client.getWorldType().contains(WorldType.PVP);
+    }
+
+    private String nameOf(Actor actor)
+    {
+        String name = actor == null ? null : actor.getName();
+        return name == null || name.isEmpty() ? null : name;
     }
 
     @Subscribe
