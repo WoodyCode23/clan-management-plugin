@@ -1980,6 +1980,10 @@ public class ClanManagementPlugin extends Plugin
                 java.awt.Graphics2D g = copy.createGraphics();
                 g.drawImage(image, 0, 0, null);
                 g.dispose();
+                // Diagnostic: under the GPU renderer the frame handed to DrawManager does not always
+                // match the game canvas, which is how a dead black margin ends up in the shot.
+                log.debug("Screenshot frame {}x{}, canvas {}x{}",
+                    copy.getWidth(), copy.getHeight(), client.getCanvasWidth(), client.getCanvasHeight());
             }
             catch (Exception e)
             {
@@ -2012,11 +2016,27 @@ public class ClanManagementPlugin extends Plugin
                 String b64 = null;
                 try
                 {
+                    // Trim BEFORE redacting, and shift the rectangles to match. Trimming afterwards
+                    // would eat the bands we just painted black and leave the rest misaligned, since
+                    // the rectangles are in original-frame pixels.
+                    java.awt.Rectangle content = contentBounds(captured);
+                    BufferedImage framed = (content.x == 0 && content.y == 0
+                        && content.width == captured.getWidth() && content.height == captured.getHeight())
+                        ? captured
+                        : captured.getSubimage(content.x, content.y, content.width, content.height);
+
                     if (toRedact != null && !toRedact.isEmpty())
                     {
-                        blackOut(captured, toRedact);
+                        java.util.List<java.awt.Rectangle> shifted = new ArrayList<>();
+                        for (java.awt.Rectangle r : toRedact)
+                        {
+                            java.awt.Rectangle moved = new java.awt.Rectangle(r);
+                            moved.translate(-content.x, -content.y);
+                            shifted.add(moved);
+                        }
+                        blackOut(framed, shifted);
                     }
-                    b64 = encodePngWithinBudget(captured);
+                    b64 = encodePngWithinBudget(framed);
                 }
                 catch (Exception e) { log.warn("Screenshot encode failed", e); }
                 callback.accept(b64);
@@ -2272,6 +2292,52 @@ public class ClanManagementPlugin extends Plugin
      * budget do we step the whole frame down, always resampling from the original so repeated
      * steps do not compound blur. Returns null when even the smallest step will not fit.
      */
+    /**
+     * Encode thread. Drops dead black margins around the frame.
+     *
+     * Under the GPU renderer the buffer handed to DrawManager can be larger than the area the game
+     * actually draws into, leaving a solid black band (observed as the left third of a shot). It is
+     * not content, it is padding, and at native resolution it is both ugly and pure wasted payload
+     * on a path that already has size limits. Deliberately conservative: a band must be perfectly
+     * black (every channel zero) to count, and if trimming would remove more than half the frame we
+     * assume the detection is wrong and keep the original rather than mangle a genuinely dark scene.
+     */
+    private java.awt.Rectangle contentBounds(BufferedImage src)
+    {
+        final int w = src.getWidth();
+        final int h = src.getHeight();
+        int left = 0, right = w - 1, top = 0, bottom = h - 1;
+
+        while (left < right && columnIsBlack(src, left, h)) left++;
+        while (right > left && columnIsBlack(src, right, h)) right--;
+        while (top < bottom && rowIsBlack(src, top, w)) top++;
+        while (bottom > top && rowIsBlack(src, bottom, w)) bottom--;
+
+        int newW = right - left + 1;
+        int newH = bottom - top + 1;
+        if (newW == w && newH == h) return new java.awt.Rectangle(0, 0, w, h);
+        if ((long) newW * newH * 2 < (long) w * h)
+        {
+            log.debug("Screenshot black-margin trim skipped: {}x{} -> {}x{} would drop over half the frame",
+                w, h, newW, newH);
+            return new java.awt.Rectangle(0, 0, w, h);
+        }
+        log.debug("Screenshot trimming black margins: {}x{} -> {}x{} at ({},{})", w, h, newW, newH, left, top);
+        return new java.awt.Rectangle(left, top, newW, newH);
+    }
+
+    private static boolean columnIsBlack(BufferedImage img, int x, int h)
+    {
+        for (int y = 0; y < h; y++) if ((img.getRGB(x, y) & 0xFFFFFF) != 0) return false;
+        return true;
+    }
+
+    private static boolean rowIsBlack(BufferedImage img, int y, int w)
+    {
+        for (int x = 0; x < w; x++) if ((img.getRGB(x, y) & 0xFFFFFF) != 0) return false;
+        return true;
+    }
+
     private String encodePngWithinBudget(BufferedImage src) throws java.io.IOException
     {
         byte[] png = writePng(src);
