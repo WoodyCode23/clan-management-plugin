@@ -1933,10 +1933,31 @@ public class ClanManagementPlugin extends Plugin
         ));
     }
 
+    // The encoded PNG travels as base64 inside a JSON body, which inflates it by roughly a third,
+    // and Discord refuses attachments over 10MB. 7MB of PNG stays clear of both ceilings while
+    // still letting a 4K client through at native size in practice.
+    private static final int SCREENSHOT_MAX_PNG_BYTES = 7 * 1024 * 1024;
+    private static final double SCREENSHOT_FALLBACK_STEP = 0.75;
+    private static final int SCREENSHOT_MAX_FALLBACK_STEPS = 6;
+
+    // Chatbox widgets whose bounds together cover everything the chat interface draws: the message
+    // area, the tab strip and the input line. They are unioned rather than picked one-by-one so a
+    // layout difference between fixed and resizable mode cannot leave a strip of chat exposed.
+    private static final int[] CHATBOX_REGION_COMPONENTS = {
+        InterfaceID.Chatbox.UNIVERSE,
+        InterfaceID.Chatbox.CHAT_BACKGROUND,
+        InterfaceID.Chatbox.CHATAREA,
+        InterfaceID.Chatbox.CHATDISPLAY,
+        InterfaceID.Chatbox.SCROLLAREA,
+        InterfaceID.Chatbox.CONTROLS,
+        InterfaceID.Chatbox.INPUT,
+    };
+
     /**
-     * Capture the current game frame (when capture=true) and run the callback with a scaled PNG
-     * as base64 — or null when disabled / capture fails. Event-driven (no sleep): the frame
-     * listener fires on the next render, then encoding + the callback run off the client thread.
+     * Capture the current game frame (when capture=true) and run the callback with a PNG as
+     * base64, or null when disabled / capture fails / the player asked to hide chat and we could
+     * not locate it. Event-driven (no sleep): the frame listener fires on the next render, then
+     * redaction + encoding + the callback run off the client thread.
      * The screenshot is uploaded to OUR API only; the plugin never sends it to Discord.
      */
     private void withScreenshot(boolean capture, java.util.function.Consumer<String> callback)
@@ -1946,6 +1967,10 @@ public class ClanManagementPlugin extends Plugin
             executor.submit(() -> callback.accept(null));
             return;
         }
+        final ClanManagementConfig.ChatHideMode hideMode = config == null
+            ? ClanManagementConfig.ChatHideMode.NOTHING
+            : config.hideChatInScreenshots();
+
         drawManager.requestNextFrameListener(image ->
         {
             BufferedImage copy;
@@ -1962,33 +1987,321 @@ public class ClanManagementPlugin extends Plugin
                 executor.submit(() -> callback.accept(null));
                 return;
             }
+
+            // This listener runs on the client thread, so it is the ONLY place we may touch
+            // widgets or the message table. Everything below is resolved to plain rectangles
+            // here and handed to the executor, which never calls back into the client.
+            java.util.List<java.awt.Rectangle> redactions = null;
+            if (hideMode != ClanManagementConfig.ChatHideMode.NOTHING)
+            {
+                redactions = collectChatRedactions(hideMode, copy.getWidth(), copy.getHeight());
+                if (redactions == null)
+                {
+                    // Fail safe for a privacy setting: the player asked for chat to be hidden and
+                    // we cannot prove where it is, so post nothing rather than leak it.
+                    log.warn("Screenshot skipped: chat hiding is on but the chatbox could not be located");
+                    executor.submit(() -> callback.accept(null));
+                    return;
+                }
+            }
+
             final BufferedImage captured = copy;
+            final java.util.List<java.awt.Rectangle> toRedact = redactions;
             executor.submit(() ->
             {
                 String b64 = null;
-                try { b64 = encodeScaledPng(captured, 800); }
+                try
+                {
+                    if (toRedact != null && !toRedact.isEmpty())
+                    {
+                        blackOut(captured, toRedact);
+                    }
+                    b64 = encodePngWithinBudget(captured);
+                }
                 catch (Exception e) { log.warn("Screenshot encode failed", e); }
                 callback.accept(b64);
             });
         });
     }
 
-    private String encodeScaledPng(BufferedImage src, int maxWidth) throws java.io.IOException
+    /**
+     * Client thread only. Resolves the regions of the captured frame that must be blacked out,
+     * in captured-image pixels. Returns an empty list when there is nothing to hide, and null
+     * when the chat interface could not be resolved at all (the caller then drops the shot).
+     */
+    private java.util.List<java.awt.Rectangle> collectChatRedactions(ClanManagementConfig.ChatHideMode mode, int imageWidth, int imageHeight)
     {
-        BufferedImage img = src;
-        if (src.getWidth() > maxWidth)
+        if (client == null)
         {
-            int h = (int) ((double) src.getHeight() * maxWidth / src.getWidth());
-            BufferedImage scaled = new BufferedImage(maxWidth, h, BufferedImage.TYPE_INT_RGB);
+            return null;
+        }
+
+        // The GPU renderer hands DrawManager a framebuffer at the stretched size while widget
+        // bounds stay in game-canvas units, so every rectangle is rescaled by that ratio.
+        double scaleX = 1.0;
+        double scaleY = 1.0;
+        int canvasWidth = client.getCanvasWidth();
+        int canvasHeight = client.getCanvasHeight();
+        if (canvasWidth > 0 && canvasHeight > 0)
+        {
+            scaleX = (double) imageWidth / canvasWidth;
+            scaleY = (double) imageHeight / canvasHeight;
+        }
+
+        java.util.List<java.awt.Rectangle> out = new ArrayList<>();
+
+        // With "Split private chat" on, PMs render over the game view instead of in the chatbox,
+        // so this overlay has to be covered under both hide modes.
+        java.awt.Rectangle splitPms = visibleBounds(InterfaceID.PmChat.CONTAINER);
+        if (splitPms != null)
+        {
+            out.add(scaleRect(splitPms, scaleX, scaleY));
+        }
+
+        Widget chatRoot = client.getWidget(InterfaceID.Chatbox.UNIVERSE);
+        if (chatRoot == null)
+        {
+            return null; // interface not loaded: we cannot prove chat is absent
+        }
+        if (chatRoot.isHidden())
+        {
+            return out; // chatbox closed (resizable mode): nothing of it is in the frame
+        }
+
+        java.awt.Rectangle chatArea = chatboxBounds();
+        if (chatArea == null)
+        {
+            return null;
+        }
+
+        if (mode == ClanManagementConfig.ChatHideMode.ALL_CHAT)
+        {
+            out.add(scaleRect(chatArea, scaleX, scaleY));
+            return out;
+        }
+
+        Set<String> pmBodies = privateMessageBodies();
+        java.util.List<java.awt.Rectangle> pmLines = new ArrayList<>();
+        boolean readAnyLine = false;
+        for (int component = InterfaceID.Chatbox.LINE0; component <= InterfaceID.Chatbox.LINE499; component++)
+        {
+            Widget line = client.getWidget(component);
+            if (line == null || line.isHidden())
+            {
+                continue;
+            }
+            String text = line.getText();
+            if (text == null || text.isEmpty())
+            {
+                continue;
+            }
+            readAnyLine = true;
+            java.awt.Rectangle bounds = line.getBounds();
+            if (bounds == null || bounds.isEmpty())
+            {
+                continue;
+            }
+            // Lines scrolled out of the chat area still have bounds, so clip to what is on screen.
+            java.awt.Rectangle visible = bounds.intersection(chatArea);
+            if (visible.isEmpty())
+            {
+                continue;
+            }
+            if (isPrivateChatLine(Text.removeTags(text), pmBodies))
+            {
+                pmLines.add(scaleRect(visible, scaleX, scaleY));
+            }
+        }
+
+        if (!readAnyLine && !pmBodies.isEmpty())
+        {
+            // The client holds private messages but the line widgets moved or would not read.
+            // Hide the whole chatbox rather than guess which rows were the PMs.
+            out.add(scaleRect(chatArea, scaleX, scaleY));
+            return out;
+        }
+
+        out.addAll(pmLines);
+        return out;
+    }
+
+    /** Client thread only. Union of every chatbox region we can see, or null if none resolve. */
+    private java.awt.Rectangle chatboxBounds()
+    {
+        java.awt.Rectangle union = null;
+        for (int component : CHATBOX_REGION_COMPONENTS)
+        {
+            java.awt.Rectangle bounds = visibleBounds(component);
+            if (bounds == null)
+            {
+                continue;
+            }
+            union = union == null ? bounds : union.union(bounds);
+        }
+        return union;
+    }
+
+    /** Client thread only. Bounds of a component when it is loaded, shown and has real size. */
+    private java.awt.Rectangle visibleBounds(int component)
+    {
+        Widget widget = client.getWidget(component);
+        if (widget == null || widget.isHidden())
+        {
+            return null;
+        }
+        java.awt.Rectangle bounds = widget.getBounds();
+        return bounds == null || bounds.isEmpty() ? null : bounds;
+    }
+
+    /**
+     * Client thread only. Bodies of the private messages the client currently holds, tag-free.
+     * Used to catch the wrapped continuation rows of a long PM, which no longer carry the
+     * "From x:" / "To x:" prefix that identifies the first row.
+     */
+    private Set<String> privateMessageBodies()
+    {
+        Set<String> bodies = new HashSet<>();
+        net.runelite.api.IterableHashTable<net.runelite.api.MessageNode> messages = client.getMessages();
+        if (messages == null)
+        {
+            return bodies;
+        }
+        for (net.runelite.api.MessageNode node : messages)
+        {
+            if (node == null)
+            {
+                continue;
+            }
+            ChatMessageType type = node.getType();
+            if (type != ChatMessageType.PRIVATECHAT
+                && type != ChatMessageType.PRIVATECHATOUT
+                && type != ChatMessageType.MODPRIVATECHAT)
+            {
+                continue;
+            }
+            String value = node.getValue();
+            if (value == null)
+            {
+                continue;
+            }
+            String plain = Text.removeTags(value).trim();
+            if (plain.length() >= 3)
+            {
+                bodies.add(plain);
+            }
+        }
+        return bodies;
+    }
+
+    /**
+     * A chatbox PM always renders as "From Name: ..." or "To Name: ...". Matching that prefix is
+     * the only signal available on the widget itself; the message-body check behind it covers the
+     * wrapped rows. Both tests err towards hiding: a game line that happens to open with "To "
+     * gets covered too, which is the safe direction for a privacy setting.
+     */
+    private boolean isPrivateChatLine(String plain, Set<String> pmBodies)
+    {
+        String line = plain == null ? "" : plain.trim();
+        if (line.isEmpty())
+        {
+            return false;
+        }
+        // Drop a leading bracketed prefix first (chat timestamps, clan and friends-chat tags).
+        if (line.startsWith("["))
+        {
+            int close = line.indexOf(']');
+            if (close >= 0)
+            {
+                line = line.substring(close + 1).trim();
+            }
+        }
+        if (line.startsWith("From ") || line.startsWith("To "))
+        {
+            int colon = line.indexOf(':');
+            if (colon > 0 && colon <= 20)
+            {
+                return true;
+            }
+        }
+        if (line.length() >= 3)
+        {
+            for (String body : pmBodies)
+            {
+                if (body.contains(line))
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /** Encode thread. Paints the resolved regions out of our private copy of the frame. */
+    private void blackOut(BufferedImage image, java.util.List<java.awt.Rectangle> regions)
+    {
+        java.awt.Rectangle frame = new java.awt.Rectangle(0, 0, image.getWidth(), image.getHeight());
+        java.awt.Graphics2D g = image.createGraphics();
+        g.setColor(java.awt.Color.BLACK);
+        for (java.awt.Rectangle region : regions)
+        {
+            java.awt.Rectangle clipped = region.intersection(frame);
+            if (!clipped.isEmpty())
+            {
+                g.fillRect(clipped.x, clipped.y, clipped.width, clipped.height);
+            }
+        }
+        g.dispose();
+    }
+
+    private static java.awt.Rectangle scaleRect(java.awt.Rectangle r, double scaleX, double scaleY)
+    {
+        if (scaleX == 1.0 && scaleY == 1.0)
+        {
+            return r;
+        }
+        int x = (int) Math.floor(r.x * scaleX);
+        int y = (int) Math.floor(r.y * scaleY);
+        int w = (int) Math.ceil((r.x + r.width) * scaleX) - x;
+        int h = (int) Math.ceil((r.y + r.height) * scaleY) - y;
+        return new java.awt.Rectangle(x, y, w, h);
+    }
+
+    /**
+     * Encode thread. PNG at native resolution first, since anything smaller is where the old
+     * fixed 800px cap turned a high-DPI client into mush. Only if the result busts the byte
+     * budget do we step the whole frame down, always resampling from the original so repeated
+     * steps do not compound blur. Returns null when even the smallest step will not fit.
+     */
+    private String encodePngWithinBudget(BufferedImage src) throws java.io.IOException
+    {
+        byte[] png = writePng(src);
+        double scale = 1.0;
+        for (int step = 0; png.length > SCREENSHOT_MAX_PNG_BYTES && step < SCREENSHOT_MAX_FALLBACK_STEPS; step++)
+        {
+            scale *= SCREENSHOT_FALLBACK_STEP;
+            int w = Math.max(1, (int) Math.round(src.getWidth() * scale));
+            int h = Math.max(1, (int) Math.round(src.getHeight() * scale));
+            BufferedImage scaled = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
             java.awt.Graphics2D g = scaled.createGraphics();
             g.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION, java.awt.RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-            g.drawImage(src, 0, 0, maxWidth, h, null);
+            g.drawImage(src, 0, 0, w, h, null);
             g.dispose();
-            img = scaled;
+            png = writePng(scaled);
+            log.debug("Screenshot over budget, retried at {}x{} ({} bytes)", w, h, png.length);
         }
+        if (png.length > SCREENSHOT_MAX_PNG_BYTES)
+        {
+            log.warn("Screenshot dropped: still {} bytes after {} downscale steps", png.length, SCREENSHOT_MAX_FALLBACK_STEPS);
+            return null;
+        }
+        return java.util.Base64.getEncoder().encodeToString(png);
+    }
+
+    private static byte[] writePng(BufferedImage image) throws java.io.IOException
+    {
         java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
-        javax.imageio.ImageIO.write(img, "png", bos);
-        return java.util.Base64.getEncoder().encodeToString(bos.toByteArray());
+        javax.imageio.ImageIO.write(image, "png", bos);
+        return bos.toByteArray();
     }
 
     private void handleCollectionLogEntry(String cleanedMessage)
@@ -2076,9 +2389,18 @@ public class ClanManagementPlugin extends Plugin
                     itemName, unlockValue, unlockSource, unlockKc,
                     wp.getX(), wp.getY(), wp.getPlane(), playerName, unlockItemId
                 );
+                // Read the authoritative counts HERE, on the client thread, at the moment of the
+                // unlock. The game has already bumped varp 2943 by this point, so these include the
+                // slot being announced. They cannot be read inside the callback below: that runs off
+                // the client thread after the screenshot encodes, and varp reads are client-thread
+                // only. The server's stored counts are no substitute, they only refresh when the
+                // player opens their collection log, so a post would otherwise show a stale total.
+                final int liveClogObtained = client.getVarpValue(VARP_CLOG_OBTAINED);
+                final int liveClogTotal = client.getVarpValue(VARP_CLOG_TOTAL);
                 withScreenshot(true, screenshot ->
                     platformApiService.submitDrop(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), unlockDrop, screenshot,
-                        config.sendScreenshotsToDiscord(), config.dropPhrase(), true /* fromClog: post every clog unlock */));
+                        config.sendScreenshotsToDiscord(), config.dropPhrase(), true /* fromClog: post every clog unlock */,
+                        liveClogObtained, liveClogTotal));
                 log.debug("Clog-unlock drop logged: {} from {}", itemName, unlockSource);
             }
         }

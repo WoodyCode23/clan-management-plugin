@@ -70,13 +70,25 @@ public class PlatformApiService
     public void submitDrop(String baseUrl, String apiKey, String clanSlug, DropEntry drop, String screenshotB64,
                            boolean discordShare, String phrase)
     {
-        submitDrop(baseUrl, apiKey, clanSlug, drop, screenshotB64, discordShare, phrase, false);
+        submitDrop(baseUrl, apiKey, clanSlug, drop, screenshotB64, discordShare, phrase, false, 0, 0);
+    }
+
+    public void submitDrop(String baseUrl, String apiKey, String clanSlug, DropEntry drop, String screenshotB64,
+                           boolean discordShare, String phrase, boolean fromClog)
+    {
+        submitDrop(baseUrl, apiKey, clanSlug, drop, screenshotB64, discordShare, phrase, fromClog, 0, 0);
     }
 
     // fromClog = this "drop" is a collection-log unlock; the server posts it to the feed regardless
     // of its notable-value gate (every clog unlock is worth posting).
+    //
+    // clogObtained/clogTotal are the game's authoritative varp counts read at the MOMENT of the
+    // unlock. They matter because the stored counts on the server are only refreshed when the player
+    // opens their collection log, so without these the post would show a stale total that does not
+    // include the unlock being announced. Pass 0 when not applicable.
     public void submitDrop(String baseUrl, String apiKey, String clanSlug, DropEntry drop, String screenshotB64,
-                           boolean discordShare, String phrase, boolean fromClog)
+                           boolean discordShare, String phrase, boolean fromClog,
+                           int clogObtained, int clogTotal)
     {
         JsonObject payload = new JsonObject();
         payload.addProperty("rsn", drop.getPlayerName());
@@ -104,6 +116,8 @@ public class PlatformApiService
             payload.addProperty("phrase", phrase.trim());
         }
         if (fromClog) payload.addProperty("fromClog", true);
+        if (clogObtained > 0) payload.addProperty("clogObtained", clogObtained);
+        if (clogTotal > 0) payload.addProperty("clogTotal", clogTotal);
 
         postAsync(baseUrl + "/clans/" + clanSlug + "/drops", apiKey, payload, "Platform drop");
     }
