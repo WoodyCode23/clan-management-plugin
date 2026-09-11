@@ -2018,6 +2018,21 @@ public class PlatformApiService
 
     private void postAsync(String url, String apiKey, JsonObject payload, String label)
     {
+        postAsync(url, apiKey, payload, label, true);
+    }
+
+    /**
+     * retryWithoutScreenshot guards a single fallback attempt. A 413 means the body was too large
+     * for our API or something in front of it, and in practice that is always the screenshot: it is
+     * orders of magnitude bigger than the rest of the payload, and bigger again because it travels
+     * base64 inside JSON. The EVENT is what matters, so rather than lose the drop along with the
+     * picture, resend it without the image. Unlike Dink we cannot post straight to Discord (the
+     * Plugin Hub forbids the plugin holding webhook URLs), so our payload crosses an extra hop with
+     * its own size ceiling, and this is the seam where that difference bites.
+     */
+    private void postAsync(String url, String apiKey, JsonObject payload, String label,
+                           boolean retryWithoutScreenshot)
+    {
         RequestBody body = RequestBody.create(JSON, gson.toJson(payload));
         Request request = new Request.Builder()
             .url(url)
@@ -2041,6 +2056,14 @@ public class PlatformApiService
                 if (response.isSuccessful())
                 {
                     log.debug("{} submitted successfully", label);
+                }
+                else if (response.code() == 413 && retryWithoutScreenshot && payload.has("screenshot"))
+                {
+                    JsonObject slim = payload.deepCopy();
+                    slim.remove("screenshot");
+                    log.warn("{} rejected as too large ({}); resubmitting without the screenshot so the event is still recorded",
+                        label, response.code());
+                    postAsync(url, apiKey, slim, label + " (no screenshot)", false);
                 }
                 else
                 {
