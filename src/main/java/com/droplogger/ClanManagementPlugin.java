@@ -2347,13 +2347,18 @@ public class ClanManagementPlugin extends Plugin
                     itemName, unlockValue, unlockSource, unlockKc,
                     wp.getX(), wp.getY(), wp.getPlane(), playerName, unlockItemId
                 );
-                // Read the authoritative counts HERE, on the client thread, at the moment of the
-                // unlock. The game has already bumped varp 2943 by this point, so these include the
-                // slot being announced. They cannot be read inside the callback below: that runs off
-                // the client thread after the screenshot encodes, and varp reads are client-thread
-                // only. The server's stored counts are no substitute, they only refresh when the
-                // player opens their collection log, so a post would otherwise show a stale total.
-                final int liveClogObtained = client.getVarpValue(VARP_CLOG_OBTAINED);
+                // Read the authoritative counts HERE, on the client thread. They cannot be read in
+                // the callback below: that runs off the client thread after the screenshot encodes,
+                // and varp reads are client-thread only. The server's stored counts are no
+                // substitute either, they only refresh when the player opens their collection log,
+                // so a post would otherwise show a stale total.
+                //
+                // The +1 is not a fudge. We detect the unlock from its CHAT MESSAGE, and the game
+                // has not incremented varp 2943 yet at that point, so reading it here returns the
+                // count from BEFORE this slot. Observed consistently: posts read exactly one short.
+                // Guarded on > 0 so an unavailable varp stays unavailable instead of becoming 1.
+                final int rawClogObtained = client.getVarpValue(VARP_CLOG_OBTAINED);
+                final int liveClogObtained = rawClogObtained > 0 ? rawClogObtained + 1 : 0;
                 final int liveClogTotal = client.getVarpValue(VARP_CLOG_TOTAL);
                 withScreenshot(true, screenshot ->
                     platformApiService.submitDrop(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), unlockDrop, screenshot,
