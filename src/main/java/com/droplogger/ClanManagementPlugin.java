@@ -1939,25 +1939,14 @@ public class ClanManagementPlugin extends Plugin
     private static final int SCREENSHOT_MAX_PNG_BYTES = 7 * 1024 * 1024;
     private static final double SCREENSHOT_FALLBACK_STEP = 0.75;
     private static final int SCREENSHOT_MAX_FALLBACK_STEPS = 6;
-
-    // Chatbox widgets whose bounds together cover everything the chat interface draws: the message
-    // area, the tab strip and the input line. They are unioned rather than picked one-by-one so a
-    // layout difference between fixed and resizable mode cannot leave a strip of chat exposed.
-    private static final int[] CHATBOX_REGION_COMPONENTS = {
-        InterfaceID.Chatbox.UNIVERSE,
-        InterfaceID.Chatbox.CHAT_BACKGROUND,
-        InterfaceID.Chatbox.CHATAREA,
-        InterfaceID.Chatbox.CHATDISPLAY,
-        InterfaceID.Chatbox.SCROLLAREA,
-        InterfaceID.Chatbox.CONTROLS,
-        InterfaceID.Chatbox.INPUT,
-    };
-
     /**
      * Capture the current game frame (when capture=true) and run the callback with a PNG as
-     * base64, or null when disabled / capture fails / the player asked to hide chat and we could
-     * not locate it. Event-driven (no sleep): the frame listener fires on the next render, then
-     * redaction + encoding + the callback run off the client thread.
+     * base64, or null when disabled or capture fails. Event-driven (no sleep): the frame listener
+     * fires on the next render, then encoding and the callback run off the client thread.
+     *
+     * Chat hiding works by hiding the chat widgets before the frame is drawn and restoring them as
+     * soon as it has been, so the game renders a clean shot. An earlier version painted black boxes
+     * over the captured image instead, which read as censorship bars.
      * The screenshot is uploaded to OUR API only; the plugin never sends it to Discord.
      */
     private void withScreenshot(boolean capture, java.util.function.Consumer<String> callback)
@@ -1971,8 +1960,22 @@ public class ClanManagementPlugin extends Plugin
             ? ClanManagementConfig.ChatHideMode.NOTHING
             : config.hideChatInScreenshots();
 
+        // Hide the chat widgets BEFORE the frame is drawn, so the game simply renders without them
+        // and the shot comes out clean. Painting black boxes over the captured image afterwards
+        // "works" but looks like censorship bars, which is what this replaced. Same approach the
+        // discord-screenshot plugin uses. Must run on the client thread, which is where every caller
+        // of withScreenshot already is (chat/event handlers).
+        final java.util.List<Widget> hidden = hideChatWidgets(hideMode);
+
         drawManager.requestNextFrameListener(image ->
         {
+            // Restore first: the frame we were promised has already been rendered by the time this
+            // fires, so the player gets their chat back immediately rather than after the upload.
+            for (Widget w : hidden)
+            {
+                w.setHidden(false);
+            }
+
             BufferedImage copy;
             try
             {
@@ -1992,50 +1995,20 @@ public class ClanManagementPlugin extends Plugin
                 return;
             }
 
-            // This listener runs on the client thread, so it is the ONLY place we may touch
-            // widgets or the message table. Everything below is resolved to plain rectangles
-            // here and handed to the executor, which never calls back into the client.
-            java.util.List<java.awt.Rectangle> redactions = null;
-            if (hideMode != ClanManagementConfig.ChatHideMode.NOTHING)
-            {
-                redactions = collectChatRedactions(hideMode, copy.getWidth(), copy.getHeight());
-                if (redactions == null)
-                {
-                    // Fail safe for a privacy setting: the player asked for chat to be hidden and
-                    // we cannot prove where it is, so post nothing rather than leak it.
-                    log.warn("Screenshot skipped: chat hiding is on but the chatbox could not be located");
-                    executor.submit(() -> callback.accept(null));
-                    return;
-                }
-            }
-
             final BufferedImage captured = copy;
-            final java.util.List<java.awt.Rectangle> toRedact = redactions;
             executor.submit(() ->
             {
                 String b64 = null;
                 try
                 {
-                    // Trim BEFORE redacting, and shift the rectangles to match. Trimming afterwards
-                    // would eat the bands we just painted black and leave the rest misaligned, since
-                    // the rectangles are in original-frame pixels.
+                    // Chat was already removed by hiding its widgets before the frame rendered, so
+                    // there is nothing to paint over here. All that remains is dropping any dead
+                    // black margin the GPU renderer padded the buffer with.
                     java.awt.Rectangle content = contentBounds(captured);
                     BufferedImage framed = (content.x == 0 && content.y == 0
                         && content.width == captured.getWidth() && content.height == captured.getHeight())
                         ? captured
                         : captured.getSubimage(content.x, content.y, content.width, content.height);
-
-                    if (toRedact != null && !toRedact.isEmpty())
-                    {
-                        java.util.List<java.awt.Rectangle> shifted = new ArrayList<>();
-                        for (java.awt.Rectangle r : toRedact)
-                        {
-                            java.awt.Rectangle moved = new java.awt.Rectangle(r);
-                            moved.translate(-content.x, -content.y);
-                            shifted.add(moved);
-                        }
-                        blackOut(framed, shifted);
-                    }
                     b64 = encodePngWithinBudget(framed);
                 }
                 catch (Exception e) { log.warn("Screenshot encode failed", e); }
@@ -2049,60 +2022,62 @@ public class ClanManagementPlugin extends Plugin
      * in captured-image pixels. Returns an empty list when there is nothing to hide, and null
      * when the chat interface could not be resolved at all (the caller then drops the shot).
      */
-    private java.util.List<java.awt.Rectangle> collectChatRedactions(ClanManagementConfig.ChatHideMode mode, int imageWidth, int imageHeight)
+    /**
+     * Client thread only. Hides the chat widgets the mode asks for and returns exactly what was
+     * hidden so the caller can put it back. Returns an empty list for NOTHING, or when the widgets
+     * are not present (chatbox closed in resizable mode), which is the correct no-op: if the chatbox
+     * is not rendered there is nothing in the frame to hide.
+     *
+     * JUST_PMS has a real limitation worth knowing: it can only remove private messages cleanly when
+     * SPLIT private chat is on, because that renders them in their own widget. With split chat off,
+     * PMs are interleaved with public and clan lines inside the shared chatbox, so individual PM
+     * line widgets are hidden instead, which removes the text but leaves the row's gap.
+     */
+    private java.util.List<Widget> hideChatWidgets(ClanManagementConfig.ChatHideMode mode)
     {
-        if (client == null)
+        java.util.List<Widget> hidden = new ArrayList<>();
+        if (mode == ClanManagementConfig.ChatHideMode.NOTHING || client == null)
         {
-            return null;
+            return hidden;
         }
 
-        // The GPU renderer hands DrawManager a framebuffer at the stretched size while widget
-        // bounds stay in game-canvas units, so every rectangle is rescaled by that ratio.
-        double scaleX = 1.0;
-        double scaleY = 1.0;
-        int canvasWidth = client.getCanvasWidth();
-        int canvasHeight = client.getCanvasHeight();
-        if (canvasWidth > 0 && canvasHeight > 0)
+        // Split private chat renders over the game view, outside the chatbox, so it has to go under
+        // both modes: it is the most sensitive thing on screen and the easiest to miss.
+        Widget splitPms = client.getWidget(InterfaceID.PmChat.CONTAINER);
+        if (splitPms != null && !splitPms.isHidden())
         {
-            scaleX = (double) imageWidth / canvasWidth;
-            scaleY = (double) imageHeight / canvasHeight;
-        }
-
-        java.util.List<java.awt.Rectangle> out = new ArrayList<>();
-
-        // With "Split private chat" on, PMs render over the game view instead of in the chatbox,
-        // so this overlay has to be covered under both hide modes.
-        java.awt.Rectangle splitPms = visibleBounds(InterfaceID.PmChat.CONTAINER);
-        if (splitPms != null)
-        {
-            out.add(scaleRect(splitPms, scaleX, scaleY));
-        }
-
-        Widget chatRoot = client.getWidget(InterfaceID.Chatbox.UNIVERSE);
-        if (chatRoot == null)
-        {
-            return null; // interface not loaded: we cannot prove chat is absent
-        }
-        if (chatRoot.isHidden())
-        {
-            return out; // chatbox closed (resizable mode): nothing of it is in the frame
-        }
-
-        java.awt.Rectangle chatArea = chatboxBounds();
-        if (chatArea == null)
-        {
-            return null;
+            splitPms.setHidden(true);
+            hidden.add(splitPms);
         }
 
         if (mode == ClanManagementConfig.ChatHideMode.ALL_CHAT)
         {
-            out.add(scaleRect(chatArea, scaleX, scaleY));
-            return out;
+            Widget chat = client.getWidget(InterfaceID.Chatbox.CHATDISPLAY);
+            if (chat != null && !chat.isHidden())
+            {
+                chat.setHidden(true);
+                hidden.add(chat);
+            }
+            return hidden;
         }
 
+        // JUST_PMS with split chat off: hide only the lines that are private messages.
+        for (Widget line : privateMessageLineWidgets())
+        {
+            if (!line.isHidden())
+            {
+                line.setHidden(true);
+                hidden.add(line);
+            }
+        }
+        return hidden;
+    }
+
+    /** Client thread only. The chatbox line widgets that are private messages. */
+    private java.util.List<Widget> privateMessageLineWidgets()
+    {
+        java.util.List<Widget> out = new ArrayList<>();
         Set<String> pmBodies = privateMessageBodies();
-        java.util.List<java.awt.Rectangle> pmLines = new ArrayList<>();
-        boolean readAnyLine = false;
         for (int component = InterfaceID.Chatbox.LINE0; component <= InterfaceID.Chatbox.LINE499; component++)
         {
             Widget line = client.getWidget(component);
@@ -2115,69 +2090,14 @@ public class ClanManagementPlugin extends Plugin
             {
                 continue;
             }
-            readAnyLine = true;
-            java.awt.Rectangle bounds = line.getBounds();
-            if (bounds == null || bounds.isEmpty())
-            {
-                continue;
-            }
-            // Lines scrolled out of the chat area still have bounds, so clip to what is on screen.
-            java.awt.Rectangle visible = bounds.intersection(chatArea);
-            if (visible.isEmpty())
-            {
-                continue;
-            }
             if (isPrivateChatLine(Text.removeTags(text), pmBodies))
             {
-                pmLines.add(scaleRect(visible, scaleX, scaleY));
+                out.add(line);
             }
         }
-
-        if (!readAnyLine && !pmBodies.isEmpty())
-        {
-            // The client holds private messages but the line widgets moved or would not read.
-            // Hide the whole chatbox rather than guess which rows were the PMs.
-            out.add(scaleRect(chatArea, scaleX, scaleY));
-            return out;
-        }
-
-        out.addAll(pmLines);
         return out;
     }
 
-    /** Client thread only. Union of every chatbox region we can see, or null if none resolve. */
-    private java.awt.Rectangle chatboxBounds()
-    {
-        java.awt.Rectangle union = null;
-        for (int component : CHATBOX_REGION_COMPONENTS)
-        {
-            java.awt.Rectangle bounds = visibleBounds(component);
-            if (bounds == null)
-            {
-                continue;
-            }
-            union = union == null ? bounds : union.union(bounds);
-        }
-        return union;
-    }
-
-    /** Client thread only. Bounds of a component when it is loaded, shown and has real size. */
-    private java.awt.Rectangle visibleBounds(int component)
-    {
-        Widget widget = client.getWidget(component);
-        if (widget == null || widget.isHidden())
-        {
-            return null;
-        }
-        java.awt.Rectangle bounds = widget.getBounds();
-        return bounds == null || bounds.isEmpty() ? null : bounds;
-    }
-
-    /**
-     * Client thread only. Bodies of the private messages the client currently holds, tag-free.
-     * Used to catch the wrapped continuation rows of a long PM, which no longer carry the
-     * "From x:" / "To x:" prefix that identifies the first row.
-     */
     private Set<String> privateMessageBodies()
     {
         Set<String> bodies = new HashSet<>();
@@ -2257,34 +2177,6 @@ public class ClanManagementPlugin extends Plugin
     }
 
     /** Encode thread. Paints the resolved regions out of our private copy of the frame. */
-    private void blackOut(BufferedImage image, java.util.List<java.awt.Rectangle> regions)
-    {
-        java.awt.Rectangle frame = new java.awt.Rectangle(0, 0, image.getWidth(), image.getHeight());
-        java.awt.Graphics2D g = image.createGraphics();
-        g.setColor(java.awt.Color.BLACK);
-        for (java.awt.Rectangle region : regions)
-        {
-            java.awt.Rectangle clipped = region.intersection(frame);
-            if (!clipped.isEmpty())
-            {
-                g.fillRect(clipped.x, clipped.y, clipped.width, clipped.height);
-            }
-        }
-        g.dispose();
-    }
-
-    private static java.awt.Rectangle scaleRect(java.awt.Rectangle r, double scaleX, double scaleY)
-    {
-        if (scaleX == 1.0 && scaleY == 1.0)
-        {
-            return r;
-        }
-        int x = (int) Math.floor(r.x * scaleX);
-        int y = (int) Math.floor(r.y * scaleY);
-        int w = (int) Math.ceil((r.x + r.width) * scaleX) - x;
-        int h = (int) Math.ceil((r.y + r.height) * scaleY) - y;
-        return new java.awt.Rectangle(x, y, w, h);
-    }
 
     /**
      * Encode thread. PNG at native resolution first, since anything smaller is where the old
