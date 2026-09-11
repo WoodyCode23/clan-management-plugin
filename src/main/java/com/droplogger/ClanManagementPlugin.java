@@ -3733,6 +3733,12 @@ public class ClanManagementPlugin extends Plugin
 
     private void refreshEventLeaderboard()
     {
+        // Re-read which event is live on every cycle, not just at login. These fields are otherwise
+        // only populated by the bootstrap call, so a client that was already running when an event
+        // started never learned about it and sat on an empty board for the whole week. Cheap: the
+        // active-event endpoint is public and we are about to call the API for the board anyway.
+        refreshActiveEventFromServer();
+
         if (activeEventType.isEmpty() || activeEventMetric.isEmpty())
         {
             panel.updateActiveEvent(null, null, null, null);
@@ -3752,6 +3758,43 @@ public class ClanManagementPlugin extends Plugin
             log.debug("Failed to fetch event leaderboard", e);
             panel.updateActiveEvent(activeEventType, activeEventDisplayName, activeEventEndTime, null);
             if (adminPanel != null) adminPanel.setActiveEvent(activeEventType, activeEventDisplayName, activeEventEndTime);
+        }
+    }
+
+    /**
+     * Refresh which event is currently live. Mirrors the assignment the bootstrap response does, so
+     * an event that starts (or ends) mid-session is picked up on the normal refresh cycle instead of
+     * requiring a client restart. Failure leaves the previous values alone: a transient API blip
+     * should not blank a live event off the panel.
+     */
+    private void refreshActiveEventFromServer()
+    {
+        try
+        {
+            JsonObject root = platformApiService.fetchActiveEvent(getPlatformUrl(), getPlatformKey(), getPlatformSlug());
+            if (root == null) return;
+            if (root.has("event") && !root.get("event").isJsonNull())
+            {
+                JsonObject event = root.getAsJsonObject("event");
+                activeEventType = event.has("type") ? event.get("type").getAsString() : "";
+                activeEventMetric = event.has("metric") ? event.get("metric").getAsString() : "";
+                activeEventDisplayName = event.has("displayName") ? event.get("displayName").getAsString() : "";
+                activeEventEndTime = event.has("endTime") ? event.get("endTime").getAsString() : "";
+                activeEventId = event.has("id") ? event.get("id").getAsString() : "";
+            }
+            else
+            {
+                // Explicitly cleared: the event ended, so stop showing its board.
+                activeEventType = "";
+                activeEventMetric = "";
+                activeEventDisplayName = "";
+                activeEventEndTime = "";
+                activeEventId = "";
+            }
+        }
+        catch (Exception e)
+        {
+            log.debug("Failed to refresh active event", e);
         }
     }
 
