@@ -5572,7 +5572,11 @@ public class ClanPanel extends PluginPanel
                 womBossMode = boss;
                 populateWomMetricCombo();
                 lastWomEntries = null;
-                renderWomLeaderboard();
+                // Fetch rather than just re-render. Dropping the cache is right (those rows belong to
+                // the mode we left and would be relabelled with the wrong unit), but rendering an
+                // empty cache would land the user on "No data available" and make them hit refresh
+                // by hand every single time they switch boards.
+                triggerWomFetch();
             }
             ((CardLayout) cards.getLayout()).show(cards, "XP");
             return;
