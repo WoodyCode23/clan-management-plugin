@@ -209,7 +209,9 @@ public class ClanPanel extends PluginPanel
     private final JComboBox<String> womPeriodCombo = new JComboBox<>(new String[]{"Day", "Week", "Month", "Year", "All-Time"});
     // Gained = the current rolling window; Records = best-ever gain in that window (WOM records)
     private final JComboBox<String> womViewCombo = new JComboBox<>(new String[]{"Gained", "Records"});
-    private final JComboBox<String> womModeCombo = new JComboBox<>(new String[]{"Skills", "Boss KC"});
+    // Skills vs Boss KC is owned by the top-level Leaderboards selector, not by a control inside the
+    // card: two dropdowns could disagree, and a board labelled "XP" then rendered kill counts as xp.
+    private boolean womBossMode = false;
     private java.util.function.BiConsumer<String, String> onFetchWomData;
     // Cached XP/KC board so the game-mode filter can re-render it client-side.
     private java.util.List<LeaderboardEntry> lastWomEntries = null;
@@ -262,7 +264,7 @@ public class ClanPanel extends PluginPanel
     private void populateWomMetricCombo()
     {
         womMetricCombo.removeAllItems();
-        if ("Boss KC".equals(womModeCombo.getSelectedItem()))
+        if (womBossMode)
         {
             for (String label : WOM_BOSS_METRICS.keySet()) womMetricCombo.addItem(label);
         }
@@ -1132,9 +1134,12 @@ public class ClanPanel extends PluginPanel
             membersContent.add(clogNote(flavour + "  ·  shared profile"));
             membersContent.add(Box.createVerticalStrut(6));
 
-            // Combined totals
-            membersContent.add(clogNote(tp.clogUnion + " combined clog  ·  "
-                + formatXp(tp.totalExp) + " total XP  ·  " + String.format("%,.0f", tp.totalEhb) + " EHB"));
+            // Combined totals. Wrapped html: three whole-number stats on one line run past the
+            // side panel, so let them flow onto a second line rather than clipping the last one.
+            membersContent.add(clogNote("<html><div style='width:" + STANDINGS_TEXT_WIDTH + "px'>"
+                + tp.clogUnion + " combined clog  ·  "
+                + formatXp(tp.totalExp) + " total XP  ·  " + String.format("%,.0f", tp.totalEhb)
+                + " EHB</div></html>"));
             membersContent.add(Box.createVerticalStrut(8));
 
             // Accounts
@@ -1153,7 +1158,10 @@ public class ClanPanel extends PluginPanel
                 // A member keeps the team's flavour helm (they're all that GIM type).
                 javax.swing.ImageIcon mh = accountTypeIcon("custom".equals(tp.kind) ? m.accountType : tp.kind);
                 if (mh != null) { n.setIcon(mh); n.setIconTextGap(4); }
-                row.add(n, BorderLayout.WEST);
+                // CENTER, not WEST: a whole-number XP total is wide, and BorderLayout would let an
+                // EAST label overlap a WEST one. In CENTER the name ellipsises and keeps its tooltip.
+                n.setToolTipText(m.rsn);
+                row.add(n, BorderLayout.CENTER);
                 JLabel stat = new JLabel(formatXp(m.exp) + " xp"
                     + (m.ehb != null ? "  ·  " + String.format("%,.0f", m.ehb) + " ehb" : ""));
                 stat.setFont(READABLE_FONT_SMALL);
@@ -4071,8 +4079,7 @@ public class ClanPanel extends PluginPanel
     {
         if ("skill".equals(type))
         {
-            return score >= 1_000_000 ? String.format("%.1fM xp", score / 1_000_000.0)
-                : String.format("%,dk xp", score / 1000);
+            return String.format("%,d xp", score);
         }
         return String.format("%,d kc", score);
     }
@@ -4414,10 +4421,11 @@ public class ClanPanel extends PluginPanel
             @Override
             public void mouseClicked(MouseEvent e)
             {
-                // Speed Times / Drops / XP now live inside the Leaderboards tab — open it and
-                // switch the sub-view instead of looking for a top-level tab that no longer exists.
+                // Speed Times / Drops / XP / Boss KC now live inside the Leaderboards tab, so open it
+                // and switch the sub-view instead of looking for a top-level tab that no longer exists.
                 if (leaderboardsSelector != null
-                    && ("Speed Times".equals(tabName) || "Drops".equals(tabName) || "XP".equals(tabName)))
+                    && ("Speed Times".equals(tabName) || "Drops".equals(tabName)
+                        || "XP".equals(tabName) || "Boss KC".equals(tabName)))
                 {
                     int lb = tabbedPane.indexOfTab("Leaderboards");
                     if (lb >= 0) tabbedPane.setSelectedIndex(lb);
@@ -4829,25 +4837,23 @@ public class ClanPanel extends PluginPanel
         refreshBtn.setFont(refreshBtn.getFont().deriveFont(12f));
         refreshBtn.setMargin(new Insets(0, 4, 0, 4));
         refreshBtn.setFocusPainted(false);
-        refreshBtn.setToolTipText("Refresh XP data");
+        refreshBtn.setToolTipText("Refresh leaderboard data");
         refreshBtn.addActionListener(e -> triggerWomFetch());
         titleRow.add(refreshBtn, BorderLayout.EAST);
         wrapper.add(titleRow);
         wrapper.add(Box.createVerticalStrut(6));
 
-        // Row 1: Mode + Skill (2 columns)
-        JPanel row1 = new JPanel(new GridLayout(1, 2, 4, 0));
+        // Row 1: the metric picker. The Skills/Boss KC mode lives in the top-level Leaderboards
+        // selector, so this card carries no second control that could contradict it.
+        JPanel row1 = new JPanel(new GridLayout(1, 1, 4, 0));
         row1.setBackground(ColorScheme.DARK_GRAY_COLOR);
         row1.setAlignmentX(Component.LEFT_ALIGNMENT);
         row1.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
 
-        womModeCombo.setFont(READABLE_FONT_SMALL);
-        womModeCombo.addActionListener(e -> populateWomMetricCombo());
         populateWomMetricCombo();
         womMetricCombo.setFont(READABLE_FONT_SMALL);
         womMetricCombo.setRenderer(new SkillComboRenderer());
 
-        row1.add(womModeCombo);
         row1.add(womMetricCombo);
         wrapper.add(row1);
         wrapper.add(Box.createVerticalStrut(4));
@@ -4903,7 +4909,7 @@ public class ClanPanel extends PluginPanel
 
         String selected = (String) womMetricCombo.getSelectedItem();
         if (selected == null) return;
-        String metric = "Boss KC".equals(womModeCombo.getSelectedItem())
+        String metric = womBossMode
             ? "boss:" + WOM_BOSS_METRICS.getOrDefault(selected, selected.toLowerCase())
             : selected.toLowerCase();
         String period = ((String) womPeriodCombo.getSelectedItem()).toLowerCase();
@@ -5004,22 +5010,28 @@ public class ClanPanel extends PluginPanel
             leftPanel.add(iconLabel);
         }
 
+        row.add(leftPanel, BorderLayout.WEST);
+
+        // The name sits in CENTER, not WEST: BorderLayout hands CENTER whatever is left over, so a
+        // long whole-number value shortens the name to an ellipsis (tooltip keeps it readable)
+        // instead of the two labels overlapping in the narrow side panel.
         JLabel nameLabel = new JLabel(entry.username);
         nameLabel.setFont(READABLE_FONT);
         nameLabel.setForeground(Color.WHITE);
-        leftPanel.add(nameLabel);
+        nameLabel.setToolTipText(entry.username);
+        nameLabel.setBorder(new EmptyBorder(0, 2, 0, 0));
+        row.add(nameLabel, BorderLayout.CENTER);
 
-        row.add(leftPanel, BorderLayout.WEST);
-
-        // Right: XP value
+        // Right: the tracked value. Boss boards count kills, so they must not be labelled xp.
+        String unit = womBossMode ? " kc" : " xp";
         String xpText;
         if (isGained)
         {
-            xpText = "+" + formatXp(entry.gained) + " xp";
+            xpText = "+" + formatXp(entry.gained) + unit;
         }
         else
         {
-            xpText = formatXp(entry.experience) + " xp";
+            xpText = formatXp(entry.experience) + unit;
             if (entry.level > 0) xpText = "Lvl " + entry.level + " | " + xpText;
         }
 
@@ -5031,12 +5043,10 @@ public class ClanPanel extends PluginPanel
         return row;
     }
 
+    /** Whole numbers with thousands separators: members asked for "1,300 xp", not "1.3K xp". */
     private String formatXp(long xp)
     {
-        if (xp >= 1_000_000_000) return String.format("%.1fB", xp / 1_000_000_000.0);
-        if (xp >= 1_000_000) return String.format("%.1fM", xp / 1_000_000.0);
-        if (xp >= 1_000) return String.format("%.1fK", xp / 1_000.0);
-        return String.valueOf(xp);
+        return String.format("%,d", xp);
     }
 
     /** Custom renderer for skill combo box — shows skill icon + name. */
@@ -5498,9 +5508,9 @@ public class ClanPanel extends PluginPanel
     }
 
     /**
-     * Leaderboards hub: a selector at the top swaps between the Speed Times, Drops and XP views
-     * (each unchanged) via a CardLayout — three former top-level tabs folded into one, matching the
-     * website's condensed nav.
+     * Leaderboards hub: a selector at the top swaps between the Speed Times, Drops, XP and Boss KC
+     * views via a CardLayout. XP and Boss KC share one card (the WOM board); the selector is the
+     * only thing that decides which mode that card renders.
      */
     private JComponent buildLeaderboardsTab()
     {
@@ -5513,10 +5523,9 @@ public class ClanPanel extends PluginPanel
         cards.add(buildDropsTab(), "Drops");
         cards.add(buildWomTab(), "XP");
 
-        JComboBox<String> selector = new JComboBox<>(new String[]{ "Drops", "Speed Times", "XP" });
+        JComboBox<String> selector = new JComboBox<>(new String[]{ "Drops", "Speed Times", "XP", "Boss KC" });
         selector.setFocusable(false);
-        selector.addActionListener(e ->
-            ((CardLayout) cards.getLayout()).show(cards, (String) selector.getSelectedItem()));
+        selector.addActionListener(e -> showLeaderboardCard(cards, (String) selector.getSelectedItem()));
         leaderboardsSelector = selector;
         // Default the hub to Drops (selecting it also shows the matching card via the listener).
         selector.setSelectedItem("Drops");
@@ -5548,12 +5557,35 @@ public class ClanPanel extends PluginPanel
         return container;
     }
 
+    /**
+     * Show the card for a top-level selection. "XP" and "Boss KC" are the same card in two modes, so
+     * the pick also drives the metric list; cached rows are dropped because they belong to the mode
+     * we are leaving and would otherwise be relabelled with the wrong unit.
+     */
+    private void showLeaderboardCard(JPanel cards, String sel)
+    {
+        boolean boss = "Boss KC".equals(sel);
+        if (boss || "XP".equals(sel))
+        {
+            if (womBossMode != boss)
+            {
+                womBossMode = boss;
+                populateWomMetricCombo();
+                lastWomEntries = null;
+                renderWomLeaderboard();
+            }
+            ((CardLayout) cards.getLayout()).show(cards, "XP");
+            return;
+        }
+        ((CardLayout) cards.getLayout()).show(cards, sel);
+    }
+
     /** Re-render whichever leaderboard board is currently showing (used on game-mode filter change). */
     private void reRenderActiveBoard()
     {
         String sel = leaderboardsSelector != null ? (String) leaderboardsSelector.getSelectedItem() : null;
         if ("Drops".equals(sel)) renderDropsLeaderboard();
-        else if ("XP".equals(sel)) renderWomLeaderboard();
+        else if ("XP".equals(sel) || "Boss KC".equals(sel)) renderWomLeaderboard();
         else renderTimesFiltered(); // Speed Times has no per-account type; render is a safe no-op filter
     }
 
@@ -6417,13 +6449,17 @@ public class ClanPanel extends PluginPanel
                     });
                     row.add(nameLabel, BorderLayout.WEST);
 
+                    // The GP column is a fixed 46px (see dropsStatsColumns) and there is no room to
+                    // widen it, so this one board keeps the collapsed form; the row tooltip carries
+                    // the exact figure.
                     String gpStr = value >= 1_000_000
                         ? String.format("%.1fM", value / 1_000_000.0)
                         : value >= 1_000
                             ? String.format("%.0fK", value / 1_000.0)
                             : String.valueOf(value);
+                    row.setToolTipText(String.format("%,d gp", value));
 
-                    // Fixed-width columns so Pts/Drops/GP line up on every row — a 0 in any
+                    // Fixed-width columns so Pts/Drops/GP line up on every row: a 0 in any
                     // column must not shift its neighbours.
                     row.add(dropsStatsColumns(String.format("%.1f", points), String.valueOf(drops), gpStr,
                         isMe ? new Color(76, 175, 80) : new Color(150, 150, 150), false,
@@ -6580,12 +6616,7 @@ public class ClanPanel extends PluginPanel
 
                     if (value > 0)
                     {
-                        String gpStr = value >= 1_000_000
-                            ? String.format("%.1fM", value / 1_000_000.0)
-                            : value >= 1_000
-                                ? String.format("%.0fK", value / 1_000.0)
-                                : value + " gp";
-                        JLabel gpLabel = new JLabel(gpStr);
+                        JLabel gpLabel = new JLabel(String.format("%,d gp", value));
                         gpLabel.setFont(READABLE_FONT_SMALL);
                         gpLabel.setForeground(new Color(255, 215, 0));
                         gpLabel.setAlignmentX(Component.RIGHT_ALIGNMENT);
@@ -6679,11 +6710,10 @@ public class ClanPanel extends PluginPanel
                     totalPts += ((Number) d.getOrDefault("points", 0)).doubleValue();
                     totalGp += ((Number) d.getOrDefault("value", 0L)).longValue();
                 }
-                String gpStr = totalGp >= 1_000_000
-                    ? String.format("%.1fM gp", totalGp / 1_000_000.0)
-                    : String.format("%,d gp", totalGp);
-                JLabel summary = new JLabel(
-                    String.format("%,.1f pts | %s | %d drops", totalPts, gpStr, drops.size()));
+                // Wrapped html: a whole-number gp total makes this line too wide for the side panel.
+                JLabel summary = new JLabel(String.format(
+                    "<html><div style='width:%dpx'>%,.1f pts | %,d gp | %d drops</div></html>",
+                    STANDINGS_TEXT_WIDTH, totalPts, totalGp, drops.size()));
                 summary.setFont(READABLE_FONT_SMALL);
                 summary.setForeground(new Color(180, 180, 180));
                 summary.setBorder(new EmptyBorder(4, 6, 4, 6));
@@ -6827,6 +6857,9 @@ public class ClanPanel extends PluginPanel
     public void setStatusXp(long totalXp)
     {
         SwingUtilities.invokeLater(() -> {
+            // This tile is one third of the panel width (~57px of usable text), where a whole number
+            // like 4,600,000,000 needs 69px, so the collapsed form stays and the tooltip is exact.
+            statusXpLabel.setToolTipText(totalXp > 0 ? String.format("%,d xp", totalXp) : null);
             if (totalXp <= 0)
             {
                 statusXpLabel.setText("--");
