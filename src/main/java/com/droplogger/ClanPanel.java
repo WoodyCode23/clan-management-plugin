@@ -212,6 +212,11 @@ public class ClanPanel extends PluginPanel
     // Skills vs Boss KC is owned by the top-level Leaderboards selector, not by a control inside the
     // card: two dropdowns could disagree, and a board labelled "XP" then rendered kill counts as xp.
     private boolean womBossMode = false;
+    // The two boards are read differently, so each remembers its own period. A KC board is most
+    // useful ranked by CURRENT kills, which is the All-Time selection (the server answers that with
+    // absolute totals, not a gain). An XP board is usually read as "who gained what lately".
+    private String lastSkillPeriod = "Day";
+    private String lastBossPeriod = "All-Time";
     private java.util.function.BiConsumer<String, String> onFetchWomData;
     // Cached XP/KC board so the game-mode filter can re-render it client-side.
     private java.util.List<LeaderboardEntry> lastWomEntries = null;
@@ -5569,8 +5574,17 @@ public class ClanPanel extends PluginPanel
         {
             if (womBossMode != boss)
             {
+                // Carry each board's own period across the switch, so Boss KC opens on current
+                // kills instead of "kills gained today" while XP keeps whatever the user had.
+                String leaving = (String) womPeriodCombo.getSelectedItem();
+                if (leaving != null)
+                {
+                    if (womBossMode) lastBossPeriod = leaving; else lastSkillPeriod = leaving;
+                }
+
                 womBossMode = boss;
                 populateWomMetricCombo();
+                womPeriodCombo.setSelectedItem(boss ? lastBossPeriod : lastSkillPeriod);
                 lastWomEntries = null;
                 // Fetch rather than just re-render. Dropping the cache is right (those rows belong to
                 // the mode we left and would be relabelled with the wrong unit), but rendering an
