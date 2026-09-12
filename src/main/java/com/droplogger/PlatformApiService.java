@@ -25,6 +25,14 @@ public class PlatformApiService
     private static final MediaType JSON = MediaType.parse("application/json; charset=utf-8");
 
     private final OkHttpClient httpClient;
+    /**
+     * Separate client for requests carrying a screenshot. A native-resolution PNG can be 16MB, which
+     * travels base64 inside JSON at roughly 21MB, and callTimeout caps the WHOLE call: at 30s that
+     * body fails on any connection slower than about 6 Mbps up, losing the drop entirely rather than
+     * just the picture. Uploads therefore get no call timeout and a long write timeout, so a genuinely
+     * stalled connection still dies while a merely slow one is allowed to finish.
+     */
+    private final OkHttpClient uploadClient;
     private final Gson gson;
 
     // The logged-in account's immutable RuneLite account hash, set by the plugin on login.
@@ -40,6 +48,13 @@ public class PlatformApiService
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
+            .build();
+        // Shares the parent's connection pool and dispatcher; only the timeouts differ.
+        this.uploadClient = httpClient.newBuilder()
+            .callTimeout(0, TimeUnit.SECONDS)   // 0 = no cap on the overall call
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(60, TimeUnit.SECONDS)
+            .writeTimeout(300, TimeUnit.SECONDS)
             .build();
         this.gson = gson;
     }
@@ -2040,7 +2055,9 @@ public class PlatformApiService
             .post(body)
             .build();
 
-        httpClient.newCall(request).enqueue(new Callback()
+        // A screenshot is the only payload big enough to need the patient client.
+        final OkHttpClient client = payload.has("screenshot") ? uploadClient : httpClient;
+        client.newCall(request).enqueue(new Callback()
         {
             @Override
             public void onFailure(Call call, IOException e)
