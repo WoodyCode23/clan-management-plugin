@@ -2035,7 +2035,11 @@ public class ClanManagementPlugin extends Plugin
     // The encoded PNG travels as base64 inside a JSON body, which inflates it by roughly a third,
     // and Discord refuses attachments over 10MB. 7MB of PNG stays clear of both ceilings while
     // still letting a 4K client through at native size in practice.
-    private static final int SCREENSHOT_MAX_PNG_BYTES = 7 * 1024 * 1024;
+    // Discord accepts far more than this: probed on an unboosted guild, 19MB uploaded fine and 22MB
+    // was refused. The old 7MB cap meant a large monitor blew the budget and got bilinear-downscaled
+    // before it ever left the client, which is why big-screen shots looked soft. 16MB base64-encodes
+    // to ~21.3MB, inside the API bodyLimit (24MB) and nginx (32M).
+    private static final int SCREENSHOT_MAX_PNG_BYTES = 16 * 1024 * 1024;
     private static final double SCREENSHOT_FALLBACK_STEP = 0.75;
     private static final int SCREENSHOT_MAX_FALLBACK_STEPS = 6;
     /**
