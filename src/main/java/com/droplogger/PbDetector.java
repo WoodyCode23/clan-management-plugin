@@ -26,9 +26,12 @@ public class PbDetector
     private static final Pattern TOB_TIME = Pattern.compile(
         "Theatre of Blood.*?(?<!total )completion time: ((\\d+:)?\\d+:\\d+(?:\\.\\d+)?)", Pattern.CASE_INSENSITIVE);
 
-    // "Tombs of Amascut...completion time: 23:45.60" — same total-time exclusion as ToB.
+    // ToA prints TWO times: a "challenge completion time" counting only time INSIDE rooms, and a
+    // "total completion time" that is wall clock for the whole raid. The board tracks the TOTAL,
+    // because challenge time ignores everything between rooms and is trivially gamed. That is the
+    // opposite of ToB above, so here the CHALLENGE line must not match.
     private static final Pattern TOA_TIME = Pattern.compile(
-        "Tombs of Amascut.*?(?<!total )completion time: ((\\d+:)?\\d+:\\d+(?:\\.\\d+)?)", Pattern.CASE_INSENSITIVE);
+        "Tombs of Amascut.*?total completion time: ((\\d+:)?\\d+:\\d+(?:\\.\\d+)?)", Pattern.CASE_INSENSITIVE);
 
     // "Hallowed Sepulchre completion time: 5:30.00"
     private static final Pattern SEP_TIME = Pattern.compile(

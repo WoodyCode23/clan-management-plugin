@@ -60,11 +60,14 @@ public class PbSweep
         reject("ToB final wave line", "Wave 'The Final Challenge' (Normal Mode) complete! Duration: 4:04.60");
 
         // ── Tombs of Amascut ──
-        one("ToA expert challenge time", "toa_expert", "25:33.00",
-            "Tombs of Amascut: Expert Mode challenge completion time: 25:33.00. Personal best: 23:12.60");
-        reject("ToA total time", "Tombs of Amascut: Expert Mode total completion time: 28:33.60. Personal best: 26:09.00");
-        one("ToA normal", "toa", "26:22.00",
-            "Tombs of Amascut challenge completion time: 26:22.00. Personal best: 25:08.00");
+        // ToA boards the TOTAL time (wall clock). Challenge time counts only time inside rooms and
+        // ignores everything between them, which makes it far too easy to game.
+        one("ToA expert total time", "toa_expert", "28:33.60",
+            "Tombs of Amascut: Expert Mode total completion time: 28:33.60. Personal best: 26:09.00");
+        reject("ToA expert challenge time", "Tombs of Amascut: Expert Mode challenge completion time: 25:33.00. Personal best: 23:12.60");
+        one("ToA normal total time", "toa", "29:14.40",
+            "Tombs of Amascut total completion time: 29:14.40. Personal best: 28:02.00");
+        reject("ToA normal challenge time", "Tombs of Amascut challenge completion time: 26:22.00. Personal best: 25:08.00");
 
         // ── Wave content (duration before KC) ──
         seq("Inferno parked", "zuk", "68:33.00",
