@@ -85,10 +85,35 @@ public interface ClanManagementConfig extends Config
 
     @ConfigSection(
         name = "Screenshots",
-        description = "Opt-in — post your drops/clogs, personal bests and deaths to your clan's Discord with a message of your choosing.",
+        description = "Opt-in: post your drops/clogs, personal bests and deaths to your clan's Discord with a message of your choosing.",
         position = 2
     )
     String screenshotSection = "screenshots";
+
+    /**
+     * What the plugin paints over before a screenshot leaves your client. NOTHING is the default
+     * so that turning screenshots on never changes what an existing user was already posting.
+     */
+    enum ChatHideMode
+    {
+        ALL_CHAT("All chat"),
+        PRIVATE_ONLY("Just PMs"),
+        NOTHING("Nothing");
+
+        private final String label;
+
+        ChatHideMode(String label)
+        {
+            this.label = label;
+        }
+
+        // RuneLite renders the enum in the config dropdown via toString().
+        @Override
+        public String toString()
+        {
+            return label;
+        }
+    }
 
     @ConfigItem(
         keyName = "sendScreenshotsToDiscord",
@@ -125,6 +150,15 @@ public interface ClanManagementConfig extends Config
         position = 3
     )
     default String deathPhrase() { return ""; }
+
+    @ConfigItem(
+        keyName = "hideChatInScreenshots",
+        name = "Hide chat in screenshots",
+        description = "What to black out of a screenshot before it is sent. All chat hides the whole chatbox. Just PMs keeps public and clan chat but hides private-message lines. Nothing sends the full screenshot, chat included (default).",
+        section = screenshotSection,
+        position = 4
+    )
+    default ChatHideMode hideChatInScreenshots() { return ChatHideMode.NOTHING; }
 
     // Admin access is role-based: a personal API key whose Discord user has an admin role
     // unlocks the Admin tab (bootstrap `permissions`). The old shared "Admin API Key" is gone.
