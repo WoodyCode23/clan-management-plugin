@@ -33,49 +33,25 @@ public class AdminService
         this.gson = gson;
     }
 
-    // ── Read operations (GET) ──
-
-    public Map<String, String> getSharedSettings(String apiUrl, String apiKey, String adminKey) throws IOException
+    /**
+     * Start a weekly event via the platform API.
+     * POST /admin/{slug}/events
+     */
+    public String startEventPlatform(String baseUrl, String apiKey, String slug,
+                                      String eventType, String metric, String displayName,
+                                      String startAtIso, String endAtIso) throws IOException
     {
-        HttpUrl url = HttpUrl.parse(apiUrl).newBuilder()
-            .addQueryParameter("action", "getSharedSettings")
-            .addQueryParameter("key", apiKey)
-            .addQueryParameter("adminKey", adminKey)
-            .build();
-
-        Request request = new Request.Builder().url(url).get().build();
-        try (Response response = httpClient.newCall(request).execute())
-        {
-            if (!response.isSuccessful())
-            {
-                throw new IOException("Settings fetch returned status: " + response.code());
-            }
-
-            String body = response.body().string();
-            JsonObject root = new JsonParser().parse(body).getAsJsonObject();
-
-            Map<String, String> settings = new LinkedHashMap<>();
-            for (Map.Entry<String, JsonElement> entry : root.entrySet())
-            {
-                if (entry.getValue().isJsonPrimitive())
-                {
-                    settings.put(entry.getKey(), entry.getValue().getAsString());
-                }
-            }
-            return settings;
-        }
-    }
-
-    // ── Write operations (POST) ──
-
-    private String adminPost(String apiUrl, String apiKey, String adminKey, JsonObject payload) throws IOException
-    {
-        payload.addProperty("key", apiKey);
-        payload.addProperty("adminKey", adminKey);
+        JsonObject payload = new JsonObject();
+        payload.addProperty("type", eventType);
+        payload.addProperty("metric", metric);
+        payload.addProperty("displayName", displayName);
+        if (startAtIso != null) payload.addProperty("startAt", startAtIso);
+        if (endAtIso != null) payload.addProperty("endAt", endAtIso);
 
         RequestBody body = RequestBody.create(JSON_TYPE, gson.toJson(payload));
         Request request = new Request.Builder()
-            .url(apiUrl)
+            .url(baseUrl + "/admin/" + slug + "/events")
+            .header("Authorization", "Bearer " + apiKey)
             .post(body)
             .build();
 
@@ -83,54 +59,67 @@ public class AdminService
         {
             if (!response.isSuccessful())
             {
-                throw new IOException("Admin API returned status: " + response.code());
+                // Surface the server's reason (e.g. the event-overlap rejection) instead of a bare code.
+                String detail = null;
+                try
+                {
+                    JsonObject err = gson.fromJson(response.body() != null ? response.body().string() : null, JsonObject.class);
+                    if (err != null && err.has("error")) detail = err.get("error").getAsString();
+                }
+                catch (Exception ignored) { }
+                throw new IOException(detail != null ? detail : "Platform API returned status: " + response.code());
             }
-
-            String responseBody = response.body().string();
-            JsonObject root = new JsonParser().parse(responseBody).getAsJsonObject();
-
-            if (root.has("status") && "error".equals(root.get("status").getAsString()))
-            {
-                String message = root.has("message") ? root.get("message").getAsString() : "Unknown error";
-                throw new IOException(message);
-            }
-
-            return root.has("message") ? root.get("message").getAsString() : "OK";
+            return "Event started";
         }
     }
 
-    public String saveSharedSettings(String apiUrl, String apiKey, String adminKey,
-                                      String clanName, String discordWebhookUrl,
-                                      String womGroupId, String announcement) throws IOException
+    /** Running + scheduled events for the admin calendar. GET /clans/{slug}/events */
+    public java.util.List<JsonObject> fetchEventsList(String baseUrl, String apiKey, String slug) throws IOException
     {
-        JsonObject payload = new JsonObject();
-        payload.addProperty("action", "adminSaveSettings");
-        payload.addProperty("clanName", clanName);
-        payload.addProperty("discordWebhookUrl", discordWebhookUrl);
-        payload.addProperty("womGroupId", womGroupId);
-        payload.addProperty("announcement", announcement);
-        return adminPost(apiUrl, apiKey, adminKey, payload);
-    }
-
-    public String rotateApiKey(String apiUrl, String apiKey, String adminKey,
-                               String newApiKey) throws IOException
-    {
-        JsonObject payload = new JsonObject();
-        payload.addProperty("action", "adminRotateApiKey");
-        payload.addProperty("newApiKey", newApiKey);
-        return adminPost(apiUrl, apiKey, adminKey, payload);
+        Request request = new Request.Builder()
+            .url(baseUrl + "/clans/" + slug + "/events?limit=8")
+            .header("Authorization", "Bearer " + apiKey)
+            .get()
+            .build();
+        try (Response response = httpClient.newCall(request).execute())
+        {
+            if (!response.isSuccessful() || response.body() == null)
+            {
+                throw new IOException("Platform API returned status: " + response.code());
+            }
+            JsonObject root = gson.fromJson(response.body().string(), JsonObject.class);
+            java.util.List<JsonObject> out = new java.util.ArrayList<>();
+            if (root != null && root.has("events"))
+            {
+                for (com.google.gson.JsonElement el : root.getAsJsonArray("events"))
+                {
+                    out.add(el.getAsJsonObject());
+                }
+            }
+            return out;
+        }
     }
 
     /**
-     * Remove a hiscore entry by category key and rank.
+     * End a weekly event via the platform API.
+     * POST /admin/{slug}/events/{id}/end
      */
-    public String removeHiscoreEntryV2(String apiUrl, String apiKey, String adminKey,
-                                        String categoryKey, int rank) throws IOException
+    public String endEventPlatform(String baseUrl, String apiKey, String slug,
+                                    String eventId) throws IOException
     {
-        JsonObject payload = new JsonObject();
-        payload.addProperty("action", "adminRemoveHiscore");
-        payload.addProperty("category", categoryKey);
-        payload.addProperty("rank", rank);
-        return adminPost(apiUrl, apiKey, adminKey, payload);
+        Request request = new Request.Builder()
+            .url(baseUrl + "/admin/" + slug + "/events/" + eventId + "/end")
+            .header("Authorization", "Bearer " + apiKey)
+            .post(RequestBody.create(JSON_TYPE, "{}"))
+            .build();
+
+        try (Response response = httpClient.newCall(request).execute())
+        {
+            if (!response.isSuccessful())
+            {
+                throw new IOException("Platform API returned status: " + response.code());
+            }
+            return "Event ended";
+        }
     }
 }

@@ -10,7 +10,7 @@ repositories {
     mavenCentral()
 }
 
-def runeLiteVersion = '1.12.20'
+def runeLiteVersion = '1.12.38'
 
 dependencies {
     compileOnly group: 'net.runelite', name: 'client', version: runeLiteVersion
@@ -30,12 +30,34 @@ tasks.withType(JavaCompile) {
     options.encoding = 'UTF-8'
 }
 
+// Local development only: launches a RuneLite client (from the test sources) against a local dev
+// API for hand-testing. This task is NOT part of the plugin build and never ships in the jar; the
+// Plugin Hub builds from source and does not run it. The insecure-TLS flags below exist solely to
+// reach a self-signed local dev server during development and have no effect on end users.
 task runClient(type: JavaExec) {
     classpath = sourceSets.test.runtimeClasspath
-    mainClass = 'com.droplogger.DropLoggerPluginTest'
+    mainClass = 'com.droplogger.ClanManagementPluginTest'
     jvmArgs = [
         '-ea',
         '-Drunelite.insecure-skip-tls-verification=true'
     ]
     args = ['--insecure-skip-tls-verification', '--developer-mode']
+}
+
+// Parsing sweep: real chat sequences through PbDetector. Run: gradlew sweep
+task sweep(type: JavaExec) {
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.droplogger.PbSweep'
+}
+
+// Migration: export the hardcoded rank tree to build/ranks-export.json. Run: gradlew exportRanks
+task exportRanks(type: JavaExec) {
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.droplogger.RankExport'
+}
+
+// Verify RankSystem.parseRanks is the exact inverse of RankExport. Run: gradlew rankRoundTrip
+task rankRoundTrip(type: JavaExec) {
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.droplogger.RankRoundTrip'
 }

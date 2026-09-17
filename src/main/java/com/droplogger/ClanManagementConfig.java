@@ -1,0 +1,165 @@
+package com.droplogger;
+
+import net.runelite.client.config.Config;
+import net.runelite.client.config.ConfigGroup;
+import net.runelite.client.config.ConfigItem;
+import net.runelite.client.config.ConfigSection;
+
+@ConfigGroup("droplogger")
+public interface ClanManagementConfig extends Config
+{
+    // ── Connection ──
+
+    @ConfigSection(
+        name = "Connection",
+        description = "Enter the API key from your clan admin to connect",
+        position = 0
+    )
+    String connectionSection = "connection";
+
+    @ConfigItem(
+        keyName = "apiKey",
+        name = "API Key",
+        description = "Your clan API key (from the clan admin / dashboard). The plugin connects to the Solus platform automatically.",
+        section = connectionSection,
+        position = 0,
+        secret = true
+    )
+    default String apiKey() { return ""; }
+
+    // ── Data Sharing ──
+
+    @ConfigSection(
+        name = "Data Sharing",
+        description = "Opt-in — everything here is off by default and is sent only to your Solus clan's server.",
+        position = 1
+    )
+    String dataSection = "data";
+
+    @ConfigItem(
+        keyName = "enableDrops",
+        name = "Track Drops",
+        description = "Off by default. Sends each valuable drop (item, GP value, monster, kill count) with your RSN to the clan server, for the drop feed and leaderboards.",
+        section = dataSection,
+        position = 0
+    )
+    default boolean enableDrops() { return false; }
+
+    @ConfigItem(
+        keyName = "enableSpeedTimes",
+        name = "Track Speed Times",
+        description = "Off by default. Sends your personal-best boss times (boss, time, team) to the clan server. Your raid party is read locally to credit the right team; your location is never sent.",
+        section = dataSection,
+        position = 1
+    )
+    default boolean enableSpeedTimes() { return false; }
+
+    @ConfigItem(
+        keyName = "enableClogSync",
+        name = "Sync Collection Log",
+        description = "Off by default. Uploads your collection log progress (obtained items + counts) when you open it in-game, for clan clog tracking.",
+        section = dataSection,
+        position = 2
+    )
+    default boolean enableClogSync() { return false; }
+
+    @ConfigItem(
+        keyName = "enableStatTracking",
+        name = "Track Stats",
+        description = "Off by default. Sends only your RSN so the clan can read your public XP/KC from the official OSRS hiscores for leaderboards. No private game data is sent.",
+        section = dataSection,
+        position = 3
+    )
+    default boolean enableStatTracking() { return false; }
+
+    @ConfigItem(
+        keyName = "chatConfirmation",
+        name = "Chat Confirmations",
+        description = "Show confirmation messages in chat when data is sent",
+        section = dataSection,
+        position = 4
+    )
+    default boolean chatConfirmation() { return true; }
+
+    // ── Screenshots to Discord ──
+
+    @ConfigSection(
+        name = "Screenshots",
+        description = "Opt-in: post your drops/clogs, personal bests and deaths to your clan's Discord with a message of your choosing.",
+        position = 2
+    )
+    String screenshotSection = "screenshots";
+
+    /**
+     * What the plugin paints over before a screenshot leaves your client. NOTHING is the default
+     * so that turning screenshots on never changes what an existing user was already posting.
+     */
+    enum ChatHideMode
+    {
+        ALL_CHAT("All chat"),
+        PRIVATE_ONLY("Just PMs"),
+        NOTHING("Nothing");
+
+        private final String label;
+
+        ChatHideMode(String label)
+        {
+            this.label = label;
+        }
+
+        // RuneLite renders the enum in the config dropdown via toString().
+        @Override
+        public String toString()
+        {
+            return label;
+        }
+    }
+
+    @ConfigItem(
+        keyName = "sendScreenshotsToDiscord",
+        name = "Send screenshots to Discord",
+        description = "Off by default. When on, your drops/clogs, personal bests and deaths are posted to the channels your clan admin set up, each with the message you enter below.",
+        section = screenshotSection,
+        position = 0
+    )
+    default boolean sendScreenshotsToDiscord() { return false; }
+
+    @ConfigItem(
+        keyName = "dropPhrase",
+        name = "Drops / clogs message",
+        description = "Posted with your drop and collection-log screenshots (like Dink's custom message). Leave blank for none.",
+        section = screenshotSection,
+        position = 1
+    )
+    default String dropPhrase() { return ""; }
+
+    @ConfigItem(
+        keyName = "pbPhrase",
+        name = "Personal best message",
+        description = "Posted with your personal-best screenshots. Leave blank for none.",
+        section = screenshotSection,
+        position = 2
+    )
+    default String pbPhrase() { return ""; }
+
+    @ConfigItem(
+        keyName = "deathPhrase",
+        name = "Death message",
+        description = "Posted with your death screenshots. Leave blank for none.",
+        section = screenshotSection,
+        position = 3
+    )
+    default String deathPhrase() { return ""; }
+
+    @ConfigItem(
+        keyName = "hideChatInScreenshots",
+        name = "Hide chat in screenshots",
+        description = "What to black out of a screenshot before it is sent. All chat hides the whole chatbox. Just PMs keeps public and clan chat but hides private-message lines. Nothing sends the full screenshot, chat included (default).",
+        section = screenshotSection,
+        position = 4
+    )
+    default ChatHideMode hideChatInScreenshots() { return ChatHideMode.NOTHING; }
+
+    // Admin access is role-based: a personal API key whose Discord user has an admin role
+    // unlocks the Admin tab (bootstrap `permissions`). The old shared "Admin API Key" is gone.
+}

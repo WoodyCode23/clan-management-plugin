@@ -19,27 +19,36 @@ public class PbDetector
 
     // "Challenge duration: 22:15.00" or "Challenge duration: 22:15.00 (new personal best)" — CoX or Gauntlet
     private static final Pattern CHALLENGE_TIME = Pattern.compile(
-        "Challenge duration: ((\\d+:)?\\d+:\\d+\\.\\d+)", Pattern.CASE_INSENSITIVE);
+        "Challenge duration: ((\\d+:)?\\d+:\\d+(?:\\.\\d+)?)", Pattern.CASE_INSENSITIVE);
 
-    // "Theatre of Blood completion time: 23:45.60"
+    // "Theatre of Blood completion time: 23:45.60" — the room time. The "total completion
+    // time" line (includes downtime) is NOT board-comparable and must not match.
     private static final Pattern TOB_TIME = Pattern.compile(
-        "Theatre of Blood.*?completion time: ((\\d+:)?\\d+:\\d+\\.\\d+)", Pattern.CASE_INSENSITIVE);
+        "Theatre of Blood.*?(?<!total )completion time: ((\\d+:)?\\d+:\\d+(?:\\.\\d+)?)", Pattern.CASE_INSENSITIVE);
 
-    // "Tombs of Amascut...completion time: 23:45.60"
+    // ToA prints TWO times: a "challenge completion time" counting only time INSIDE rooms, and a
+    // "total completion time" that is wall clock for the whole raid. The board tracks the TOTAL,
+    // because challenge time ignores everything between rooms and is trivially gamed. That is the
+    // opposite of ToB above, so here the CHALLENGE line must not match.
     private static final Pattern TOA_TIME = Pattern.compile(
-        "Tombs of Amascut.*?completion time: ((\\d+:)?\\d+:\\d+\\.\\d+)", Pattern.CASE_INSENSITIVE);
+        "Tombs of Amascut.*?total completion time: ((\\d+:)?\\d+:\\d+(?:\\.\\d+)?)", Pattern.CASE_INSENSITIVE);
 
     // "Hallowed Sepulchre completion time: 5:30.00"
     private static final Pattern SEP_TIME = Pattern.compile(
-        "Hallowed Sepulchre.*?completion time: ((\\d+:)?\\d+:\\d+\\.\\d+)", Pattern.CASE_INSENSITIVE);
+        "Hallowed Sepulchre.*?completion time: ((\\d+:)?\\d+:\\d+(?:\\.\\d+)?)", Pattern.CASE_INSENSITIVE);
 
     // "Fight duration: 1:23.40" — boss kills
     private static final Pattern FIGHT_TIME = Pattern.compile(
-        "Fight duration: ((\\d+:)?\\d+:\\d+\\.\\d+)", Pattern.CASE_INSENSITIVE);
+        "Fight duration: ((\\d+:)?\\d+:\\d+(?:\\.\\d+)?)", Pattern.CASE_INSENSITIVE);
 
     // "Duration: 32:15.60" — wave content (Jad, Zuk, Colo) and general
     private static final Pattern DURATION_TIME = Pattern.compile(
-        "Duration: ((\\d+:)?\\d+:\\d+\\.\\d+)", Pattern.CASE_INSENSITIVE);
+        "Duration: ((\\d+:)?\\d+:\\d+(?:\\.\\d+)?)", Pattern.CASE_INSENSITIVE);
+
+    // "Fight duration: 2:41.40. Personal best: 2:02.40" — on a non-PB kill the game prints the
+    // player's TRUE personal best alongside the kill time. That value is the correct baseline.
+    private static final Pattern PB_VALUE = Pattern.compile(
+        "Personal best: ((\\d+:)?\\d+:\\d+(?:\\.\\d+)?)", Pattern.CASE_INSENSITIVE);
 
     // ── Activity identification patterns ──
     // Kill count messages identify which boss was just killed
@@ -47,6 +56,21 @@ public class PbDetector
     // "Your Duke Sucellus kill count is: 50."
     private static final Pattern KC_PATTERN = Pattern.compile(
         "Your (.+?) kill count is: ([\\d,]+)", Pattern.CASE_INSENSITIVE);
+
+    // "Your completed Chambers of Xeric count is: 470." / "…Theatre of Blood count is: 12." —
+    // raids use "completed … count", not "kill count", so KC_PATTERN misses them.
+    private static final Pattern RAID_COUNT_PATTERN = Pattern.compile(
+        "Your completed (.+?) count is: ([\\d,]+)", Pattern.CASE_INSENSITIVE);
+
+    // "Your Barrows chest count is: 120."
+    private static final Pattern CHEST_COUNT_PATTERN = Pattern.compile(
+        "Your (.+?) chest count is: ([\\d,]+)", Pattern.CASE_INSENSITIVE);
+
+    // "Your Corrupted Gauntlet completion count is: 44." — the Gauntlet uses "completion
+    // count", which none of the other count patterns match; without this the Challenge
+    // duration line has no context and CG times mis-filed as CoX.
+    private static final Pattern COMPLETION_COUNT_PATTERN = Pattern.compile(
+        "Your (.+?) completion count is: ([\\d,]+)", Pattern.CASE_INSENSITIVE);
 
     // "Your Chambers of Xeric challenge/raid completion count is: 50."
     private static final Pattern COX_COMPLETION = Pattern.compile(
@@ -69,6 +93,32 @@ public class PbDetector
     private String lastBossName = null;
     private int lastKillCount = 0;
     private boolean isCoxCm = false;
+    private long contextAtMs = 0; // when lastActivity was last set from a KC/count message
+    // True only when the CURRENT cox/cox_cm context came from a DEFINITIVE self-completion —
+    // the player's own "Your completed Chambers of Xeric count is:" or the "your team completed
+    // the Chambers of Xeric!" line. A bare "Chambers of Xeric" mention (entering the raid, a
+    // plugin hiscore line the plugin itself prints, etc.) sets context but leaves this false.
+    // A "Challenge duration:" may only resolve to CoX when this is true; otherwise it parks and
+    // the unambiguous completion-count message decides — which is what routes a Gauntlet's
+    // identical "Challenge duration:" line to the Gauntlet board instead of Chambers.
+    private boolean coxContextConfirmed = false;
+
+    // ── Pending duration (Inferno / Fight Caves / Colosseum ordering) ──
+    // In TzHaar content and the Colosseum the "Duration: x" line arrives BEFORE the
+    // "Your TzKal-Zuk kill count is:" line, so there is no activity context yet when the
+    // time appears. The time is parked here and the KC message that follows claims it.
+    private String pendingTime = null;
+    private boolean pendingPb = false;
+    private String pendingPbTime = null;
+    private long pendingAtMs = 0;
+    private CompletionResult pendingCompletion = null;
+
+    // Context older than this cannot claim a bare "Duration:" line — after an hour in the
+    // Inferno, the last KC message was some unrelated boss (or nothing at all).
+    private static final long CONTEXT_FRESH_MS = 30_000;
+    // A parked duration must be claimed by a KC message within this window (the game sends
+    // both lines in the same tick; the window is generous for lag).
+    private static final long PENDING_CLAIM_MS = 10_000;
 
     /**
      * Process a chat message to update activity context.
@@ -83,23 +133,112 @@ public class PbDetector
             lastBossName = kcMatcher.group(1).trim();
             lastKillCount = Integer.parseInt(kcMatcher.group(2).replace(",", ""));
             lastActivity = mapBossToGroup(lastBossName);
+            contextAtMs = System.currentTimeMillis();
+            coxContextConfirmed = false; // a boss kill is never CoX; drop any prior confirmation
+            claimPendingDuration();
             log.debug("Activity context set: {} ({}) KC={}", lastBossName, lastActivity, lastKillCount);
             return;
         }
 
+        // Raid completion counts ("Your completed Chambers of Xeric count is: 470") and chest
+        // counts ("Your Barrows chest count is: 120") — set the counter context so raid/chest
+        // DROPS get the right KC attached, exactly like boss kill counts.
+        Matcher raidCount = RAID_COUNT_PATTERN.matcher(cleanedMessage);
+        if (raidCount.find())
+        {
+            lastBossName = raidCount.group(1).trim();
+            lastKillCount = Integer.parseInt(raidCount.group(2).replace(",", ""));
+            lastActivity = mapBossToGroup(lastBossName);
+            contextAtMs = System.currentTimeMillis();
+            // "Your completed Chambers of Xeric count is:" is a definitive self-completion — this
+            // is exactly the signal a Challenge-duration line is allowed to resolve to CoX against.
+            coxContextConfirmed = "cox".equals(lastActivity) || "cox_cm".equals(lastActivity);
+            claimPendingDuration();
+            log.debug("Raid count context set: {} ({}) KC={}", lastBossName, lastActivity, lastKillCount);
+            return;
+        }
+        Matcher chestCount = CHEST_COUNT_PATTERN.matcher(cleanedMessage);
+        if (chestCount.find())
+        {
+            lastBossName = chestCount.group(1).trim();
+            lastKillCount = Integer.parseInt(chestCount.group(2).replace(",", ""));
+            lastActivity = mapBossToGroup(lastBossName);
+            contextAtMs = System.currentTimeMillis();
+            coxContextConfirmed = false; // a chest count (Barrows) is never CoX
+            claimPendingDuration();
+            return;
+        }
+        Matcher completionCount = COMPLETION_COUNT_PATTERN.matcher(cleanedMessage);
+        if (completionCount.find())
+        {
+            lastBossName = completionCount.group(1).trim();
+            lastKillCount = Integer.parseInt(completionCount.group(2).replace(",", ""));
+            lastActivity = mapBossToGroup(lastBossName);
+            contextAtMs = System.currentTimeMillis();
+            // "Your Corrupted Gauntlet completion count is:" resolves the Gauntlet unambiguously —
+            // definitively NOT CoX, so clear any lingering CoX confirmation.
+            coxContextConfirmed = false;
+            claimPendingDuration();
+            log.debug("Completion count context set: {} ({}) KC={}", lastBossName, lastActivity, lastKillCount);
+            return;
+        }
+
         // Track raid completions
-        if (COX_COMPLETE_MSG.matcher(cleanedMessage).find() ||
-            COX_COMPLETION.matcher(cleanedMessage).find())
+        boolean coxCompleteMsg = COX_COMPLETE_MSG.matcher(cleanedMessage).find();
+        if (coxCompleteMsg || COX_COMPLETION.matcher(cleanedMessage).find())
         {
             isCoxCm = COX_CM_PATTERN.matcher(cleanedMessage).find();
             lastActivity = isCoxCm ? "cox_cm" : "cox";
             lastBossName = isCoxCm ? "CM Chambers of Xeric" : "Chambers of Xeric";
+            contextAtMs = System.currentTimeMillis();
+            // Only the real "your team completed the Chambers of Xeric!" line is definitive. A bare
+            // "Chambers of Xeric" mention (raid entry, a plugin-printed hiscore line) is too weak to
+            // resolve a Challenge-duration against — that is the exact hole a Gauntlet finishing
+            // moments later fell through, inheriting CoX context and landing on the Chambers board.
+            coxContextConfirmed = coxCompleteMsg;
         }
         else if (TOB_COMPLETE_MSG.matcher(cleanedMessage).find())
         {
             lastActivity = "tob";
             lastBossName = "Theatre of Blood";
+            contextAtMs = System.currentTimeMillis();
         }
+    }
+
+    /**
+     * A KC message just set fresh activity context — if a bare "Duration:" line was parked
+     * moments ago (Inferno/Fight Caves/Colosseum send the time BEFORE the kill count), turn
+     * it into a completion the plugin can drain via {@link #drainPendingCompletion()}.
+     */
+    private void claimPendingDuration()
+    {
+        if (pendingTime == null)
+        {
+            return;
+        }
+        String time = pendingTime;
+        boolean pb = pendingPb;
+        String pbTime = pendingPbTime;
+        pendingTime = null;
+        pendingPbTime = null;
+        if (System.currentTimeMillis() - pendingAtMs > PENDING_CLAIM_MS
+            || lastActivity == null || "unknown".equals(lastActivity))
+        {
+            return;
+        }
+        pendingCompletion = new CompletionResult(lastActivity, time, lastBossName, pb, pbTime);
+        log.debug("Pending duration claimed by {}: {}", lastActivity, time);
+    }
+
+    /**
+     * Return (and clear) a completion whose duration line arrived before its kill-count
+     * line. Call after {@link #processMessage} on every game message.
+     */
+    public CompletionResult drainPendingCompletion()
+    {
+        CompletionResult result = pendingCompletion;
+        pendingCompletion = null;
+        return result;
     }
 
     /**
@@ -110,53 +249,120 @@ public class PbDetector
      */
     public CompletionResult detectCompletion(String cleanedMessage)
     {
+        // Intermediate progress lines also say "Duration:" but are NOT completions:
+        //  - third-party phase timers ("phase"/"split"/"section") — produced a 6s "Phosani kill"
+        //  - vanilla CoX floor times ("Upper/Middle/Lower level complete! Duration: 4:31")
+        //  - Olm phase lines ("Olm duration: 5:20") — produced a 36s "CoX solo"
+        //  - ToB room times ("Wave 'The Maiden of Sugadinti' complete! Duration: 2:45")
+        // Only the whole-kill / whole-raid message may count.
+        String lowerAll = cleanedMessage.toLowerCase();
+        if (lowerAll.contains("phase") || lowerAll.contains("split") || lowerAll.contains("section")
+            || lowerAll.contains("level complete") || (lowerAll.contains("olm duration") && !lowerAll.contains("team size")) /* keep the real CoX completion line, which carries 'Team size:' plus 'Olm duration:' */
+            || (lowerAll.contains("wave") && !lowerAll.contains("completion time")) /* keep the real ToB completion, which shares a message with the last wave line */
+            // Nightmare plugin phase lines: "Phosani's Nightmare P4 boss complete! Duration: 0:08.40"
+            || lowerAll.contains("boss complete"))
+        {
+            return null;
+        }
+
         boolean isPb = cleanedMessage.contains("(new personal best)");
+        Matcher pbMatcher = PB_VALUE.matcher(cleanedMessage);
+        String pbTime = pbMatcher.find() ? pbMatcher.group(1) : null;
         Matcher matcher;
 
-        // Check ToB first (specific pattern)
+        // Check ToB first (specific pattern) — distinguish entry/normal/hard
         matcher = TOB_TIME.matcher(cleanedMessage);
         if (matcher.find())
         {
-            return new CompletionResult("tob", matcher.group(1), null, isPb);
+            String lower = cleanedMessage.toLowerCase();
+            String tobGroup;
+            if (lower.contains("entry")) tobGroup = "tob_entry";
+            else if (lower.contains("hard")) tobGroup = "tob_hm";
+            else tobGroup = "tob";
+            return new CompletionResult(tobGroup, matcher.group(1), null, isPb, pbTime);
         }
 
-        // Check ToA — "Expert Mode" in the message means 300+ invocations
+        // Check ToA — entry/normal/expert
         matcher = TOA_TIME.matcher(cleanedMessage);
         if (matcher.find())
         {
-            String toaGroup = cleanedMessage.toLowerCase().contains("expert") ? "toa_expert" : "toa";
-            return new CompletionResult(toaGroup, matcher.group(1), null, isPb);
+            String lower = cleanedMessage.toLowerCase();
+            String toaGroup;
+            if (lower.contains("entry")) toaGroup = "toa_entry";
+            else if (lower.contains("expert")) toaGroup = "toa_expert";
+            else toaGroup = "toa";
+            return new CompletionResult(toaGroup, matcher.group(1), null, isPb, pbTime);
         }
 
         // Check Sepulchre
         matcher = SEP_TIME.matcher(cleanedMessage);
         if (matcher.find())
         {
-            return new CompletionResult("sep", matcher.group(1), null, isPb);
+            return new CompletionResult("sep", matcher.group(1), null, isPb, pbTime);
         }
 
-        // Check Challenge duration (CoX or Gauntlet — disambiguate by context)
+        // Check Challenge duration (CoX or Gauntlet — disambiguate by context). With no
+        // FRESH context, park it and let the following count message claim it — guessing
+        // here is how a Corrupted Gauntlet PB ended up on the Chambers board.
         matcher = CHALLENGE_TIME.matcher(cleanedMessage);
         if (matcher.find())
         {
-            String group = resolveChallengeDuration();
-            return new CompletionResult(group, matcher.group(1), null, isPb);
+            boolean challengeContextFresh = System.currentTimeMillis() - contextAtMs <= CONTEXT_FRESH_MS;
+            String group = challengeContextFresh ? resolveChallengeDuration() : null;
+            if (group == null)
+            {
+                pendingTime = matcher.group(1);
+                pendingPb = isPb;
+                pendingPbTime = pbTime;
+                pendingAtMs = System.currentTimeMillis();
+                log.debug("Challenge duration with no fresh context parked: {}", pendingTime);
+                return null;
+            }
+            return new CompletionResult(group, matcher.group(1), null, isPb, pbTime);
         }
 
-        // Check Fight duration (bosses — use lastActivity for boss identity)
+        // Check Fight duration (bosses — use lastActivity for boss identity). Same freshness
+        // rule as bare "Duration:": some bosses (Grotesque Guardians) print the fight duration
+        // BEFORE the kill-count line, and stale context misattributed the time to whatever boss
+        // was killed earlier in the session (a GG time landed on Phosani's board). Parked times
+        // get claimed by the KC line that follows.
         matcher = FIGHT_TIME.matcher(cleanedMessage);
         if (matcher.find())
         {
-            String group = lastActivity != null ? lastActivity : "unknown";
-            return new CompletionResult(group, matcher.group(1), lastBossName, isPb);
+            boolean fightContextFresh = lastActivity != null && !"unknown".equals(lastActivity)
+                && System.currentTimeMillis() - contextAtMs <= CONTEXT_FRESH_MS;
+            if (!fightContextFresh)
+            {
+                pendingTime = matcher.group(1);
+                pendingPb = isPb;
+                pendingPbTime = pbTime;
+                pendingAtMs = System.currentTimeMillis();
+                log.debug("Fight duration with no fresh context parked: {}", pendingTime);
+                return null;
+            }
+            return new CompletionResult(lastActivity, matcher.group(1), lastBossName, isPb, pbTime);
         }
 
-        // Check generic Duration (Jad, Zuk, Colo — use lastActivity)
+        // Check generic Duration (Jad, Zuk, Colo — use lastActivity).
+        // These content types send "Duration:" BEFORE "Your TzKal-Zuk kill count is:", so
+        // fresh context means a same-tick multi-line message ordered KC-first; stale or
+        // missing context means the KC line is still coming — park the time and let
+        // claimPendingDuration() attribute it when the KC message arrives.
         matcher = DURATION_TIME.matcher(cleanedMessage);
         if (matcher.find())
         {
-            String group = lastActivity != null ? lastActivity : "unknown";
-            return new CompletionResult(group, matcher.group(1), lastBossName, isPb);
+            boolean contextFresh = lastActivity != null && !"unknown".equals(lastActivity)
+                && System.currentTimeMillis() - contextAtMs <= CONTEXT_FRESH_MS;
+            if (!contextFresh)
+            {
+                pendingTime = matcher.group(1);
+                pendingPb = isPb;
+                pendingPbTime = pbTime;
+                pendingAtMs = System.currentTimeMillis();
+                log.debug("Duration with no fresh context parked: {}", pendingTime);
+                return null;
+            }
+            return new CompletionResult(lastActivity, matcher.group(1), lastBossName, isPb, pbTime);
         }
 
         return null;
@@ -167,11 +373,14 @@ public class PbDetector
      */
     private String resolveChallengeDuration()
     {
-        if ("cox_cm".equals(lastActivity))
+        // CoX only when the context is a CONFIRMED self-completion (count / "your team completed").
+        // Unconfirmed cox context (a bare mention) falls through to park — the completion-count
+        // message that follows then routes the time correctly (Gauntlet -> Gauntlet, CoX -> CoX).
+        if ("cox_cm".equals(lastActivity) && coxContextConfirmed)
         {
             return "cox_cm";
         }
-        if ("cox".equals(lastActivity))
+        if ("cox".equals(lastActivity) && coxContextConfirmed)
         {
             return "cox";
         }
@@ -183,7 +392,7 @@ public class PbDetector
         if (lastBossName != null)
         {
             String lower = lastBossName.toLowerCase();
-            if (lower.contains("hunllef"))
+            if (lower.contains("hunllef") || lower.contains("corrupted gauntlet"))
             {
                 return "gaunt_corrupted";
             }
@@ -192,8 +401,9 @@ public class PbDetector
                 return "gaunt";
             }
         }
-        // Default to cox if ambiguous (more common)
-        return "cox";
+        // Ambiguous — caller parks the time for the count message to claim. Never guess:
+        // a wrong guess files the time on another boss's board.
+        return null;
     }
 
     /**
@@ -220,9 +430,16 @@ public class PbDetector
         // Araxxor
         if (lower.contains("araxxor")) return "araxxor";
 
-        // Gauntlet (hunllef = corrupted, crystalline = normal)
-        if (lower.contains("hunllef")) return "gaunt_corrupted";
-        if (lower.contains("crystalline")) return "gaunt";
+        // Maggot King (Blood Moon Rises, 2026)
+        if (lower.contains("maggot king")) return "maggot_king";
+
+        // Gauntlet: by boss (hunllef/crystalline) or by completion-count name — corrupted
+        // must match before plain "gauntlet".
+        if (lower.contains("hunllef") || lower.contains("corrupted gauntlet")) return "gaunt_corrupted";
+        if (lower.contains("crystalline") || lower.contains("gauntlet")) return "gaunt";
+
+        // Doom of Mokhaiotl (delve boss, 2025)
+        if (lower.contains("mokhaiotl")) return "doom";
 
         // Wave content
         if (lower.contains("tztok-jad") || lower.contains("jad")) return "jad";
@@ -241,6 +458,7 @@ public class PbDetector
         // Hueycoatl / Amoxliatl
         if (lower.contains("hueycoatl")) return "hueycoatl";
         if (lower.contains("amoxliatl")) return "amoxliatl";
+        if (lower.contains("mad angel")) return "mad_angel";
 
         // GWD bosses
         if (lower.contains("general graardor") || lower.contains("graardor")) return "bandos";
@@ -285,8 +503,13 @@ public class PbDetector
         // TzHaar-Ket-Rak challenges
         if (lower.contains("ket-rak") || lower.contains("ket rak")) return "raks";
 
-        // Raids (usually identified by completion messages, not KC)
-        if (lower.contains("chambers") || lower.contains("xeric")) return "cox";
+        // Raids (usually identified by completion messages, not KC). The CM count message is
+        // "Your completed Chambers of Xeric: Challenge Mode count is: X" — check CM first or
+        // solo/team CM completions land on the regular CoX board.
+        if (lower.contains("chambers") || lower.contains("xeric"))
+        {
+            return lower.contains("challenge mode") ? "cox_cm" : "cox";
+        }
         if (lower.contains("theatre") || lower.contains("verzik")) return "tob";
         if (lower.contains("tombs") || lower.contains("amascut")) return "toa";
 
@@ -314,6 +537,11 @@ public class PbDetector
         lastActivity = null;
         lastBossName = null;
         isCoxCm = false;
+        contextAtMs = 0;
+        coxContextConfirmed = false;
+        pendingTime = null;
+        pendingPbTime = null;
+        pendingCompletion = null;
     }
 
     /**
@@ -327,14 +555,63 @@ public class PbDetector
         private final double timeSeconds;
         private final String bossName;
         private final boolean personalBest;
+        // The "Personal best: x" value the game prints on a non-PB kill (null when absent —
+        // e.g. the kill IS the PB, so the message says "(new personal best)" instead).
+        private final String personalBestTime;
+        private final double personalBestSeconds;
 
         public CompletionResult(String group, String formattedTime, String bossName, boolean personalBest)
         {
+            this(group, formattedTime, bossName, personalBest, null);
+        }
+
+        public CompletionResult(String group, String formattedTime, String bossName, boolean personalBest,
+                                String personalBestTime)
+        {
             this.group = group;
             this.formattedTime = formattedTime;
-            this.timeSeconds = HiscoreService.parseTimeToSeconds(formattedTime);
+            this.timeSeconds = parseTimeToSeconds(formattedTime);
             this.bossName = bossName;
             this.personalBest = personalBest;
+            this.personalBestTime = personalBestTime;
+            this.personalBestSeconds = personalBestTime != null ? parseTimeToSeconds(personalBestTime) : 0;
         }
+    }
+
+    /** Parse a "h:mm:ss.ss" / "mm:ss.ss" / "ss.ss" completion time into seconds. Pure utility. */
+    static double parseTimeToSeconds(String timeStr)
+    {
+        if (timeStr == null || timeStr.isEmpty())
+        {
+            return 0;
+        }
+
+        String[] parts = timeStr.split(":");
+        double seconds = 0;
+
+        try
+        {
+            if (parts.length == 3)
+            {
+                seconds = Double.parseDouble(parts[0]) * 3600
+                    + Double.parseDouble(parts[1]) * 60
+                    + Double.parseDouble(parts[2]);
+            }
+            else if (parts.length == 2)
+            {
+                seconds = Double.parseDouble(parts[0]) * 60
+                    + Double.parseDouble(parts[1]);
+            }
+            else if (parts.length == 1)
+            {
+                seconds = Double.parseDouble(parts[0]);
+            }
+        }
+        catch (NumberFormatException e)
+        {
+            return 0;
+        }
+
+        return seconds;
     }
 }

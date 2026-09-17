@@ -87,17 +87,42 @@ public class BossCategory
 
     public static final BossCategory COX_SOLO = register(
         "cox_solo", "cox", "Chambers of Xeric", "Raids", 1, 1, false, 10);
+    public static final BossCategory COX_DUO = register(
+        "cox_duo", "cox", "Chambers of Xeric", "Raids", 2, 2, true);
     public static final BossCategory COX_TRIO = register(
         "cox_trio", "cox", "Chambers of Xeric", "Raids", 3, 3, true, 11);
+    public static final BossCategory COX_4MAN = register(
+        "cox_4man", "cox", "Chambers of Xeric", "Raids", 4, 4, true);
     public static final BossCategory COX_5MAN = register(
         "cox_5man", "cox", "Chambers of Xeric", "Raids", 5, 5, true, -1);
+    public static final BossCategory COX_GROUP = register(
+        "cox_group", "cox", "Chambers of Xeric", "Raids", 6, 100, true);
     public static final BossCategory COX_CM_SOLO = register(
         "cox_cm_solo", "cox_cm", "CM Chambers of Xeric", "Raids", 1, 1, false, 12);
+    public static final BossCategory COX_CM_DUO = register(
+        "cox_cm_duo", "cox_cm", "CM Chambers of Xeric", "Raids", 2, 2, true);
     public static final BossCategory COX_CM_TRIO = register(
         "cox_cm_trio", "cox_cm", "CM Chambers of Xeric", "Raids", 3, 3, true, 13);
+    public static final BossCategory COX_CM_4MAN = register(
+        "cox_cm_4man", "cox_cm", "CM Chambers of Xeric", "Raids", 4, 4, true);
     public static final BossCategory COX_CM_5MAN = register(
         "cox_cm_5man", "cox_cm", "CM Chambers of Xeric", "Raids", 5, 5, true, 14);
+    public static final BossCategory COX_CM_GROUP = register(
+        "cox_cm_group", "cox_cm", "CM Chambers of Xeric", "Raids", 6, 100, true);
 
+    // ToB — Entry Mode
+    public static final BossCategory TOB_ENTRY_SOLO = register(
+        "tob_entry_solo", "tob_entry", "Theatre of Blood: Entry Mode", "Raids", 1, 1, false);
+    public static final BossCategory TOB_ENTRY_DUO = register(
+        "tob_entry_duo", "tob_entry", "Theatre of Blood: Entry Mode", "Raids", 2, 2, true);
+    public static final BossCategory TOB_ENTRY_TRIO = register(
+        "tob_entry_trio", "tob_entry", "Theatre of Blood: Entry Mode", "Raids", 3, 3, true);
+    public static final BossCategory TOB_ENTRY_4MAN = register(
+        "tob_entry_4man", "tob_entry", "Theatre of Blood: Entry Mode", "Raids", 4, 4, true);
+    public static final BossCategory TOB_ENTRY_5MAN = register(
+        "tob_entry_5man", "tob_entry", "Theatre of Blood: Entry Mode", "Raids", 5, 5, true);
+
+    // ToB — Normal
     public static final BossCategory TOB_DUO = register(
         "tob_duo", "tob", "Theatre of Blood", "Raids", 2, 2, true, 15);
     public static final BossCategory TOB_TRIO = register(
@@ -107,14 +132,41 @@ public class BossCategory
     public static final BossCategory TOB_5MAN = register(
         "tob_5man", "tob", "Theatre of Blood", "Raids", 5, 5, true, 18);
 
+    // ToB — Hard Mode
+    public static final BossCategory TOB_HM_TRIO = register(
+        "tob_hm_trio", "tob_hm", "Theatre of Blood: Hard Mode", "Raids", 3, 3, true);
+    public static final BossCategory TOB_HM_4MAN = register(
+        "tob_hm_4man", "tob_hm", "Theatre of Blood: Hard Mode", "Raids", 4, 4, true);
+    public static final BossCategory TOB_HM_5MAN = register(
+        "tob_hm_5man", "tob_hm", "Theatre of Blood: Hard Mode", "Raids", 5, 5, true);
+
+    // ToA — Entry Mode
+    public static final BossCategory TOA_ENTRY_SOLO = register(
+        "toa_entry_solo", "toa_entry", "Tombs of Amascut: Entry Mode", "Raids", 1, 1, false);
+    public static final BossCategory TOA_ENTRY_DUO = register(
+        "toa_entry_duo", "toa_entry", "Tombs of Amascut: Entry Mode", "Raids", 2, 2, true);
+    public static final BossCategory TOA_ENTRY_GROUP = register(
+        "toa_entry_group", "toa_entry", "Tombs of Amascut: Entry Mode", "Raids", 3, 100, true);
+
+    // ToA — Normal
     public static final BossCategory TOA_SOLO = register(
         "toa_solo", "toa", "Tombs of Amascut", "Raids", 1, 1, false, 20);
     public static final BossCategory TOA_DUO = register(
         "toa_duo", "toa", "Tombs of Amascut", "Raids", 2, 2, true, 21);
+    public static final BossCategory TOA_TRIO = register(
+        "toa_trio", "toa", "Tombs of Amascut", "Raids", 3, 3, true);
+    public static final BossCategory TOA_GROUP = register(
+        "toa_group", "toa", "Tombs of Amascut", "Raids", 4, 100, true);
+
+    // ToA — Expert Mode
     public static final BossCategory TOA_EXPERT_SOLO = register(
-        "toa_expert_solo", "toa_expert", "Tombs of Amascut (Expert)", "Raids", 1, 1, false, 22);
+        "toa_expert_solo", "toa_expert", "Tombs of Amascut: Expert Mode", "Raids", 1, 1, false, 22);
     public static final BossCategory TOA_EXPERT_DUO = register(
-        "toa_expert_duo", "toa_expert", "Tombs of Amascut (Expert)", "Raids", 2, 2, true, 23);
+        "toa_expert_duo", "toa_expert", "Tombs of Amascut: Expert Mode", "Raids", 2, 2, true, 23);
+    public static final BossCategory TOA_EXPERT_TRIO = register(
+        "toa_expert_trio", "toa_expert", "Tombs of Amascut: Expert Mode", "Raids", 3, 3, true);
+    public static final BossCategory TOA_EXPERT_GROUP = register(
+        "toa_expert_group", "toa_expert", "Tombs of Amascut: Expert Mode", "Raids", 4, 100, true);
 
     // ── GWD ──
 
@@ -177,11 +229,15 @@ public class BossCategory
 
     public static final BossCategory PHOSANIS = register(
         "phosani_solo", "phosanis", "Phosani's Nightmare", "Nightmare", 1, 1, false, 30);
+    public static final BossCategory NIGHTMARE_SOLO = register(
+        "nightmare_solo", "nightmare", "The Nightmare", "Nightmare", 1, 1, false);
     public static final BossCategory NIGHTMARE_GROUP = register(
         "nightmare_group", "nightmare", "The Nightmare", "Nightmare", 2, 100, true, 29);
 
     // ── Nex ──
 
+    public static final BossCategory NEX_SOLO = register(
+        "nex_solo", "nex", "Nex", "Nex", 1, 1, false);
     public static final BossCategory NEX_DUO = register(
         "nex_duo", "nex", "Nex", "Nex", 2, 2, true, 37);
     public static final BossCategory NEX_TRIO = register(
@@ -209,6 +265,12 @@ public class BossCategory
 
     public static final BossCategory AMOXLIATL_SOLO = register(
         "amoxliatl_solo", "amoxliatl", "Amoxliatl", "New Bosses", 1, 1, false);
+
+    public static final BossCategory MAGGOT_KING_SOLO = register(
+        "maggot_king_solo", "maggot_king", "Maggot King", "New Bosses", 1, 1, false);
+
+    public static final BossCategory MAD_ANGEL_SOLO = register(
+        "mad_angel_solo", "mad_angel", "Mad Angel", "New Bosses", 1, 1, false);
 
     // ── Slayer Bosses ──
 
@@ -312,7 +374,38 @@ public class BossCategory
                 }
             }
         }
-        return best;
+        if (best != null)
+        {
+            return best;
+        }
+
+        // No category covers this size. Masses (6+) get the group's "6+" category — created on
+        // demand for bosses that only register small sizes — so a 12-man all-clan mass lands in
+        // a proper "6+" bucket instead of being dropped or mislabeled. The actual team size is
+        // still recorded on the submission. Sizes 2–5 with no bucket clamp to the nearest one.
+        BossCategory largest = null, smallest = null;
+        for (BossCategory cat : ALL)
+        {
+            if (!cat.group.equals(group)) continue;
+            if (largest == null || cat.maxPlayers > largest.maxPlayers) largest = cat;
+            if (smallest == null || cat.minPlayers < smallest.minPlayers) smallest = cat;
+        }
+        if (smallest == null) return null; // unknown group
+        if (partySize >= 6)
+        {
+            return massCategory(group, smallest.displayName, smallest.displayGroup);
+        }
+        if (partySize > largest.maxPlayers) return largest;
+        return smallest; // size below every min
+    }
+
+    /** The group's "6+" mass category, registered on first use for bosses that only list small sizes. */
+    private static synchronized BossCategory massCategory(String group, String displayName, String displayGroup)
+    {
+        String key = group + "_mass";
+        BossCategory existing = getByKey(key);
+        if (existing != null) return existing;
+        return register(key, group, displayName, displayGroup, 6, 100, true);
     }
 
     /**
@@ -387,6 +480,51 @@ public class BossCategory
     }
 
     /**
+     * Get all categories matching a boss display name across all groups.
+     */
+    public static List<BossCategory> getCategoriesForBossAnyGroup(String displayName)
+    {
+        List<BossCategory> result = new ArrayList<>();
+        for (BossCategory cat : ALL)
+        {
+            if (cat.displayName.equals(displayName))
+            {
+                result.add(cat);
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Look up a BossCategory by its key (e.g. "cox_solo").
+     */
+    public static BossCategory fromKey(String key)
+    {
+        for (BossCategory cat : ALL)
+        {
+            if (cat.key.equals(key)) return cat;
+        }
+        return null;
+    }
+
+    /**
+     * Search all boss display names (case-insensitive), return unique matches.
+     */
+    public static List<String> searchBossNames(String query)
+    {
+        String lower = query.toLowerCase();
+        List<String> results = new ArrayList<>();
+        for (BossCategory cat : ALL)
+        {
+            if (cat.displayName.toLowerCase().contains(lower) && !results.contains(cat.displayName))
+            {
+                results.add(cat.displayName);
+            }
+        }
+        return results;
+    }
+
+    /**
      * Get all display group names in registration order.
      */
     public static List<String> getDisplayGroupNames()
@@ -400,6 +538,110 @@ public class BossCategory
             }
         }
         return names;
+    }
+
+    /**
+     * Map an adventure log boss name (lowercase, underscored) to a BossCategory group key.
+     * Adventure log names like "chambers_of_xeric" need to map to group keys like "cox".
+     * Returns null if no mapping found.
+     */
+    public static String mapAdventureLogName(String adventureLogKey)
+    {
+        if (adventureLogKey == null) return null;
+        switch (adventureLogKey)
+        {
+            // Raids
+            case "chambers_of_xeric": return "cox";
+            case "chambers_of_xeric__challenge_mode": return "cox_cm"; // " - " → double underscore
+            case "chambers_of_xeric_challenge_mode": return "cox_cm"; // colon stripped variant
+            case "theatre_of_blood": return "tob";
+            case "theatre_of_blood__entry": return "tob_entry"; // " - Entry" → double underscore
+            case "theatre_of_blood_entry_mode": return "tob_entry";
+            case "theatre_of_blood__hard": return "tob_hm"; // " - Hard" → double underscore
+            case "theatre_of_blood_hard_mode": return "tob_hm";
+            case "tombs_of_amascut": return "toa";
+            case "tombs_of_amascut__entry": return "toa_entry"; // " - Entry" → double underscore
+            case "tombs_of_amascut_entry_mode": return "toa_entry";
+            case "tombs_of_amascut__expert": return "toa_expert"; // " - Expert" → double underscore
+            case "tombs_of_amascut_expert_mode": return "toa_expert";
+
+            // GWD
+            case "general_graardor": return "bandos";
+            case "commander_zilyana": return "sara";
+            case "kril_tsutsaroth": return "zammy";
+            case "kreearra": return "arma";
+
+            // DT2
+            case "duke_sucellus": return "duke";
+            case "the_leviathan": return "leviathan";
+            case "vardorvis": return "vardorvis";
+            case "the_whisperer": return "whisperer";
+
+            // Wave content
+            case "tzhaar_fight_cave": return "jad";
+            case "inferno": return "zuk";
+            case "fortis_colosseum": return "colo";
+
+            // Gauntlet
+            case "the_gauntlet": return "gaunt";
+            case "the_corrupted_gauntlet": return "gaunt_corrupted";
+
+            // Nightmare
+            case "the_nightmare": return "nightmare";
+            case "phosanis_nightmare": return "phosanis";
+
+            // Nex
+            case "nex": return "nex";
+
+            // New Bosses
+            case "araxxor": return "araxxor";
+            case "royal_titans": return "titans";
+            case "yama": return "yama";
+            case "the_hueycoatl": return "hueycoatl";
+            case "amoxliatl": return "amoxliatl";
+
+            // Slayer
+            case "cerberus": return "cerberus";
+            case "alchemical_hydra": return "hydra";
+            case "thermonuclear_smoke_devil": return "thermy";
+            case "kraken": return "kraken";
+            case "abyssal_sire": return "sire";
+            case "grotesque_guardians": return "grotesque";
+            case "skotizo": return "skotizo";
+
+            // Other
+            case "zulrah": return "zulrah";
+            case "vorkath": return "vorkath";
+            case "kalphite_queen": return "kq";
+            case "corporeal_beast": return "corp";
+            case "giant_mole": return "mole";
+            case "sarachnis": return "sarachnis";
+            case "king_black_dragon": return "kbd";
+            case "dagannoth_kings": return "dks";
+            case "barrows": return "barrows";
+            case "bryophyta": return "bryophyta";
+            case "obor": return "obor";
+            case "hespori": return "hespori";
+
+            // Wilderness
+            case "callisto": case "artio": return "callisto";
+            case "vetion": case "calvarion": return "vetion";
+            case "venenatis": case "spindel": return "venenatis";
+            case "chaos_elemental": return "chaos_ele";
+            case "scorpia": return "scorpia";
+            case "crazy_archaeologist": return "crazy_arch";
+
+            // Challenges
+            case "barbarian_assault": return "ba";
+            case "hallowed_sepulchre": return "sep";
+
+            // Not in our category system but still trackable
+            case "fragment_of_seren": case "phantom_muspah": case "tempoross":
+            case "galvek":
+                return adventureLogKey; // pass through as-is
+
+            default: return adventureLogKey;
+        }
     }
 
     @Override

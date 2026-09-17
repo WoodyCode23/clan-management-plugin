@@ -1,0 +1,4656 @@
+package com.droplogger;
+
+import com.google.inject.Provides;
+import lombok.extern.slf4j.Slf4j;
+import net.runelite.api.Actor;
+import net.runelite.api.ChatMessageType;
+import net.runelite.api.Client;
+import net.runelite.api.NPC;
+import net.runelite.api.NPCComposition;
+import net.runelite.api.Player;
+import net.runelite.api.clan.ClanChannel;
+import net.runelite.api.clan.ClanChannelMember;
+import net.runelite.api.coords.WorldPoint;
+import net.runelite.api.GameState;
+import net.runelite.api.WorldType;
+import net.runelite.api.EnumComposition;
+import net.runelite.api.MenuAction;
+import net.runelite.api.StructComposition;
+import net.runelite.api.events.ActorDeath;
+import net.runelite.api.events.InteractingChanged;
+import net.runelite.api.events.ChatMessage;
+import net.runelite.api.events.GameStateChanged;
+import net.runelite.api.events.ItemContainerChanged;
+import net.runelite.api.events.GameTick;
+import net.runelite.api.events.ScriptPreFired;
+import net.runelite.api.events.ScriptPostFired;
+import net.runelite.api.events.WidgetLoaded;
+import net.runelite.api.gameval.InterfaceID;
+import net.runelite.api.gameval.InventoryID;
+import net.runelite.api.gameval.VarbitID;
+import net.runelite.api.Skill;
+import net.runelite.api.gameval.VarbitID;
+import net.runelite.api.Item;
+import net.runelite.api.ItemComposition;
+import net.runelite.api.ItemContainer;
+import net.runelite.api.widgets.Widget;
+import net.runelite.client.callback.ClientThread;
+import net.runelite.client.config.ConfigManager;
+import net.runelite.client.eventbus.Subscribe;
+import net.runelite.client.events.NpcLootReceived;
+import net.runelite.client.plugins.loottracker.LootReceived;
+import net.runelite.client.game.ItemStack;
+import net.runelite.http.api.loottracker.LootRecordType;
+import net.runelite.client.game.ItemManager;
+import net.runelite.client.game.SpriteManager;
+import net.runelite.client.plugins.Plugin;
+import net.runelite.client.plugins.PluginDescriptor;
+import net.runelite.client.ui.ClientToolbar;
+import net.runelite.client.ui.DrawManager;
+import net.runelite.client.ui.NavigationButton;
+import net.runelite.client.util.ImageUtil;
+import net.runelite.client.util.Text;
+
+import com.google.gson.Gson;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
+import com.google.gson.reflect.TypeToken;
+
+import javax.inject.Inject;
+import java.lang.ref.WeakReference;
+import java.awt.image.BufferedImage;
+import java.io.File;
+import java.io.FileReader;
+import java.io.FileWriter;
+import java.lang.reflect.Type;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+@Slf4j
+@PluginDescriptor(
+    name = "Solus",
+    description = "Solus clan plugin — drops, speed times, and more",
+    tags = {"solus", "clan", "drop", "logger", "discord", "speed", "times"}
+)
+public class ClanManagementPlugin extends Plugin
+{
+    private static final Pattern COLLECTION_LOG_PATTERN =
+        Pattern.compile("New item added to your collection log: (.+)");
+
+    // A DUPLICATE pet ("You have a funny feeling like you would have been followed") fires no
+    // clog unlock and no loot event — the only identification is the boss context from the
+    // kill-count line. Keys must match the boss name as it appears in KC chat messages.
+    private static final Map<String, String> BOSS_PET = new HashMap<>();
+    static
+    {
+        BOSS_PET.put("yama", "Yami");
+        BOSS_PET.put("kraken", "Pet kraken");
+        BOSS_PET.put("cerberus", "Hellpuppy");
+        BOSS_PET.put("vorkath", "Vorki");
+        BOSS_PET.put("zulrah", "Pet snakeling");
+        BOSS_PET.put("grotesque guardians", "Noon");
+        BOSS_PET.put("abyssal sire", "Abyssal orphan");
+        BOSS_PET.put("alchemical hydra", "Ikkle hydra");
+        BOSS_PET.put("sarachnis", "Sraracha");
+        BOSS_PET.put("kalphite queen", "Kalphite princess");
+        BOSS_PET.put("general graardor", "Pet general graardor");
+        BOSS_PET.put("k'ril tsutsaroth", "Pet k'ril tsutsaroth");
+        BOSS_PET.put("commander zilyana", "Pet zilyana");
+        BOSS_PET.put("kree'arra", "Pet kree'arra");
+        BOSS_PET.put("nex", "Nexling");
+        BOSS_PET.put("giant mole", "Baby mole");
+        BOSS_PET.put("dagannoth rex", "Pet dagannoth rex");
+        BOSS_PET.put("dagannoth prime", "Pet dagannoth prime");
+        BOSS_PET.put("dagannoth supreme", "Pet dagannoth supreme");
+        BOSS_PET.put("corporeal beast", "Pet dark core");
+        BOSS_PET.put("king black dragon", "Prince black dragon");
+        BOSS_PET.put("thermonuclear smoke devil", "Pet smoke devil");
+        BOSS_PET.put("scorpia", "Scorpia's offspring");
+        BOSS_PET.put("callisto", "Callisto cub");
+        BOSS_PET.put("artio", "Callisto cub");
+        BOSS_PET.put("venenatis", "Venenatis spiderling");
+        BOSS_PET.put("spindel", "Venenatis spiderling");
+        BOSS_PET.put("vet'ion", "Vet'ion jr.");
+        BOSS_PET.put("calvar'ion", "Vet'ion jr.");
+        BOSS_PET.put("chaos elemental", "Pet chaos elemental");
+        BOSS_PET.put("skotizo", "Skotos");
+        BOSS_PET.put("araxxor", "Nid");
+        BOSS_PET.put("phantom muspah", "Muphin");
+        BOSS_PET.put("the nightmare", "Little nightmare");
+        BOSS_PET.put("phosani's nightmare", "Little nightmare");
+        BOSS_PET.put("duke sucellus", "Baron");
+        BOSS_PET.put("vardorvis", "Butch");
+        BOSS_PET.put("the leviathan", "Lil'viathan");
+        BOSS_PET.put("the whisperer", "Wisp");
+        BOSS_PET.put("the hueycoatl", "Huberte");
+        BOSS_PET.put("amoxliatl", "Moxi");
+        BOSS_PET.put("the royal titans", "Bran");
+        BOSS_PET.put("doom of mokhaiotl", "Dom");
+        BOSS_PET.put("sol heredit", "Smol heredit");
+        BOSS_PET.put("zalcano", "Smolcano");
+        BOSS_PET.put("scurrius", "Scurry");
+        BOSS_PET.put("tztok-jad", "Tzrek-jad");
+        BOSS_PET.put("tzkal-zuk", "Jal-nib-rek");
+        BOSS_PET.put("chambers of xeric", "Olmlet");
+        BOSS_PET.put("chambers of xeric challenge mode", "Olmlet");
+        BOSS_PET.put("theatre of blood", "Lil' zik");
+        BOSS_PET.put("tombs of amascut", "Tumeken's guardian");
+    }
+
+    private static final Pattern CLUE_COMPLETION_PATTERN =
+        Pattern.compile("You have completed (\\d+) (easy|medium|hard|elite|master|beginner) Treasure Trails\\.");
+    private static final Pattern CLOG_PB_PATTERN =
+        Pattern.compile("Fastest (?:kill|time|completion)[:\\s]+([\\d]+:[\\d.]+)");
+
+    @Inject
+    private Client client;
+
+    @Inject
+    private ClientThread clientThread;
+
+    @Inject
+    private ClanManagementConfig config;
+
+    @Inject
+    private ConfigManager configManager;
+
+    @Inject
+    private ClientToolbar clientToolbar;
+
+    @Inject
+    private ItemManager itemManager;
+
+    @Inject
+    private SpriteManager spriteManager;
+
+    // ── Bingo/clog-event team dots in clan chat ──
+    @Inject
+    private net.runelite.client.game.ChatIconManager chatIconManager;
+    private final java.util.Map<String, String> teamColorByRsn = new java.util.HashMap<>(); // normalized name -> "#RRGGBB"
+    private final java.util.Map<String, Integer> teamIconIdByColor = new java.util.concurrent.ConcurrentHashMap<>(); // color -> ChatIconManager icon id
+    private volatile long teamRosterLoadedAtMs = 0;
+
+    private static String normalizeName(String s)
+    {
+        if (s == null) return "";
+        return s.toLowerCase().replace(' ', ' ').replace('_', ' ').replace('-', ' ').replaceAll(" +", " ").trim();
+    }
+
+    // Rebuild the name->team-colour map from the current draft (throttled to 5 min). Off-thread fetch.
+    private void refreshTeamRosterIfStale()
+    {
+        if (System.currentTimeMillis() - teamRosterLoadedAtMs < 5 * 60_000L) return;
+        teamRosterLoadedAtMs = System.currentTimeMillis();
+        executor.submit(() ->
+        {
+            try
+            {
+                if (!isPlatformConfigured()) { synchronized (teamColorByRsn) { teamColorByRsn.clear(); } return; }
+                // Only tag clan chat while a clog event is actually running. Once it ends (status
+                // "ended") or there is no current event, drop the roster so old team colours stop
+                // appearing next to names in chat.
+                PlatformApiService.ClogRace race = platformApiService.fetchClogRace(getPlatformUrl(), getPlatformKey(), getPlatformSlug());
+                String evStatus = race != null && race.event != null ? race.event.status : null;
+                if (evStatus == null || evStatus.equals("ended"))
+                {
+                    synchronized (teamColorByRsn) { teamColorByRsn.clear(); }
+                    return;
+                }
+                com.google.gson.JsonObject draft = boardDataService.fetchDraft(getPlatformUrl(), getPlatformSlug(), getPlatformKey());
+                java.util.Map<String, String> map = new java.util.HashMap<>();
+                if (draft != null && draft.has("teams") && draft.get("teams").isJsonArray())
+                {
+                    java.util.Map<String, String> colorByTeam = new java.util.HashMap<>();
+                    for (com.google.gson.JsonElement el : draft.getAsJsonArray("teams"))
+                    {
+                        com.google.gson.JsonObject t = el.getAsJsonObject();
+                        String color = t.has("color") && !t.get("color").isJsonNull() ? t.get("color").getAsString() : null;
+                        if (color == null) continue;
+                        colorByTeam.put(t.get("id").getAsString(), color);
+                        if (t.has("captain1") && !t.get("captain1").isJsonNull()) map.put(normalizeName(t.get("captain1").getAsString()), color);
+                        if (t.has("captain2") && !t.get("captain2").isJsonNull()) map.put(normalizeName(t.get("captain2").getAsString()), color);
+                    }
+                    java.util.Map<String, String> rsnByPool = new java.util.HashMap<>();
+                    if (draft.has("pool") && draft.get("pool").isJsonArray())
+                        for (com.google.gson.JsonElement el : draft.getAsJsonArray("pool"))
+                        { com.google.gson.JsonObject p = el.getAsJsonObject(); rsnByPool.put(p.get("id").getAsString(), p.get("rsn").getAsString()); }
+                    if (draft.has("picks") && draft.get("picks").isJsonArray())
+                        for (com.google.gson.JsonElement el : draft.getAsJsonArray("picks"))
+                        {
+                            com.google.gson.JsonObject pk = el.getAsJsonObject();
+                            String rsn = rsnByPool.get(pk.get("poolId").getAsString());
+                            String color = colorByTeam.get(pk.get("teamId").getAsString());
+                            if (rsn != null && color != null) map.put(normalizeName(rsn), color);
+                        }
+                }
+                synchronized (teamColorByRsn) { teamColorByRsn.clear(); teamColorByRsn.putAll(map); }
+                registerTeamColorIcons(new java.util.HashSet<>(map.values()));
+            }
+            catch (Exception ex) { log.debug("team roster refresh failed", ex); }
+        });
+    }
+
+    // Pre-register a small filled dot per team colour, ON THE CLIENT THREAD and ahead of time.
+    // ChatIconManager assigns the <img=> index only on a later tick (its own clientThread.invokeLater
+    // -> refreshIcons), so registration and index-resolution MUST be separate steps.
+    private void registerTeamColorIcons(java.util.Collection<String> colors)
+    {
+        if (colors.isEmpty()) return;
+        clientThread.invokeLater(() ->
+        {
+            for (String color : colors)
+            {
+                if (color == null || teamIconIdByColor.containsKey(color)) continue;
+                try
+                {
+                    java.awt.Color c = java.awt.Color.decode(color);
+                    java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(12, 12, java.awt.image.BufferedImage.TYPE_INT_ARGB);
+                    java.awt.Graphics2D g = img.createGraphics();
+                    g.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
+                    g.setColor(c);
+                    g.fillOval(1, 2, 9, 9);
+                    g.dispose();
+                    teamIconIdByColor.put(color, chatIconManager.registerChatIcon(img));
+                }
+                catch (Exception ex) { log.debug("team icon register failed for {}", color, ex); }
+            }
+        });
+    }
+
+    // Resolve the already-registered dot's chat <img=> index for a colour (-1 until it's ready).
+    private int teamIconIndex(String color)
+    {
+        Integer id = teamIconIdByColor.get(color);
+        return id == null ? -1 : chatIconManager.chatIconIndex(id);
+    }
+
+    // Prepend a team-colour dot to clan-chat lines (typed messages + drop broadcasts) for anyone on a
+    // bingo/clog-event team, so friend vs enemy team is obvious at a glance. Defensive: never throws.
+    private void tagClanChatTeam(ChatMessage event)
+    {
+        try
+        {
+            ChatMessageType t = event.getType();
+            boolean typed = t == ChatMessageType.CLAN_CHAT || t == ChatMessageType.CLAN_GUEST_CHAT || t == ChatMessageType.FRIENDSCHAT;
+            boolean broadcast = t == ChatMessageType.CLAN_MESSAGE || t == ChatMessageType.CLAN_GUEST_MESSAGE || t == ChatMessageType.FRIENDSCHATNOTIFICATION;
+            if (!typed && !broadcast) return;
+            refreshTeamRosterIfStale();
+            if (teamColorByRsn.isEmpty()) return;
+            net.runelite.api.MessageNode node = event.getMessageNode();
+            if (node == null) return;
+
+            if (typed)
+            {
+                String color = teamColorByRsn.get(normalizeName(Text.removeTags(event.getName())));
+                if (color == null) return;
+                int idx = teamIconIndex(color);
+                if (idx < 0) return;
+                String cur = node.getName() == null ? "" : node.getName();
+                String tag = "<img=" + idx + ">";
+                if (!cur.contains(tag)) { node.setName(tag + cur); client.refreshChat(); }
+            }
+            else
+            {
+                String msg = node.getValue() == null ? "" : node.getValue();
+                String plainNorm = normalizeName(Text.removeTags(msg));
+                for (java.util.Map.Entry<String, String> e : teamColorByRsn.entrySet())
+                {
+                    if (e.getKey().isEmpty() || !plainNorm.contains(e.getKey())) continue;
+                    int idx = teamIconIndex(e.getValue());
+                    if (idx < 0) return;
+                    String tag = "<img=" + idx + ">";
+                    if (!msg.contains(tag)) { node.setValue(tag + " " + msg); client.refreshChat(); }
+                    return;
+                }
+            }
+        }
+        catch (Exception ex) { log.debug("team dot tag failed", ex); }
+    }
+
+
+    @Inject
+    private ScheduledExecutorService executor;
+
+    @Inject
+    private DrawManager drawManager;
+
+    @Inject
+    private BoardDataService boardDataService;
+
+    @Inject
+    private AdminService adminService;
+
+    @Inject
+    private Gson gson;
+
+    @Inject
+    private PlatformApiService platformApiService;
+
+    @Inject
+    private RsHiscoreTracker hiscoreTracker;
+
+    private ClanPanel panel;
+    private AdminPanel adminPanel;
+    private NavigationButton navButton;
+
+    private ScheduledFuture<?> refreshTask;
+    private ScheduledFuture<?> raidRaceTask; // 20s poll while the Raid Race tab is active; self-cancels on deselect
+
+    // Track last killed NPC for correlating drops
+    private String lastKilledNpc = "Unknown";
+    private int lastKillCount = 0;
+    private long lastKillTime = 0;
+
+    // Death cause: the last actor we interacted with, used to name our killer. See identifyKiller().
+    private WeakReference<Actor> lastTarget = new WeakReference<>(null);
+    private static final String ATTACK_OPTION = "Attack";
+    // How far a boss may have drifted from our corpse and still be a believable killer.
+    private static final int KILLER_SEARCH_RADIUS = 15;
+
+    private PbDetector pbDetector;
+    private FightTracker fightTracker;
+    private boolean wasInInstance = false;
+
+    // Fixed platform endpoint. The plugin is Solus-only and always talks to ONE hardcoded URL
+    // — required by the RuneLite Plugin Hub (no network call to a URL derived from user input
+    // or fetched data). The only connection config a user enters is their clan API key.
+    private static final String PLATFORM_URL = "https://api.solusosrs.com";
+    private static final String PLATFORM_SLUG = "solus";
+
+
+    // In-memory hiscore cache: categoryKey → list of entries
+    private final Map<String, List<HiscoreEntry>> hiscoreCacheV2 = Collections.synchronizedMap(new LinkedHashMap<>());
+    private volatile boolean hiscoreV2BatchFetched = false; // true once allTopTimes has been called this session
+    // Speed-times mode: "clan" (clan-verified live only — the DEFAULT, so imports stay off the
+    // board) or "all" (each player's best across sources, via the Mode dropdown). The Recent
+    // overview is newest-first in both modes.
+    private volatile String pbMode = "clan";
+    private volatile String activityFilter = ""; // activity feed type filter: "" = all, else CSV e.g. "drop,pb"
+    private volatile boolean platformIsAdmin = false; // caller's key owner has admin/manage_announcements (from bootstrap permissions)
+
+    // Server-side config fetched from Settings tab
+    private int fetchedMinDropValue = 100000;
+    private String clanName = "Solus";
+    private boolean serverConfigLoaded = false;
+    private boolean achievementsSyncedThisSession = false; // diary/quest sync fires once per login
+
+    // Cached drops tab data
+    private List<Map<String, Object>> cachedLeaderboard;
+    private List<Map<String, Object>> cachedRecentDrops;
+    private List<Map<String, String>> cachedClanWhitelist;
+    private boolean dropsTabLoaded = false;
+
+    // Active event state
+    private String activeEventType = "";
+    private String activeEventMetric = "";
+    private String activeEventDisplayName = "";
+    private String activeEventEndTime = "";
+    private String activeEventId = "";
+
+    // Collection log sync state (automatic — like WikiSync/RuneProfile)
+    private final Map<Integer, ClogItem> clogSyncItems = Collections.synchronizedMap(new LinkedHashMap<>());
+    // Rank checks default to CURRENT possession (bank/equipment). The collection log may ONLY grant
+    // ownership for items consumed into a permanent unlock that leave no holdable trace, so a sold,
+    // lost, hacked, or Jagex-stripped item never counts. Keep this list tiny and deliberate.
+    private static final Set<String> CLOG_OWNED_WHITELIST = new HashSet<>(Arrays.asList(
+        "slepey tablet"
+    ));
+    private Map<Integer, String[]> clogItemCategoryMap = null; // itemId -> [tab, category]
+    private Map<String, Integer> clogNameToId = null; // lowercase item name -> itemId (for pet icons)
+    private int clogDebounceTicksRemaining = -1;
+    private boolean clogSearchPending = false;
+    private int clogRawEventCount = 0;
+    private static final int CLOG_DEBOUNCE_TICKS = 30;
+    private static final int SCRIPT_CLOG_ITEM = 4100;
+    private static final int SEARCH_TOGGLE_PACKED = 40697932; // InterfaceID.Collection.SEARCH_TOGGLE
+    private static final int CLOG_TABS_ENUM = 2102;
+    private static final int CLOG_DUPE_REMAP_ENUM = 3721; // game enum: bad itemId -> canonical itemId
+    // Cross-category collection-log slots that share a single log slot in-game but carry distinct
+    // item ids that enum 3721 does NOT cover. The Volcanic Mine prospector pieces are listed under
+    // their own category with new item ids, yet the game counts them as the same slots as the
+    // Motherlode Mine set (varp 2943/2944 counts them once). Mapped variant -> canonical so our
+    // catalog and unique counts match the game's totals. Enum 3721 still takes precedence and
+    // covers any future Jagex-declared dupes; this map only fills the gaps 3721 leaves.
+    private static final Map<Integer, Integer> CLOG_DUPE_REMAP_GAPS = Map.of(
+        29472, 12013, // Prospector helmet (Volcanic Mine -> Motherlode Mine)
+        29474, 12014, // Prospector jacket
+        29476, 12015, // Prospector legs
+        29478, 12016  // Prospector boots
+    );
+    private static final int VARP_CLOG_OBTAINED = 2943;   // VarPlayer.CLOG_LOGGED — authoritative unique obtained
+    private static final int VARP_CLOG_TOTAL = 2944;      // VarPlayer.CLOG_TOTAL — authoritative unique total
+    private static final int PARAM_TAB_NAME = 682;
+    private static final int PARAM_TAB_CATEGORIES_ENUM = 683;
+    private static final int PARAM_CATEGORY_NAME = 689;
+    private static final int PARAM_CATEGORY_ITEMS_ENUM = 690;
+
+    // Boss group-key -> representative item id, for the small icon beside each boss name.
+    private static final Map<String, Integer> BOSS_GROUP_ICONS = new HashMap<>();
+    static
+    {
+        // Raids
+        BOSS_GROUP_ICONS.put("cox", 20851);      BOSS_GROUP_ICONS.put("cox_cm", 22386);
+        BOSS_GROUP_ICONS.put("tob", 22473);      BOSS_GROUP_ICONS.put("tob_entry", 22473);
+        BOSS_GROUP_ICONS.put("tob_hm", 22473);
+        BOSS_GROUP_ICONS.put("toa", 27352);      BOSS_GROUP_ICONS.put("toa_entry", 27352);
+        BOSS_GROUP_ICONS.put("toa_expert", 27352);
+        // GWD
+        BOSS_GROUP_ICONS.put("bandos", 12650);   BOSS_GROUP_ICONS.put("sara", 12651);
+        BOSS_GROUP_ICONS.put("zammy", 12652);    BOSS_GROUP_ICONS.put("arma", 12649);
+        // DT2
+        BOSS_GROUP_ICONS.put("duke", 28250);     BOSS_GROUP_ICONS.put("leviathan", 28252);
+        BOSS_GROUP_ICONS.put("whisperer", 28246); BOSS_GROUP_ICONS.put("vardorvis", 28248);
+        // Wave / capes
+        BOSS_GROUP_ICONS.put("jad", 13225);      BOSS_GROUP_ICONS.put("zuk", 21291);
+        BOSS_GROUP_ICONS.put("colo", 28960);
+        // Gauntlet
+        BOSS_GROUP_ICONS.put("gaunt", 23757);    BOSS_GROUP_ICONS.put("gaunt_corrupted", 23759);
+        // Nightmare
+        BOSS_GROUP_ICONS.put("nightmare", 24491); BOSS_GROUP_ICONS.put("phosanis", 24491);
+        // Slayer / misc bosses
+        BOSS_GROUP_ICONS.put("nex", 26348);      BOSS_GROUP_ICONS.put("araxxor", 29836);
+        BOSS_GROUP_ICONS.put("cerberus", 13247); BOSS_GROUP_ICONS.put("hydra", 22746);
+        BOSS_GROUP_ICONS.put("thermy", 12648);   BOSS_GROUP_ICONS.put("kraken", 12655);
+        BOSS_GROUP_ICONS.put("sire", 13262);     BOSS_GROUP_ICONS.put("grotesque", 21748);
+        BOSS_GROUP_ICONS.put("skotizo", 21273);  BOSS_GROUP_ICONS.put("zulrah", 12921);
+        BOSS_GROUP_ICONS.put("vorkath", 21992);  BOSS_GROUP_ICONS.put("kq", 12647);
+        BOSS_GROUP_ICONS.put("corp", 12816);     BOSS_GROUP_ICONS.put("mole", 12646);
+        BOSS_GROUP_ICONS.put("sarachnis", 23495); BOSS_GROUP_ICONS.put("kbd", 12653);
+        BOSS_GROUP_ICONS.put("dks", 12644);
+        // Newer bosses
+        BOSS_GROUP_ICONS.put("hueycoatl", 30152); BOSS_GROUP_ICONS.put("amoxliatl", 30154);
+        BOSS_GROUP_ICONS.put("yama", 29622);
+        BOSS_GROUP_ICONS.put("maggot_king", 33634); // Elder venator fang
+        // Wilderness
+        BOSS_GROUP_ICONS.put("callisto", 13178); BOSS_GROUP_ICONS.put("vetion", 13179);
+        BOSS_GROUP_ICONS.put("venenatis", 13177); BOSS_GROUP_ICONS.put("chaos_ele", 11995);
+        BOSS_GROUP_ICONS.put("scorpia", 13181);  BOSS_GROUP_ICONS.put("crazy_arch", 11990);
+        // Low/other
+        BOSS_GROUP_ICONS.put("barrows", 4708);   BOSS_GROUP_ICONS.put("bryophyta", 22372);
+        BOSS_GROUP_ICONS.put("obor", 20756);
+        BOSS_GROUP_ICONS.put("hespori", 22997);  // filled bottomless compost bucket — its signature unique (no item depicts the boss)
+        BOSS_GROUP_ICONS.put("titans", 30638);   // Giantsoul amulet (Royal Titans)
+        BOSS_GROUP_ICONS.put("sep", 20659);      BOSS_GROUP_ICONS.put("ba", 12703);
+    }
+    // Built from enum 3721 on clog open: maps a slot's "bad" item id to its canonical id.
+    // Replaces the old hand-maintained skip list (which dropped real slots → undercount).
+    private Map<Integer, Integer> clogDupeRemap = Collections.emptyMap();
+    // Authoritative game counts captured on clog open (varp 2943/2944), reused at upload time.
+    private int clogObtainedCount = 0;
+    private int clogTotalCount = 0;
+
+    // Adventure log PB sync state
+    private int adventureLogPbTicksRemaining = -1;
+    private int caReadTicksRemaining = -1; // ticks until we read the CA task interface after it opens
+    private int slayerReadTicksRemaining = -1; // ticks until we read the Slayer Rewards shop after it opens
+    private static final int GIM_SIDEPANEL_GROUP = 726; // InterfaceID.GIM_SIDEPANEL (gameval)
+    private int gimReadTicksRemaining = -1; // ticks until we read the GIM group panel after it opens
+    private boolean gimGroupReported = false; // once per session
+    // Task-name text color in the CA interface: bright green = completed, grey = incomplete.
+    private static final int CA_COMPLETE_COLOR = 0x0DC10D;
+    private static final int CA_TASK_NAME_COMPONENT = 10; // component 715,10 holds the task-name column
+    private static final int JOURNALSCROLL_GROUP = 741;
+    private static final int SLAYER_REWARDS_GROUP = 426; // the Slayer Rewards shop interface
+    // Status sprites on each Slayer Rewards unlock row: OWNED vs not. (May change if Jagex reworks the
+    // shop art — verified 2026-09: owned=8384, locked=8382.)
+    private static final int SLAYER_UNLOCK_OWNED_SPRITE = 8384;
+    private static final int ADVENTURE_LOG_PB_DELAY_TICKS = 3;
+    // Matches: "Fastest kill: 0:46.80", "Fastest run - (Team size: Solo): 13:52.80",
+    //          "Fastest Overall time - (Team size: 2 player): 25:40.80",
+    //          "Fastest Room time - (Team size: 1 player entry mode):" (time on next line)
+    private static final Pattern ADVENTURE_PB_PATTERN =
+        Pattern.compile("Fastest (?:Overall time|Room time|kill|time|run|completion)(?:\\s*-\\s*\\(Team size:\\s*(.+?)\\))?[:\\s]+((?:\\d+:)?\\d+:\\d+\\.\\d+)?");
+    // Standalone time on its own line (for ToB/ToA where time wraps)
+    private static final Pattern STANDALONE_TIME = Pattern.compile("^((?:\\d+:)?\\d+:\\d+\\.\\d+)$");
+
+    @Provides
+    ClanManagementConfig provideConfig(ConfigManager configManager)
+    {
+        return configManager.getConfig(ClanManagementConfig.class);
+    }
+
+    /** @deprecated Legacy — returns empty string; still referenced by the dead GAS fallbacks. */
+    private String getApiKey()
+    {
+        return "";
+    }
+
+    /**
+     * Check if the player is on a non-standard world (leagues, deadman, tournament, etc.).
+     * Drops and PBs from these worlds should not be tracked.
+     */
+    private boolean isNonStandardWorld()
+    {
+        java.util.EnumSet<WorldType> worldTypes = client.getWorldType();
+        if (worldTypes == null) return false;
+        return worldTypes.contains(WorldType.SEASONAL)
+            || worldTypes.contains(WorldType.DEADMAN)
+            || worldTypes.contains(WorldType.TOURNAMENT_WORLD)
+            || worldTypes.contains(WorldType.FRESH_START_WORLD);
+    }
+
+    private boolean isPlatformConfigured()
+    {
+        return config.apiKey() != null && !config.apiKey().trim().isEmpty();
+    }
+
+    private String getPlatformUrl()
+    {
+        return PLATFORM_URL;
+    }
+
+    private String getPlatformKey()
+    {
+        return config.apiKey() == null ? "" : config.apiKey().trim();
+    }
+
+    private String getPlatformSlug()
+    {
+        return PLATFORM_SLUG;
+    }
+
+    /**
+     * Fetch shared config from the platform bootstrap endpoint.
+     * Updates cached values for min drop value, active event, etc. (no URLs are ever
+     * read from this response — the plugin only calls the hardcoded platform endpoint.)
+     */
+    private void fetchBootstrapConfig()
+    {
+        if (!isPlatformConfigured())
+        {
+            return;
+        }
+
+        String url = getPlatformUrl() + "/clans/" + getPlatformSlug() + "/bootstrap";
+        JsonObject response = platformApiService.getSync(url, getPlatformKey());
+        clogCatalogIds = platformApiService.fetchClogCatalogIds(getPlatformUrl(), getPlatformKey(), getPlatformSlug());
+        log.debug("clog catalog ids loaded: {}", clogCatalogIds.size());
+
+        // Pop the Event tab once when a race is live, or a scheduled one starts within 7 days.
+        JsonObject activeEvent = platformApiService.fetchActiveEvent(getPlatformUrl(), getPlatformKey(), getPlatformSlug());
+        if (activeEvent != null)
+        {
+            boolean live = activeEvent.has("event") && !activeEvent.get("event").isJsonNull();
+            boolean soon = false;
+            if (activeEvent.has("upcoming") && !activeEvent.get("upcoming").isJsonNull())
+            {
+                try
+                {
+                    long startMs = java.time.Instant.parse(
+                        activeEvent.getAsJsonObject("upcoming").get("startTime").getAsString()).toEpochMilli();
+                    soon = startMs - System.currentTimeMillis() <= 7L * 24 * 3600 * 1000;
+                }
+                catch (Exception ignored) { }
+            }
+            if (live || soon)
+            {
+                panel.showEventTabOnce();
+            }
+        }
+        if (response == null)
+        {
+            log.warn("Failed to fetch bootstrap config from platform");
+            return;
+        }
+
+        // Settings
+        if (response.has("settings"))
+        {
+            JsonObject settings = response.getAsJsonObject("settings");
+            if (settings.has("minDropValue"))
+            {
+                fetchedMinDropValue = settings.get("minDropValue").getAsInt();
+            }
+        }
+
+        // Active event
+        if (response.has("activeEvent") && !response.get("activeEvent").isJsonNull())
+        {
+            JsonObject event = response.getAsJsonObject("activeEvent");
+            activeEventType = event.has("type") ? event.get("type").getAsString() : "";
+            activeEventMetric = event.has("metric") ? event.get("metric").getAsString() : "";
+            activeEventDisplayName = event.has("displayName") ? event.get("displayName").getAsString() : "";
+            activeEventEndTime = event.has("endTime") ? event.get("endTime").getAsString() : "";
+            activeEventId = event.has("id") ? event.get("id").getAsString() : "";
+        }
+        else
+        {
+            activeEventType = "";
+            activeEventMetric = "";
+            activeEventDisplayName = "";
+            activeEventEndTime = "";
+            activeEventId = "";
+        }
+
+        // Permissions — the caller key owner's clan permissions drive admin-section unlock.
+        platformIsAdmin = false;
+        if (response.has("permissions") && response.get("permissions").isJsonArray())
+        {
+            JsonArray perms = response.getAsJsonArray("permissions");
+            for (int i = 0; i < perms.size(); i++)
+            {
+                String perm = perms.get(i).getAsString();
+                if ("admin".equals(perm) || "manage_announcements".equals(perm))
+                {
+                    platformIsAdmin = true;
+                    break;
+                }
+            }
+        }
+
+        // Announcements — render on the home tab.
+        List<PlatformApiService.Announcement> anns = new ArrayList<>();
+        if (response.has("announcements") && response.get("announcements").isJsonArray())
+        {
+            JsonArray arr = response.getAsJsonArray("announcements");
+            for (int i = 0; i < arr.size(); i++)
+            {
+                JsonObject o = arr.get(i).getAsJsonObject();
+                anns.add(new PlatformApiService.Announcement(
+                    o.has("id") ? o.get("id").getAsString() : "",
+                    o.has("message") && !o.get("message").isJsonNull() ? o.get("message").getAsString() : "",
+                    o.has("author") && !o.get("author").isJsonNull() ? o.get("author").getAsString() : null,
+                    o.has("pinned") && o.get("pinned").getAsBoolean()));
+            }
+        }
+        panel.setAnnouncements(anns);
+
+        // Now that permissions are known, unlock the admin tab if this key's owner is an admin.
+        if (platformIsAdmin)
+        {
+            javax.swing.SwingUtilities.invokeLater(this::setupAdminPanel);
+        }
+
+        log.debug("Bootstrap config loaded from platform");
+    }
+
+    /** Re-fetch announcements and refresh both the home display and the admin management list. */
+    private void refreshAnnouncements()
+    {
+        if (!isPlatformConfigured()) return;
+        List<PlatformApiService.Announcement> anns = platformApiService.fetchAnnouncements(
+            getPlatformUrl(), getPlatformKey(), getPlatformSlug());
+        panel.setAnnouncements(anns);
+        if (adminPanel != null) adminPanel.setAnnouncementsList(anns);
+    }
+
+    /** Get the clan name — hardcoded to Solus. */
+    String getClanName()
+    {
+        return "Solus";
+    }
+
+    /**
+     * True only when the LOGGED-IN account is actually a member of the clan. A member's API key
+     * configured on a non-clan alt must not submit that alt's drops/times to the clan feed —
+     * the key authenticates the Discord user, not the account being played.
+     */
+    private boolean localPlayerInClan()
+    {
+        ClanChannel clan = client.getClanChannel();
+        return clan != null && clan.getName() != null
+            && clan.getName().equalsIgnoreCase(getClanName());
+    }
+
+    @Override
+    protected void startUp()
+    {
+        // Set up side panel
+        panel = new ClanPanel();
+        panel.setItemManager(itemManager); // for local item-icon rendering in the Members clog grid
+        panel.setSpriteManager(spriteManager); // for in-game clan-rank icons on the Ranks tab
+        panel.exportRankIcons(new File(pluginDataDir(), "rank-icons")); // inline rank icons beside names
+        // Show tabs only if board code is configured
+        panel.setConnected(isPlatformConfigured());
+        panel.setOnRefresh(() -> executor.submit(this::refreshData));
+        panel.setOnFetchTimes((cat, timesPanel) -> executor.submit(() -> fetchAndDisplayTimesV2(cat, timesPanel)));
+        panel.setOnPbModeChange(mode -> executor.submit(() ->
+        {
+            pbMode = mode;
+            batchFetchAllHiscores(); // re-fetch in the new mode (cache is replaced, not merged)
+        }));
+        panel.setOnActivityFilterChange(filter -> executor.submit(() ->
+        {
+            activityFilter = filter;
+            refreshClanActivity();
+        }));
+        // Members tab: load the roster on first open, fetch a player's clog on select.
+        panel.setOnLoadRoster(() -> executor.submit(() ->
+        {
+            if (!isPlatformConfigured()) return;
+            panel.setMemberList(platformApiService.fetchRoster(getPlatformUrl(), getPlatformKey(), getPlatformSlug()));
+            panel.setTeams(platformApiService.fetchTeams(getPlatformUrl(), getPlatformKey(), getPlatformSlug()));
+        }));
+        panel.setOnSelectTeam(teamSlug -> executor.submit(() ->
+        {
+            if (!isPlatformConfigured()) return;
+            panel.showTeamProfile(platformApiService.fetchTeamProfile(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), teamSlug));
+        }));
+        // Event tab: live draft state (public endpoint) — your team, captains, roster.
+        panel.setOnLoadEvent(() -> executor.submit(() ->
+        {
+            if (!isPlatformConfigured()) return;
+            try
+            {
+                String localName = client.getLocalPlayer() != null ? client.getLocalPlayer().getName() : null;
+                panel.updateEvent(
+                    boardDataService.fetchDraft(getPlatformUrl(), getPlatformSlug(), getPlatformKey()),
+                    platformApiService.fetchActiveEvent(getPlatformUrl(), getPlatformKey(), getPlatformSlug()),
+                    localName);
+            }
+            catch (Exception ex)
+            {
+                log.debug("event tab load failed", ex);
+                panel.updateEvent(null, null, null);
+            }
+        }));
+        panel.setOnSelectMember(rsn -> executor.submit(() ->
+        {
+            if (!isPlatformConfigured()) return;
+            PlatformApiService.PlayerProfile prof = platformApiService.fetchPlayerProfile(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), rsn);
+            PlatformApiService.MemberAbout about = platformApiService.fetchMemberAbout(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), rsn);
+            java.util.Map<String, Integer> kc = platformApiService.fetchPlayerKc(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), rsn);
+            panel.showMemberProfile(rsn, prof, about, kc);
+        }));
+        panel.setOnLoadClog(rsn -> executor.submit(() ->
+        {
+            if (!isPlatformConfigured()) return;
+            panel.showPlayerClog(rsn, platformApiService.fetchPlayerClog(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), rsn));
+        }));
+        panel.setOnLoadCa(rsn -> executor.submit(() ->
+        {
+            if (!isPlatformConfigured()) return;
+            panel.showPlayerCa(rsn, platformApiService.fetchPlayerCa(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), rsn));
+        }));
+        // Loud auth-failure warning: a bad/mispasted API key otherwise fails silently while the
+        // panel looks fine (e.g. a member's kills never syncing). At most one warning per 5 min.
+        // Only warn when the logged-in account is actually a clan member: lots of people play mains
+        // + alts, and a non-clan alt gets expected "not a member" (403) rejections that must NOT be
+        // mistaken for a bad key or spammed to chat.
+        platformApiService.setOnAuthFailure(() ->
+        {
+            long now = System.currentTimeMillis();
+            if (now - lastAuthWarnAt < 5 * 60_000) return;
+            clientThread.invokeLater(() ->
+            {
+                if (!localPlayerInClan()) return; // on a non-clan alt: their key isn't the problem, stay silent
+                lastAuthWarnAt = System.currentTimeMillis();
+                client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+                    "[" + getClanName() + "] Your API key was REJECTED. Drops/times are NOT syncing. "
+                        + "Run /getkey in Discord and paste the new key into the plugin settings.", "");
+            });
+        });
+
+        // Raid Race tab: clog-race board/standings/countdown (public endpoint). Selecting the tab
+        // fetches immediately and (re)starts a 20s poll (see startRaidRacePoll) that self-cancels
+        // once the tab is no longer active, so it never refreshes in the background.
+        panel.setOnLoadRaidRace(() ->
+        {
+            executor.submit(this::fetchRaidRace);
+            startRaidRacePoll();
+        });
+
+        panel.setOnLoadRanks(this::loadRanksWithMode);
+        // Lazily fetch one event's signups when its card is expanded, then push them back to the panel.
+        panel.setOnFetchEventSignups(eventId ->
+        {
+            if (!isPlatformConfigured() || eventId == null) return;
+            executor.submit(() ->
+            {
+                PlatformApiService.Signups s = platformApiService.fetchSignups(
+                    getPlatformUrl(), getPlatformKey(), getPlatformSlug(), eventId);
+                panel.setEventSignups(eventId, s);
+            });
+        });
+        // Sign the local player up for one specific event, then refresh that event's list.
+        panel.setOnSignupForEvent(eventId ->
+        {
+            String rsn = getLocalPlayerName();
+            if (!isPlatformConfigured() || eventId == null || rsn == null || rsn.isEmpty()) return;
+            executor.submit(() ->
+            {
+                platformApiService.signup(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), rsn, eventId);
+                PlatformApiService.Signups s = platformApiService.fetchSignups(
+                    getPlatformUrl(), getPlatformKey(), getPlatformSlug(), eventId);
+                panel.setEventSignups(eventId, s);
+            });
+        });
+        panel.setOnRequestRank(args ->
+        {
+            String rankName = (String) args[0];
+            boolean eligible = (Boolean) args[1];
+            @SuppressWarnings("unchecked")
+            java.util.List<String> missing = (java.util.List<String>) args[2];
+            String rsn = client.getLocalPlayer() != null ? client.getLocalPlayer().getName() : "";
+            if (!isPlatformConfigured() || rsn.isEmpty()) return;
+            executor.submit(() -> platformApiService.requestRank(
+                getPlatformUrl(), getPlatformKey(), getPlatformSlug(), rsn, rankName, eligible, missing));
+        });
+        panel.setOnSetRankOverride(args ->
+        {
+            String rsn = (String) args[0];
+            String mode = (String) args[1];
+            String assigned = (String) args[2];
+            if (!isPlatformConfigured()) return;
+            String setBy = client.getLocalPlayer() != null ? client.getLocalPlayer().getName() : null;
+            executor.submit(() -> platformApiService.setRankOverride(
+                getPlatformUrl(), getPlatformKey(), getPlatformSlug(), rsn, mode, assigned, setBy));
+        });
+        panel.setOnClearRankOverride(rsn ->
+        {
+            if (!isPlatformConfigured()) return;
+            executor.submit(() -> platformApiService.clearRankOverride(
+                getPlatformUrl(), getPlatformKey(), getPlatformSlug(), rsn));
+        });
+        panel.setOnClearHiscoreCache(() ->
+        {
+            hiscoreCacheV2.clear();
+            hiscoreV2BatchFetched = false;
+            File cacheFile = getHiscoreCacheFile();
+            if (cacheFile.exists()) cacheFile.delete();
+            log.debug("Hiscore cache cleared — next view will batch-fetch");
+        });
+        panel.setOnRefreshDropsTab(() -> executor.submit(this::refreshDropsTab));
+        panel.setOnFetchPlayerDrops((rsn) -> executor.submit(() -> fetchPlayerDrops(rsn)));
+        panel.setOnRefreshWhitelist(() -> executor.submit(this::refreshClanWhitelist));
+        panel.setOnFetchWomData((metric, period) -> executor.submit(() -> fetchWomData(metric, period)));
+        panel.setOnRefreshStatus(() -> executor.submit(this::refreshStatusBoxes));
+        // Load caches from disk (avoids re-fetching every startup)
+        loadHiscoreCacheFromDisk();
+        loadDropsCacheFromDisk();
+        loadWhitelistCacheFromDisk();
+        // Show cached drops data immediately if available
+        if (cachedLeaderboard != null)
+        {
+            panel.updateDropsLeaderboard(cachedLeaderboard, null);
+        }
+        if (cachedRecentDrops != null)
+        {
+            panel.updateRecentDrops(cachedRecentDrops);
+        }
+        if (cachedClanWhitelist != null && !cachedClanWhitelist.isEmpty())
+        {
+            panel.updateClanWhitelist(cachedClanWhitelist);
+        }
+
+        BufferedImage icon = ImageUtil.loadImageResource(getClass(), "/panel_icon.png");
+        if (icon == null)
+        {
+            icon = new BufferedImage(16, 16, BufferedImage.TYPE_INT_ARGB);
+        }
+        icon = ImageUtil.resizeImage(icon, 16, 16);
+
+        navButton = NavigationButton.builder()
+            .tooltip("Solus")
+            .icon(icon)
+            .priority(5)
+            .panel(panel)
+            .build();
+        clientToolbar.addNavigation(navButton);
+
+        // Build boss icons for the Speed Times list once item images are cached (client thread).
+        executor.schedule(() -> clientThread.invokeLater(this::buildAndSetBossIcons), 6, TimeUnit.SECONDS);
+
+        // Set up admin panel if admin key is configured
+        setupAdminPanel();
+
+        // Set up PB detector and fight tracker
+        pbDetector = new PbDetector();
+        fightTracker = new FightTracker();
+
+        // Start periodic data refresh
+        startDataRefresh();
+
+        log.info("Clan Management plugin started");
+    }
+
+    @Override
+    protected void shutDown()
+    {
+        if (refreshTask != null) refreshTask.cancel(true);
+        if (raidRaceTask != null) raidRaceTask.cancel(true);
+
+        if (fightTracker != null) fightTracker.reset();
+
+        hiscoreTracker.reset();
+
+        clogSyncItems.clear();
+        // clog dedup handled by Set keys + enum-3721 canonical remap
+        clogDebounceTicksRemaining = -1;
+        clogSearchPending = false;
+        pbReadPending = false;
+        adventureLogPbTicksRemaining = -1;
+
+        clientToolbar.removeNavigation(navButton);
+        log.info("Solus plugin stopped");
+    }
+
+    @Subscribe
+    public void onConfigChanged(net.runelite.client.events.ConfigChanged event)
+    {
+        if (!"droplogger".equals(event.getGroup()))
+        {
+            return;
+        }
+
+        if ("apiKey".equals(event.getKey()))
+        {
+            log.debug("API key changed, refreshing platform data...");
+            serverConfigLoaded = false;
+            executor.submit(this::refreshData);
+        }
+
+    }
+
+    @Subscribe
+    public void onGameTick(GameTick event)
+    {
+        // Stat tracking: detect clan member logoffs
+        if (isPlatformConfigured())
+        {
+            hiscoreTracker.onGameTick(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), config.enableStatTracking());
+        }
+
+        // Collection log: trigger search after clog opens to enumerate all items
+        if (clogSearchPending)
+        {
+            clogSearchPending = false;
+            triggerClogSearch();
+        }
+
+        // Read PB from collection log header (deferred by 1 tick)
+        if (pbReadPending)
+        {
+            pbReadPending = false;
+            readClogPb();
+        }
+
+        // Adventure log Counters page — bulk PB parse (deferred by several ticks)
+        if (adventureLogPbTicksRemaining > 0)
+        {
+            adventureLogPbTicksRemaining--;
+        }
+        else if (adventureLogPbTicksRemaining == 0)
+        {
+            adventureLogPbTicksRemaining = -1;
+            parseAdventureLogPbs();
+        }
+
+        // Read the Combat Achievements interface a few ticks after it opens (deferred so the
+        // task list has populated its widgets).
+        if (caReadTicksRemaining > 0)
+        {
+            caReadTicksRemaining--;
+        }
+        else if (caReadTicksRemaining == 0)
+        {
+            caReadTicksRemaining = -1;
+            readCombatAchievements();
+        }
+
+        // Read the Slayer Rewards shop a few ticks after it opens (its unlock rows populate late).
+        if (slayerReadTicksRemaining > 0)
+        {
+            slayerReadTicksRemaining--;
+        }
+        else if (slayerReadTicksRemaining == 0)
+        {
+            slayerReadTicksRemaining = -1;
+            readSlayerUnlocks();
+        }
+
+        if (gimReadTicksRemaining > 0)
+        {
+            gimReadTicksRemaining--;
+        }
+        else if (gimReadTicksRemaining == 0)
+        {
+            gimReadTicksRemaining = -1;
+            readGimGroupPanel();
+        }
+
+        // Collection log auto-sync debounce
+        if (clogDebounceTicksRemaining > 0)
+        {
+            clogDebounceTicksRemaining--;
+        }
+        else if (clogDebounceTicksRemaining == 0)
+        {
+            clogDebounceTicksRemaining = -1;
+            log.debug("Clog debounce fired: {} raw events, {} unique items collected", clogRawEventCount, clogSyncItems.size());
+            uploadCollectionLog();
+        }
+
+        if (fightTracker == null)
+        {
+            return;
+        }
+
+        boolean inInstance = client.isInInstancedRegion();
+
+        if (inInstance && !wasInInstance)
+        {
+            // Just entered an instance — start tracking
+            String localName = client.getLocalPlayer() != null
+                ? client.getLocalPlayer().getName() : null;
+            fightTracker.startTracking(localName);
+        }
+        else if (!inInstance && wasInInstance)
+        {
+            // Just left an instance — stop tracking (data preserved for PB check)
+            fightTracker.stopTracking();
+        }
+
+        if (inInstance && fightTracker.isTracking())
+        {
+            // Scan for players each tick while in the instance
+            fightTracker.addPlayers(client.getPlayers(), client.getLocalPlayer());
+        }
+
+        wasInInstance = inInstance;
+    }
+
+    @Subscribe
+    public void onGameStateChanged(GameStateChanged event)
+    {
+        // Capture the immutable account hash so player data is keyed on the account, not the RSN.
+        if (event.getGameState() == GameState.LOGGED_IN)
+        {
+            long hash = client.getAccountHash();
+            platformApiService.setAccountHash(hash != -1 ? String.valueOf(hash) : null);
+
+            // Give the panel the game's chat-badge helm icons for the Members list (once per client).
+            sendAccountTypeIcons();
+
+            // Sync Achievement Diary + Quest standing once per login. Triggered here (not off the
+            // bootstrap fetch, which runs at the LOGIN screen before the player exists) and delayed
+            // a few seconds so the diary varbits / quest states are populated. The flag stops a
+            // world-hop's LOGGED_IN from re-firing it; it resets on a real logout below.
+            if (isPlatformConfigured() && !achievementsSyncedThisSession)
+            {
+                executor.schedule(() -> clientThread.invokeLater(this::readAchievements), 8, TimeUnit.SECONDS);
+            }
+        }
+
+        // Reset fight tracker on logout/hop to avoid stale data
+        if (event.getGameState() == GameState.LOGIN_SCREEN
+            || event.getGameState() == GameState.HOPPING)
+        {
+            if (fightTracker != null)
+            {
+                fightTracker.reset();
+            }
+            wasInInstance = false;
+            platformApiService.setAccountHash(null);
+            rankOwnedCache.clear();   // don't carry one account's items to the next login
+            rankOwnedIds.clear();
+            rankBankRefreshed = false; // next login's first bank open refreshes ranks again
+        }
+        // Only a real logout (login screen) re-arms the diary/quest sync; a world hop must not.
+        if (event.getGameState() == GameState.LOGIN_SCREEN)
+        {
+            achievementsSyncedThisSession = false;
+            gimGroupReported = false;
+        }
+    }
+
+    @Subscribe
+    public void onChatMessage(ChatMessage event)
+    {
+        tagClanChatTeam(event); // bingo/clog-event team dot in clan chat
+
+        // Combat achievement live completion — track the instant it's earned, not just when the CA
+        // interface is opened. Runs on ANY chat type (the CA message need not be a GAMEMESSAGE).
+        detectCombatAchievement(Text.removeTags(event.getMessage() == null ? "" : event.getMessage()));
+
+        // Raid completions (CoX raid-complete/Team size/Duration, ToB/ToA times) arrive as
+        // FRIENDSCHATNOTIFICATION, not GAMEMESSAGE. Accept both so the time-bearing line is seen.
+        ChatMessageType chatType = event.getType();
+        if (chatType != ChatMessageType.GAMEMESSAGE && chatType != ChatMessageType.FRIENDSCHATNOTIFICATION)
+        {
+            return;
+        }
+
+        String rawMessage = event.getMessage();
+        String cleanedMessage = Text.removeTags(rawMessage);
+
+        // ── Skip non-standard worlds (leagues, deadman, tournaments) ──
+        if (isNonStandardWorld())
+        {
+            return;
+        }
+
+        // ── Hiscore submission (always update context, even if submission is disabled) ──
+        pbDetector.processMessage(cleanedMessage);
+
+        if (config.enableSpeedTimes())
+        {
+            handleCompletionTime(cleanedMessage);
+        }
+
+        // ── Clue completion detection (set source for upcoming drop message) ──
+        Matcher clueMatcher = CLUE_COMPLETION_PATTERN.matcher(cleanedMessage);
+        if (clueMatcher.find())
+        {
+            String tier = clueMatcher.group(2);
+            lastKilledNpc = tier.substring(0, 1).toUpperCase() + tier.substring(1) + " Clue Scroll";
+            lastKillTime = System.currentTimeMillis();
+        }
+
+        // Drops are logged from the LootReceived event (onLootReceived) instead of the in-game
+        // "Valuable drop" chat line — that gives the real monster (no more "Unknown") + item IDs,
+        // so we can post only collection-log / whitelisted items rather than every valuable drop.
+
+        // ── Collection Log Detection ── Run whenever EITHER Clog Sync or Drops is on. The handler
+        // submits the unlock to the clan activity feed when Clog Sync is on, and posts it to the drop
+        // feed (with screenshot) when Drops is on. These are independent toggles — a member can sync
+        // their collection log without using the drop feed — so this must NOT be gated on Drops alone.
+        if (config.enableClogSync() || config.enableDrops())
+        {
+            handleCollectionLogEntry(cleanedMessage);
+        }
+        if (config.enableDrops())
+        {
+            handleDuplicatePet(cleanedMessage);
+        }
+
+        // ── Live diary/quest sync ──
+        // Quest completions ("Congratulations, you've completed a quest: X") and diary tier
+        // completions ("Congratulations! You have completed all of the hard tasks in ...") both
+        // announce in chat, so re-read + sync right then — same live model as drops/PBs. A short
+        // delay lets the varbits/quest states settle; the signature check inside readAchievements
+        // makes a false positive a no-op.
+        String lowerMsg = cleanedMessage.toLowerCase();
+        if (lowerMsg.contains("you've completed a quest")
+            || (lowerMsg.contains("congratulations") && lowerMsg.contains("tasks in")))
+        {
+            executor.schedule(() -> clientThread.invokeLater(this::readAchievements), 3, TimeUnit.SECONDS);
+        }
+    }
+
+    // Duplicate pets fire ONLY this chat line — no clog unlock, no loot event — so the boss
+    // context from the kill-count line is the sole way to know which pet it was.
+    private void handleDuplicatePet(String cleanedMessage)
+    {
+        // First person only — the third-person broadcast ("X has a funny feeling...") is other
+        // players' pets. Prefix + fragment instead of the full sentence to tolerate wording drift.
+        String lower = cleanedMessage.toLowerCase();
+        if (!lower.startsWith("you have a funny feeling") || !lower.contains("would have been followed")) return;
+        if (!isPlatformConfigured() || !localPlayerInClan()) return;
+
+        String boss = pbDetector.getLastBossName();
+        String petName = boss != null ? BOSS_PET.get(boss.toLowerCase()) : null;
+        if (petName == null)
+        {
+            log.debug("Duplicate pet with no mapped boss context (boss={})", boss);
+            return;
+        }
+
+        String playerName = client.getLocalPlayer() != null ? client.getLocalPlayer().getName() : "Unknown";
+        WorldPoint wp = client.getLocalPlayer() != null
+            ? client.getLocalPlayer().getWorldLocation() : new WorldPoint(0, 0, 0);
+        DropEntry drop = new DropEntry(petName, 0, boss, pbDetector.getLastKillCount(),
+            wp.getX(), wp.getY(), wp.getPlane(), playerName, -1);
+        withScreenshot(true, screenshot ->
+            platformApiService.submitDrop(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), drop, screenshot,
+                config.sendScreenshotsToDiscord(), config.dropPhrase()));
+        log.debug("Duplicate pet logged: {} from {}", petName, boss);
+    }
+
+    /**
+     * Opt-in death screenshots. Only when the player enabled "Send screenshots to Discord" do we
+     * capture their death frame and forward it (with their caption) to the clan's deaths webhook.
+     * Nothing is captured or sent when the toggle is off. Fires only for the local player's death.
+     */
+    @Subscribe
+    public void onActorDeath(ActorDeath event)
+    {
+        // Whatever we were fighting is no longer a candidate killer once it is the one dying.
+        if (event.getActor() == lastTarget.get()) lastTarget = new WeakReference<>(null);
+
+        if (!config.sendScreenshotsToDiscord()) return;
+        if (client.getLocalPlayer() == null || event.getActor() != client.getLocalPlayer()) return;
+        if (!isPlatformConfigured() || !localPlayerInClan()) return;
+
+        String rsn = client.getLocalPlayer().getName();
+        if (rsn == null || rsn.isEmpty()) return;
+
+        // Resolve the killer NOW, on the client thread and on the death tick. The screenshot callback
+        // runs a frame later and off this thread, by which point the killer may have wandered off or
+        // despawned — and actor reads are client-thread-only anyway.
+        String cause = identifyKiller();
+
+        withScreenshot(true, screenshot ->
+            platformApiService.submitDeath(getPlatformUrl(), getPlatformKey(), getPlatformSlug(),
+                rsn, cause, screenshot, config.deathPhrase()));
+    }
+
+    /**
+     * Remember the last thing the player interacted with, so a death can name it. A WeakReference so
+     * remembering an actor never keeps a despawned NPC from being collected.
+     */
+    @Subscribe
+    public void onInteractingChanged(InteractingChanged event)
+    {
+        if (event.getSource() == client.getLocalPlayer() && event.getTarget() != null)
+        {
+            lastTarget = new WeakReference<>(event.getTarget());
+        }
+    }
+
+    /**
+     * Infer who killed us, following Dink's approach: prefer the last thing we interacted with while
+     * it is still targeting us, then anything attackable that is, then the last thing we fought if it
+     * is still nearby. Returns null rather than guessing, and the post then simply omits the cause.
+     * Client thread only.
+     */
+    private String identifyKiller()
+    {
+        Player me = client.getLocalPlayer();
+        if (me == null) return null;
+        Actor last = lastTarget.get();
+
+        // 1. What we were fighting, still on us. The common PvM case.
+        if (isKillerCandidate(me, last) && last.getInteracting() == me) return nameOf(last);
+
+        // 2. Anything attackable currently targeting us — covers dying to something we never clicked,
+        //    like an aggressive NPC or a second boss phase spawn.
+        for (NPC npc : client.getTopLevelWorldView().npcs())
+        {
+            if (npc.getInteracting() == me && isAttackableNpc(npc)) return nameOf(npc);
+        }
+
+        // 3. Some bosses drop their target on the tick they kill you, so fall back to the last thing
+        //    we fought while it is still in the room. Naming the boss you were standing on is right
+        //    far more often than it is wrong.
+        if (isAttackableNpc(last) && me.getWorldLocation() != null && last.getWorldLocation() != null
+            && last.getWorldLocation().distanceTo(me.getWorldLocation()) <= KILLER_SEARCH_RADIUS)
+        {
+            return nameOf(last);
+        }
+        return null;
+    }
+
+    /** An actor we would be willing to blame: an attackable NPC, or a player when PvP is possible. */
+    private boolean isKillerCandidate(Player me, Actor actor)
+    {
+        if (actor == null || actor == me) return false;
+        if (actor instanceof Player) return inPvpArea();
+        return isAttackableNpc(actor);
+    }
+
+    /** True for NPCs that can actually fight back, which filters out pets, shopkeepers and scenery. */
+    private boolean isAttackableNpc(Actor actor)
+    {
+        if (!(actor instanceof NPC)) return false;
+        NPCComposition comp = ((NPC) actor).getTransformedComposition();
+        if (comp == null) return false;
+        for (String action : comp.getActions())
+        {
+            if (ATTACK_OPTION.equals(action)) return true;
+        }
+        return false;
+    }
+
+    /** Only blame another player where one could actually have killed us. */
+    private boolean inPvpArea()
+    {
+        return client.getVarbitValue(VarbitID.INSIDE_WILDERNESS) > 0
+            || client.getWorldType().contains(WorldType.PVP);
+    }
+
+    private String nameOf(Actor actor)
+    {
+        String name = actor == null ? null : actor.getName();
+        return name == null || name.isEmpty() ? null : name;
+    }
+
+    @Subscribe
+    public void onWidgetLoaded(WidgetLoaded event)
+    {
+        // Adventure log Counters page (group 741) — bulk PB sync
+        if (event.getGroupId() == JOURNALSCROLL_GROUP && isPlatformConfigured() && config.enableSpeedTimes())
+        {
+            log.debug("Adventure log Counters page detected (group 741), scheduling PB parse");
+            // Defer by several ticks so widget text has time to populate
+            adventureLogPbTicksRemaining = ADVENTURE_LOG_PB_DELAY_TICKS;
+        }
+
+        // Sync Combat Achievements whenever the player opens the CA task list.
+        if (event.getGroupId() == InterfaceID.CA_TASKS && isPlatformConfigured() && config.enableClogSync())
+        {
+            caReadTicksRemaining = 4;
+        }
+
+        // Sync Slayer Rewards unlocks whenever the player opens the Slayer rewards shop (group 426).
+        if (event.getGroupId() == SLAYER_REWARDS_GROUP && isPlatformConfigured() && config.enableClogSync())
+        {
+            slayerReadTicksRemaining = 4;
+        }
+
+        // GIM Group side panel (interface 726): read the group's member list for automatic team
+        // detection. Once per session — the group barely changes.
+        if (event.getGroupId() == GIM_SIDEPANEL_GROUP && isPlatformConfigured() && !gimGroupReported)
+        {
+            gimReadTicksRemaining = 4; // let the panel's texts populate first
+        }
+
+        if (event.getGroupId() == InterfaceID.COLLECTION && isPlatformConfigured() && config.enableClogSync())
+        {
+            // Show the game's authoritative unique counts immediately (varp 2943/2944) so the
+            // panel matches the in-game "X/Y" exactly, independent of what's been synced.
+            clogObtainedCount = client.getVarpValue(VARP_CLOG_OBTAINED);
+            clogTotalCount = client.getVarpValue(VARP_CLOG_TOTAL);
+            if (clogTotalCount > 0)
+            {
+                panel.setStatusClog(clogObtainedCount, clogTotalCount);
+            }
+            // Build category mapping and sync catalog every time clog opens
+            buildClogCategoryMap();
+            // Collection log opened — trigger search on next tick to enumerate all items
+            clogSyncItems.clear();
+            // clog dedup handled by Set keys + enum-3721 canonical remap
+            clogRawEventCount = 0;
+            clogSearchPending = true;
+            panel.setClogSyncStatus("Scanning collection log...");
+        }
+    }
+
+    @Subscribe
+    public void onScriptPreFired(ScriptPreFired event)
+    {
+        if (event.getScriptId() != SCRIPT_CLOG_ITEM || !isPlatformConfigured() || !config.enableClogSync())
+        {
+            return;
+        }
+
+        // Script 4100 fires per obtained item: args[1] = itemId, args[2] = quantity
+        Object[] args = event.getScriptEvent().getArguments();
+        if (args == null || args.length < 2)
+        {
+            return;
+        }
+
+        int itemId = remapClogId((int) args[1]);
+        int quantity = args.length >= 3 ? (int) args[2] : 1;
+        clogRawEventCount++;
+        String itemName = itemManager.getItemComposition(itemId).getName();
+
+        if (itemName == null || itemName.isEmpty() || itemName.equals("null"))
+        {
+            return;
+        }
+        if (!clogSyncItems.containsKey(itemId))
+        {
+            String tab = null;
+            String category = null;
+            if (clogItemCategoryMap != null)
+            {
+                String[] meta = clogItemCategoryMap.get(itemId);
+                if (meta != null)
+                {
+                    tab = meta[0];
+                    category = meta[1];
+                }
+            }
+            clogSyncItems.put(itemId, new ClogItem(itemName, itemId, tab, category, quantity));
+            panel.updateClogSyncCount(clogSyncItems.size());
+        }
+        // Reset debounce — upload after CLOG_DEBOUNCE_TICKS with no new items
+        clogDebounceTicksRemaining = CLOG_DEBOUNCE_TICKS;
+    }
+
+    /**
+     * Build the bad->canonical item-id remap from game enum 3721. Some collection-log slots
+     * have two item ids (an old one carrying save data + a newer "good" one introduced to fix
+     * item-dupe bugs). The game ships this enum so clients can normalise; using it (instead of a
+     * hand-maintained skip list) makes our unique counts match the game's varp 2943/2944 exactly.
+     */
+    private void buildClogDupeRemap()
+    {
+        try
+        {
+            EnumComposition remap = client.getEnum(CLOG_DUPE_REMAP_ENUM);
+            int[] badIds = remap.getKeys();
+            int[] goodIds = remap.getIntVals();
+            // Seed with the known gaps, then let enum 3721 overlay/win where it has an entry.
+            Map<Integer, Integer> m = new HashMap<>(CLOG_DUPE_REMAP_GAPS);
+            for (int i = 0; i < badIds.length && i < goodIds.length; i++)
+            {
+                m.put(badIds[i], goodIds[i]);
+            }
+            clogDupeRemap = m;
+        }
+        catch (Exception e)
+        {
+            // Enum read failed — still apply the known gap remaps so prospector dupes don't leak.
+            clogDupeRemap = CLOG_DUPE_REMAP_GAPS;
+            log.warn("Failed to build clog dupe remap (enum {})", CLOG_DUPE_REMAP_ENUM, e);
+        }
+    }
+
+    /** Normalise a collection-log item id to its canonical id via the game's dupe-remap enum. */
+    private int remapClogId(int itemId)
+    {
+        return clogDupeRemap.getOrDefault(itemId, itemId);
+    }
+
+    /** Build small boss icons via ItemManager and hand them to the panel (run on the client thread). */
+    private void buildAndSetBossIcons()
+    {
+        if (panel == null) return;
+        java.util.Map<String, javax.swing.ImageIcon> icons = new HashMap<>();
+        for (Map.Entry<String, Integer> e : BOSS_GROUP_ICONS.entrySet())
+        {
+            try
+            {
+                java.awt.image.BufferedImage img = itemManager.getImage(e.getValue());
+                if (img != null)
+                {
+                    icons.put(e.getKey(), new javax.swing.ImageIcon(img));
+                }
+            }
+            catch (Exception ignored) { /* skip icons that fail to load */ }
+        }
+        panel.setBossIcons(icons);
+    }
+
+    private void buildClogCategoryMap()
+    {
+        try
+        {
+            buildClogDupeRemap();
+            Map<Integer, String[]> map = new HashMap<>();
+            // Catalog entries: each (itemId, category) pair is a separate entry
+            // so items like Dragon pickaxe appear under every boss that drops them
+            JsonArray catalogItems = new JsonArray();
+            Set<String> catalogSeen = new HashSet<>(); // "itemId::category" dedup
+            int sortOrder = 0;
+
+            EnumComposition tabsEnum = client.getEnum(CLOG_TABS_ENUM);
+            int[] tabStructIds = tabsEnum.getIntVals();
+
+            for (int tabStructId : tabStructIds)
+            {
+                StructComposition tabStruct = client.getStructComposition(tabStructId);
+                String tabName = tabStruct.getStringValue(PARAM_TAB_NAME);
+                int categoriesEnumId = tabStruct.getIntValue(PARAM_TAB_CATEGORIES_ENUM);
+
+                EnumComposition categoriesEnum = client.getEnum(categoriesEnumId);
+                int[] categoryStructIds = categoriesEnum.getIntVals();
+
+                for (int catStructId : categoryStructIds)
+                {
+                    StructComposition catStruct = client.getStructComposition(catStructId);
+                    String categoryName = catStruct.getStringValue(PARAM_CATEGORY_NAME);
+                    int itemsEnumId = catStruct.getIntValue(PARAM_CATEGORY_ITEMS_ENUM);
+
+                    EnumComposition itemsEnum = client.getEnum(itemsEnumId);
+                    int[] itemIds = itemsEnum.getIntVals();
+
+                    for (int rawItemId : itemIds)
+                    {
+                        int itemId = remapClogId(rawItemId);
+                        // Items can appear in MULTIPLE clog categories (Nexling is in "Nex" AND
+                        // "All Pets"). Tabs iterate Bosses-first, so keep the FIRST category seen -
+                        // the boss page - instead of letting Other/"All Pets" overwrite it.
+                        map.putIfAbsent(itemId, new String[]{tabName, categoryName});
+
+                        String catItemName = itemManager.getItemComposition(itemId).getName();
+                        if (catItemName == null || catItemName.equals("null")) continue;
+
+                        String dedupKey = itemId + "::" + categoryName;
+                        if (!catalogSeen.add(dedupKey)) continue;
+
+                        JsonObject item = new JsonObject();
+                        item.addProperty("itemId", itemId);
+                        item.addProperty("itemName", catItemName);
+                        item.addProperty("tab", tabName);
+                        item.addProperty("category", categoryName);
+                        item.addProperty("sortOrder", sortOrder++);
+                        catalogItems.add(item);
+                    }
+                }
+            }
+
+            clogItemCategoryMap = map;
+            log.debug("Built collection log category map: {} unique item IDs, {} catalog entries",
+                map.size(), catalogItems.size());
+
+            String catBaseUrl = getPlatformUrl();
+            String catApiKey = getPlatformKey();
+            String catSlug = getPlatformSlug();
+            executor.submit(() -> platformApiService.syncCatalogResolved(
+                catBaseUrl, catApiKey, catSlug, catalogItems
+            ));
+        }
+        catch (Exception e)
+        {
+            log.warn("Failed to build collection log category map", e);
+        }
+    }
+
+    private boolean pbReadPending = false;
+
+    @Subscribe
+    public void onScriptPostFired(ScriptPostFired event)
+    {
+        // Script 2731 = COLLECTION_DRAW_LIST — fires when a category page is loaded in the clog
+        if (event.getScriptId() != 2731 || !isPlatformConfigured() || !config.enableSpeedTimes())
+        {
+            return;
+        }
+        // Defer reading by 1 tick so the header text has time to populate
+        pbReadPending = true;
+    }
+
+    private void readClogPb()
+    {
+        // The collection log is open and a category was just selected.
+        // Read the header text and the selected category name.
+
+        // Header text: group 621, child 20
+        Widget headerWidget = client.getWidget(621, 20);
+        if (headerWidget == null)
+        {
+            return;
+        }
+
+        // The header text is in dynamic children, not getText() on the parent
+        // Try reading from children first, fall back to parent text
+        StringBuilder headerBuilder = new StringBuilder();
+        Widget[] headerChildren = headerWidget.getDynamicChildren();
+        if (headerChildren != null && headerChildren.length > 0)
+        {
+            for (Widget child : headerChildren)
+            {
+                String t = child.getText();
+                if (t != null && !t.isEmpty())
+                {
+                    headerBuilder.append(t).append(" ");
+                }
+            }
+        }
+        if (headerBuilder.length() == 0)
+        {
+            String t = headerWidget.getText();
+            if (t != null) headerBuilder.append(t);
+        }
+
+        String headerText = Text.removeTags(headerBuilder.toString().trim());
+        if (headerText.isEmpty())
+        {
+            return;
+        }
+
+        log.debug("Collection log header text: {}", headerText);
+
+        // Parse fastest time
+        java.util.regex.Matcher pbMatcher = CLOG_PB_PATTERN.matcher(headerText);
+        if (!pbMatcher.find())
+        {
+            return;
+        }
+
+        String timeStr = pbMatcher.group(1);
+        int timeMs = parsePbTime(timeStr);
+        if (timeMs <= 0)
+        {
+            return;
+        }
+
+        // Get the page/boss name from the MAIN widget title area (group 621, child 17 = MAIN)
+        // or from the HEADER widget itself — the first line is typically the boss name
+        // Try getting the category from the header: first line before "Kill Count:"
+        String bossName = null;
+        java.util.regex.Matcher nameMatcher = Pattern.compile("^(.+?)(?:\\s*Kill Count|\\s*Completions|\\s*Fastest)").matcher(headerText);
+        if (nameMatcher.find())
+        {
+            bossName = nameMatcher.group(1).trim();
+        }
+
+        if (bossName == null || bossName.isEmpty())
+        {
+            // Fallback: try reading from the category list
+            Widget listWidget = client.getWidget(621, 9);
+            if (listWidget != null)
+            {
+                Widget[] listChildren = listWidget.getDynamicChildren();
+                if (listChildren != null)
+                {
+                    for (Widget child : listChildren)
+                    {
+                        String text = Text.removeTags(child.getText()).trim();
+                        if (!text.isEmpty() && (child.getTextColor() == 0xff981f || child.getTextColor() == 0xffffff))
+                        {
+                            bossName = text;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (bossName == null || bossName.isEmpty())
+        {
+            return;
+        }
+
+        String rsn = client.getLocalPlayer() != null
+            ? client.getLocalPlayer().getName() : null;
+        if (rsn == null)
+        {
+            return;
+        }
+
+        String rawKey = bossName.toLowerCase().replace(" ", "_")
+            .replace("'", "").replaceAll("[^a-z0-9_]", "");
+        String group = BossCategory.mapAdventureLogName(rawKey);
+        BossCategory cat = BossCategory.find(group, 1);
+        String bossKey = cat != null ? cat.getKey() : group;
+
+        log.debug("Collection log PB detected: {} — {} ({}ms, key={})", bossName, timeStr, timeMs, bossKey);
+
+        executor.submit(() -> platformApiService.submitPb(
+            getPlatformUrl(),
+            getPlatformKey(),
+            getPlatformSlug(),
+            rsn,
+            bossKey,
+            1, // solo
+            timeMs,
+            "adventure_log",
+            null // solo — no roster
+        ));
+    }
+
+    private static int parsePbTime(String timeStr)
+    {
+        // Formats: "1:23.40", "12:34.50", "1:23", "0:45.60", "1:23:45.60" (h:mm:ss.cc)
+        try
+        {
+            String[] parts = timeStr.split(":");
+            if (parts.length == 3)
+            {
+                // H:MM:SS.cc
+                int hours = Integer.parseInt(parts[0]);
+                int minutes = Integer.parseInt(parts[1]);
+                double seconds = Double.parseDouble(parts[2]);
+                return (int) (hours * 3600000 + minutes * 60000 + seconds * 1000);
+            }
+            else if (parts.length == 2)
+            {
+                // MM:SS.cc or MM:SS
+                int minutes = Integer.parseInt(parts[0]);
+                double seconds;
+                if (parts[1].contains("."))
+                {
+                    seconds = Double.parseDouble(parts[1]);
+                }
+                else
+                {
+                    seconds = Integer.parseInt(parts[1]);
+                }
+                return (int) (minutes * 60000 + seconds * 1000);
+            }
+            return -1;
+        }
+        catch (NumberFormatException e)
+        {
+            return -1;
+        }
+    }
+
+    /**
+     * Parse ALL personal bests from the adventure log Counters page (group 741).
+     * The widget contains dynamic children with sequential boss names and time entries.
+     */
+    private void parseAdventureLogPbs()
+    {
+        String rsn = client.getLocalPlayer() != null
+            ? client.getLocalPlayer().getName() : null;
+        if (rsn == null)
+        {
+            return;
+        }
+
+        // Find the container widget with dynamic children (scroll content)
+        // Try dynamic children first, then static children
+        Widget[] children = null;
+        for (int child = 0; child < 30; child++)
+        {
+            Widget w = client.getWidget(JOURNALSCROLL_GROUP, child);
+            if (w == null) continue;
+
+            Widget[] dynChildren = w.getDynamicChildren();
+            if (dynChildren != null && dynChildren.length > 10)
+            {
+                log.debug("Adventure log: found {} dynamic children in widget 741.{}", dynChildren.length, child);
+                children = dynChildren;
+                break;
+            }
+
+            Widget[] statChildren = w.getStaticChildren();
+            if (statChildren != null && statChildren.length > 10)
+            {
+                log.debug("Adventure log: found {} static children in widget 741.{}", statChildren.length, child);
+                children = statChildren;
+                break;
+            }
+        }
+
+        if (children == null)
+        {
+            log.warn("Adventure log Counters: no content widget found in group 741");
+            return;
+        }
+        if (children == null || children.length == 0)
+        {
+            return;
+        }
+
+        // Section headers to skip (not boss names)
+        Set<String> sectionHeaders = new HashSet<>();
+        sectionHeaders.add("Minigames");
+        sectionHeaders.add("Bosses");
+        sectionHeaders.add("Skilling Bosses");
+        sectionHeaders.add("Raids");
+
+
+        List<PbEntry> parsedPbs = new ArrayList<>();
+        String currentBoss = null;
+        // For ToB/ToA: pending team size from a "Fastest Room time" line where time is on the next line
+        String pendingTeamSize = null;
+        boolean pendingIsRoom = false;
+        // Track which boss+teamSize combos we've added as "Room time" so we skip "Overall time" dupes
+        Set<String> roomTimeKeys = new HashSet<>();
+
+        for (Widget child : children)
+        {
+            String text = child.getText();
+            if (text == null || text.isEmpty()) continue;
+            String clean = Text.removeTags(text).trim();
+            if (clean.isEmpty() || clean.length() <= 2) continue;
+
+            // Skip section headers
+            if (sectionHeaders.contains(clean)) {
+                currentBoss = null;
+                pendingTeamSize = null;
+                continue;
+            }
+
+            // Check if this is a standalone time on its own line (continuation from previous)
+            Matcher standaloneMatcher = STANDALONE_TIME.matcher(clean);
+            if (standaloneMatcher.find() && pendingTeamSize != null && currentBoss != null)
+            {
+                if (pendingIsRoom)
+                {
+                    String timeStr = standaloneMatcher.group(1);
+                    int timeMs = parsePbTime(timeStr);
+                    if (timeMs > 0)
+                    {
+                        int teamSize = parseTeamSize(pendingTeamSize);
+                        parsedPbs.add(new PbEntry(currentBoss, teamSize, timeMs));
+                        roomTimeKeys.add(currentBoss + "::" + teamSize);
+                    }
+                }
+                pendingTeamSize = null;
+                pendingIsRoom = false;
+                continue;
+            }
+
+            // Try to parse as a PB time entry
+            Matcher pbMatcher = ADVENTURE_PB_PATTERN.matcher(clean);
+            if (pbMatcher.find())
+            {
+                if (currentBoss == null) continue;
+
+                boolean isOverall = clean.contains("Overall time");
+                boolean isRoom = clean.contains("Room time");
+
+                String teamSizeStr = pbMatcher.group(1);
+                String timeStr = pbMatcher.group(2); // may be null if time is on next line
+
+                if (timeStr == null)
+                {
+                    // Time is on the next widget child line — save context and continue
+                    pendingTeamSize = teamSizeStr;
+                    pendingIsRoom = isRoom;
+                    continue;
+                }
+
+                // For ToB/ToA: use "Room time" (challenge time), skip "Overall time"
+                if (isOverall)
+                {
+                    continue;
+                }
+
+                // Skip legacy "former" entries
+                if (clean.contains("(former)"))
+                {
+                    continue;
+                }
+
+                int timeMs = parsePbTime(timeStr);
+                if (timeMs <= 0) continue;
+
+                int teamSize = parseTeamSize(teamSizeStr);
+
+                // Don't duplicate if we already have a Room time for this combo
+                String comboKey = currentBoss + "::" + teamSize;
+                if (isRoom)
+                {
+                    roomTimeKeys.add(comboKey);
+                }
+                // Always add room times; skip non-room if we already have room time
+                if (isRoom || !roomTimeKeys.contains(comboKey))
+                {
+                    parsedPbs.add(new PbEntry(currentBoss, teamSize, timeMs));
+                }
+
+                pendingTeamSize = null;
+                pendingIsRoom = false;
+            }
+            else if (!clean.contains("Kill Count") && !clean.contains("Completions")
+                      && !clean.contains("Personal Best") && !clean.contains("Kills")
+                      && !clean.contains("(former)"))
+            {
+                // This line is a boss/activity name
+                currentBoss = clean;
+                pendingTeamSize = null;
+                pendingIsRoom = false;
+            }
+        }
+
+        if (parsedPbs.isEmpty())
+        {
+            log.debug("Adventure log Counters: no PBs found");
+            return;
+        }
+
+        log.debug("Adventure log PBs parsed: {} entries for {}", parsedPbs.size(), rsn);
+
+        // Show chat confirmation
+        final int pbCount = parsedPbs.size();
+        client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+            "[" + getClanName() + "] Syncing " + pbCount + " personal bests...", "");
+
+        // Submit all PBs to the platform API
+        final String playerName = rsn;
+        executor.submit(() ->
+        {
+            int submitted = 0;
+            for (PbEntry pb : parsedPbs)
+            {
+                String rawKey = pb.bossName.toLowerCase().replace(" ", "_")
+                    .replace("'", "").replaceAll("[^a-z0-9_]", "");
+                String group = BossCategory.mapAdventureLogName(rawKey);
+
+                // Try to resolve to a proper BossCategory key
+                BossCategory cat = BossCategory.find(group, pb.teamSize);
+                String bossKey = cat != null ? cat.getKey() : group;
+
+                log.debug("Adventure log PB: '{}' → raw='{}' → group='{}' → key='{}' (size={}, time={}ms)",
+                    pb.bossName, rawKey, group, bossKey, pb.teamSize, pb.timeMs);
+
+                platformApiService.submitPb(
+                    getPlatformUrl(),
+                    getPlatformKey(),
+                    getPlatformSlug(),
+                    playerName,
+                    bossKey,
+                    pb.teamSize,
+                    pb.timeMs,
+                    "adventure_log",
+                    null // imported from a single player's log — no roster
+                );
+                submitted++;
+            }
+            log.debug("Submitted {} PBs to platform for {}", submitted, playerName);
+            final int finalSubmitted = submitted;
+            clientThread.invokeLater(() ->
+                client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+                    "[" + getClanName() + "] Synced " + finalSubmitted + " personal bests to platform", "")
+            );
+        });
+    }
+
+    private static int parseTeamSize(String teamSizeStr)
+    {
+        if (teamSizeStr == null) return 1; // No team size specified = solo
+        String s = teamSizeStr.trim();
+        // Strip leading "(" from ToA's malformed "(2 player)" format
+        if (s.startsWith("(")) s = s.substring(1).trim();
+        if (s.equalsIgnoreCase("Solo")) return 1;
+        // "2 players", "3 players", "1 player entry mode", "5 player hard mode", etc.
+        Matcher m = Pattern.compile("(\\d+)\\s*(?:\\+\\s*)?players?").matcher(s);
+        if (m.find()) return Integer.parseInt(m.group(1));
+        // "11-15 players" range — use max
+        Matcher rangeMatcher = Pattern.compile("(\\d+)-(\\d+)\\s*players?").matcher(s);
+        if (rangeMatcher.find()) return Integer.parseInt(rangeMatcher.group(2));
+        // "24+" or "6+" etc.
+        Matcher plusMatcher = Pattern.compile("(\\d+)\\+").matcher(s);
+        if (plusMatcher.find()) return Integer.parseInt(plusMatcher.group(1));
+        // Just a number
+        Matcher numMatcher = Pattern.compile("(\\d+)").matcher(s);
+        if (numMatcher.find()) return Integer.parseInt(numMatcher.group(1));
+        return 1;
+    }
+
+    private static class PbEntry
+    {
+        final String bossName;
+        final int teamSize;
+        final int timeMs;
+
+        PbEntry(String bossName, int teamSize, int timeMs)
+        {
+            this.bossName = bossName;
+            this.teamSize = teamSize;
+            this.timeMs = timeMs;
+        }
+    }
+
+    private void triggerClogSearch()
+    {
+        // Auto-trigger the search toggle in the collection log to enumerate ALL obtained items
+        // This causes script 4100 to fire for every obtained item
+        try
+        {
+            client.menuAction(-1, SEARCH_TOGGLE_PACKED, MenuAction.CC_OP, 1, -1, "Search", null);
+            client.runScript(2240);
+            log.debug("Collection log auto-search triggered");
+        }
+        catch (Exception e)
+        {
+            log.warn("Failed to trigger collection log search", e);
+        }
+    }
+
+    private void uploadCollectionLog()
+    {
+        if (clogSyncItems.isEmpty())
+        {
+            return;
+        }
+
+        String rsn = client.getLocalPlayer() != null
+            ? client.getLocalPlayer().getName() : "Unknown";
+        List<ClogItem> items = new ArrayList<>(clogSyncItems.values());
+        int count = items.size();
+
+        panel.setClogSyncStatus("Uploading " + count + " items...");
+
+        executor.submit(() -> platformApiService.bulkSyncCollectionLog(
+            getPlatformUrl(),
+            getPlatformKey(),
+            getPlatformSlug(),
+            rsn,
+            items,
+            clogObtainedCount,
+            clogTotalCount,
+            new okhttp3.Callback()
+            {
+                @Override
+                public void onFailure(okhttp3.Call call, java.io.IOException e)
+                {
+                    log.error("Collection log auto-sync failed", e);
+                    panel.setClogSyncStatus("Sync failed: " + e.getMessage());
+                }
+
+                @Override
+                public void onResponse(okhttp3.Call call, okhttp3.Response response)
+                {
+                    response.close();
+                    if (response.isSuccessful())
+                    {
+                        log.debug("Collection log synced: {} items for {}", count, rsn);
+                        panel.setClogSyncStatus("Synced " + count + " items");
+                        clientThread.invokeLater(() -> client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+                            "[" + getClanName() + "] Collection log synced: " + clogObtainedCount + "/" + clogTotalCount + " unlocked", ""));
+                    }
+                    else
+                    {
+                        panel.setClogSyncStatus("Sync failed: HTTP " + response.code());
+                    }
+                }
+            }
+        ));
+    }
+
+    // The encoded PNG travels as base64 inside a JSON body, which inflates it by roughly a third,
+    // and Discord refuses attachments over 10MB. 7MB of PNG stays clear of both ceilings while
+    // still letting a 4K client through at native size in practice.
+    // Discord accepts far more than this: probed on an unboosted guild, 19MB uploaded fine and 22MB
+    // was refused. The old 7MB cap meant a large monitor blew the budget and got bilinear-downscaled
+    // before it ever left the client, which is why big-screen shots looked soft. 16MB base64-encodes
+    // to ~21.3MB, inside the API bodyLimit (24MB) and nginx (32M).
+    private static final int SCREENSHOT_MAX_PNG_BYTES = 16 * 1024 * 1024;
+    private static final double SCREENSHOT_FALLBACK_STEP = 0.75;
+    private static final int SCREENSHOT_MAX_FALLBACK_STEPS = 6;
+    /**
+     * Capture the current game frame (when capture=true) and run the callback with a PNG as
+     * base64, or null when disabled or capture fails. Event-driven (no sleep): the frame listener
+     * fires on the next render, then encoding and the callback run off the client thread.
+     *
+     * Chat hiding works by hiding the chat widgets before the frame is drawn and restoring them as
+     * soon as it has been, so the game renders a clean shot. An earlier version painted black boxes
+     * over the captured image instead, which read as censorship bars.
+     * The screenshot is uploaded to OUR API only; the plugin never sends it to Discord.
+     */
+    private void withScreenshot(boolean capture, java.util.function.Consumer<String> callback)
+    {
+        if (!capture || drawManager == null)
+        {
+            executor.submit(() -> callback.accept(null));
+            return;
+        }
+        final ClanManagementConfig.ChatHideMode hideMode = config == null
+            ? ClanManagementConfig.ChatHideMode.NOTHING
+            : config.hideChatInScreenshots();
+
+        // Hide the chat widgets BEFORE the frame is drawn, so the game simply renders without them
+        // and the shot comes out clean. Painting black boxes over the captured image afterwards
+        // "works" but looks like censorship bars, which is what this replaced. Same approach the
+        // discord-screenshot plugin uses. Must run on the client thread, which is where every caller
+        // of withScreenshot already is (chat/event handlers).
+        final java.util.List<Widget> hidden = hideChatWidgets(hideMode);
+
+        drawManager.requestNextFrameListener(image ->
+        {
+            // Restore first: the frame we were promised has already been rendered by the time this
+            // fires, so the player gets their chat back immediately rather than after the upload.
+            for (Widget w : hidden)
+            {
+                w.setHidden(false);
+            }
+
+            BufferedImage copy;
+            try
+            {
+                copy = new BufferedImage(image.getWidth(null), image.getHeight(null), BufferedImage.TYPE_INT_RGB);
+                java.awt.Graphics2D g = copy.createGraphics();
+                g.drawImage(image, 0, 0, null);
+                g.dispose();
+                // Diagnostic: under the GPU renderer the frame handed to DrawManager does not always
+                // match the game canvas, which is how a dead black margin ends up in the shot.
+                log.debug("Screenshot frame {}x{}, canvas {}x{}",
+                    copy.getWidth(), copy.getHeight(), client.getCanvasWidth(), client.getCanvasHeight());
+            }
+            catch (Exception e)
+            {
+                log.warn("Screenshot capture failed", e);
+                executor.submit(() -> callback.accept(null));
+                return;
+            }
+
+            final BufferedImage captured = copy;
+            executor.submit(() ->
+            {
+                String b64 = null;
+                try
+                {
+                    // Chat was already removed by hiding its widgets before the frame rendered, so
+                    // there is nothing to paint over here. All that remains is dropping any dead
+                    // black margin the GPU renderer padded the buffer with.
+                    java.awt.Rectangle content = contentBounds(captured);
+                    BufferedImage framed = (content.x == 0 && content.y == 0
+                        && content.width == captured.getWidth() && content.height == captured.getHeight())
+                        ? captured
+                        : captured.getSubimage(content.x, content.y, content.width, content.height);
+                    b64 = encodePngWithinBudget(framed);
+                }
+                catch (Exception e) { log.warn("Screenshot encode failed", e); }
+                callback.accept(b64);
+            });
+        });
+    }
+
+    /**
+     * Client thread only. Resolves the regions of the captured frame that must be blacked out,
+     * in captured-image pixels. Returns an empty list when there is nothing to hide, and null
+     * when the chat interface could not be resolved at all (the caller then drops the shot).
+     */
+    /**
+     * Client thread only. Hides the chat widgets the mode asks for and returns exactly what was
+     * hidden so the caller can put it back. Returns an empty list for NOTHING, or when the widgets
+     * are not present (chatbox closed in resizable mode), which is the correct no-op: if the chatbox
+     * is not rendered there is nothing in the frame to hide.
+     *
+     * JUST_PMS has a real limitation worth knowing: it can only remove private messages cleanly when
+     * SPLIT private chat is on, because that renders them in their own widget. With split chat off,
+     * PMs are interleaved with public and clan lines inside the shared chatbox, so individual PM
+     * line widgets are hidden instead, which removes the text but leaves the row's gap.
+     */
+    private java.util.List<Widget> hideChatWidgets(ClanManagementConfig.ChatHideMode mode)
+    {
+        java.util.List<Widget> hidden = new ArrayList<>();
+        if (mode == ClanManagementConfig.ChatHideMode.NOTHING || client == null)
+        {
+            return hidden;
+        }
+
+        // Split private chat renders over the game view, outside the chatbox, so it has to go under
+        // both modes: it is the most sensitive thing on screen and the easiest to miss.
+        Widget splitPms = client.getWidget(InterfaceID.PmChat.CONTAINER);
+        if (splitPms != null && !splitPms.isHidden())
+        {
+            splitPms.setHidden(true);
+            hidden.add(splitPms);
+        }
+
+        if (mode == ClanManagementConfig.ChatHideMode.ALL_CHAT)
+        {
+            Widget chat = client.getWidget(InterfaceID.Chatbox.CHATDISPLAY);
+            if (chat != null && !chat.isHidden())
+            {
+                chat.setHidden(true);
+                hidden.add(chat);
+            }
+            return hidden;
+        }
+
+        // JUST_PMS with split chat off: hide only the lines that are private messages.
+        for (Widget line : privateMessageLineWidgets())
+        {
+            if (!line.isHidden())
+            {
+                line.setHidden(true);
+                hidden.add(line);
+            }
+        }
+        return hidden;
+    }
+
+    /** Client thread only. The chatbox line widgets that are private messages. */
+    private java.util.List<Widget> privateMessageLineWidgets()
+    {
+        java.util.List<Widget> out = new ArrayList<>();
+        Set<String> pmBodies = privateMessageBodies();
+        for (int component = InterfaceID.Chatbox.LINE0; component <= InterfaceID.Chatbox.LINE499; component++)
+        {
+            Widget line = client.getWidget(component);
+            if (line == null || line.isHidden())
+            {
+                continue;
+            }
+            String text = line.getText();
+            if (text == null || text.isEmpty())
+            {
+                continue;
+            }
+            if (isPrivateChatLine(Text.removeTags(text), pmBodies))
+            {
+                out.add(line);
+            }
+        }
+        return out;
+    }
+
+    private Set<String> privateMessageBodies()
+    {
+        Set<String> bodies = new HashSet<>();
+        net.runelite.api.IterableHashTable<net.runelite.api.MessageNode> messages = client.getMessages();
+        if (messages == null)
+        {
+            return bodies;
+        }
+        for (net.runelite.api.MessageNode node : messages)
+        {
+            if (node == null)
+            {
+                continue;
+            }
+            ChatMessageType type = node.getType();
+            if (type != ChatMessageType.PRIVATECHAT
+                && type != ChatMessageType.PRIVATECHATOUT
+                && type != ChatMessageType.MODPRIVATECHAT)
+            {
+                continue;
+            }
+            String value = node.getValue();
+            if (value == null)
+            {
+                continue;
+            }
+            String plain = Text.removeTags(value).trim();
+            if (plain.length() >= 3)
+            {
+                bodies.add(plain);
+            }
+        }
+        return bodies;
+    }
+
+    /**
+     * A chatbox PM always renders as "From Name: ..." or "To Name: ...". Matching that prefix is
+     * the only signal available on the widget itself; the message-body check behind it covers the
+     * wrapped rows. Both tests err towards hiding: a game line that happens to open with "To "
+     * gets covered too, which is the safe direction for a privacy setting.
+     */
+    private boolean isPrivateChatLine(String plain, Set<String> pmBodies)
+    {
+        String line = plain == null ? "" : plain.trim();
+        if (line.isEmpty())
+        {
+            return false;
+        }
+        // Drop a leading bracketed prefix first (chat timestamps, clan and friends-chat tags).
+        if (line.startsWith("["))
+        {
+            int close = line.indexOf(']');
+            if (close >= 0)
+            {
+                line = line.substring(close + 1).trim();
+            }
+        }
+        if (line.startsWith("From ") || line.startsWith("To "))
+        {
+            int colon = line.indexOf(':');
+            if (colon > 0 && colon <= 20)
+            {
+                return true;
+            }
+        }
+        if (line.length() >= 3)
+        {
+            for (String body : pmBodies)
+            {
+                if (body.contains(line))
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /** Encode thread. Paints the resolved regions out of our private copy of the frame. */
+
+    /**
+     * Encode thread. PNG at native resolution first, since anything smaller is where the old
+     * fixed 800px cap turned a high-DPI client into mush. Only if the result busts the byte
+     * budget do we step the whole frame down, always resampling from the original so repeated
+     * steps do not compound blur. Returns null when even the smallest step will not fit.
+     */
+    /**
+     * Encode thread. Drops dead black margins around the frame.
+     *
+     * Under the GPU renderer the buffer handed to DrawManager can be larger than the area the game
+     * actually draws into, leaving a solid black band (observed as the left third of a shot). It is
+     * not content, it is padding, and at native resolution it is both ugly and pure wasted payload
+     * on a path that already has size limits. Deliberately conservative: a band must be perfectly
+     * black (every channel zero) to count, and if trimming would remove more than half the frame we
+     * assume the detection is wrong and keep the original rather than mangle a genuinely dark scene.
+     */
+    private java.awt.Rectangle contentBounds(BufferedImage src)
+    {
+        final int w = src.getWidth();
+        final int h = src.getHeight();
+        int left = 0, right = w - 1, top = 0, bottom = h - 1;
+
+        while (left < right && columnIsBlack(src, left, h)) left++;
+        while (right > left && columnIsBlack(src, right, h)) right--;
+        while (top < bottom && rowIsBlack(src, top, w)) top++;
+        while (bottom > top && rowIsBlack(src, bottom, w)) bottom--;
+
+        int newW = right - left + 1;
+        int newH = bottom - top + 1;
+        if (newW == w && newH == h) return new java.awt.Rectangle(0, 0, w, h);
+        if ((long) newW * newH * 2 < (long) w * h)
+        {
+            log.debug("Screenshot black-margin trim skipped: {}x{} -> {}x{} would drop over half the frame",
+                w, h, newW, newH);
+            return new java.awt.Rectangle(0, 0, w, h);
+        }
+        log.debug("Screenshot trimming black margins: {}x{} -> {}x{} at ({},{})", w, h, newW, newH, left, top);
+        return new java.awt.Rectangle(left, top, newW, newH);
+    }
+
+    private static boolean columnIsBlack(BufferedImage img, int x, int h)
+    {
+        for (int y = 0; y < h; y++) if ((img.getRGB(x, y) & 0xFFFFFF) != 0) return false;
+        return true;
+    }
+
+    private static boolean rowIsBlack(BufferedImage img, int y, int w)
+    {
+        for (int x = 0; x < w; x++) if ((img.getRGB(x, y) & 0xFFFFFF) != 0) return false;
+        return true;
+    }
+
+    private String encodePngWithinBudget(BufferedImage src) throws java.io.IOException
+    {
+        byte[] png = writePng(src);
+        double scale = 1.0;
+        for (int step = 0; png.length > SCREENSHOT_MAX_PNG_BYTES && step < SCREENSHOT_MAX_FALLBACK_STEPS; step++)
+        {
+            scale *= SCREENSHOT_FALLBACK_STEP;
+            int w = Math.max(1, (int) Math.round(src.getWidth() * scale));
+            int h = Math.max(1, (int) Math.round(src.getHeight() * scale));
+            BufferedImage scaled = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
+            java.awt.Graphics2D g = scaled.createGraphics();
+            g.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION, java.awt.RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+            g.drawImage(src, 0, 0, w, h, null);
+            g.dispose();
+            png = writePng(scaled);
+            log.debug("Screenshot over budget, retried at {}x{} ({} bytes)", w, h, png.length);
+        }
+        if (png.length > SCREENSHOT_MAX_PNG_BYTES)
+        {
+            log.warn("Screenshot dropped: still {} bytes after {} downscale steps", png.length, SCREENSHOT_MAX_FALLBACK_STEPS);
+            return null;
+        }
+        return java.util.Base64.getEncoder().encodeToString(png);
+    }
+
+    private static byte[] writePng(BufferedImage image) throws java.io.IOException
+    {
+        java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+        javax.imageio.ImageIO.write(image, "png", bos);
+        return bos.toByteArray();
+    }
+
+    private void handleCollectionLogEntry(String cleanedMessage)
+    {
+        if (!localPlayerInClan()) return; // non-clan alt on a member client - do not post
+        Matcher matcher = COLLECTION_LOG_PATTERN.matcher(cleanedMessage);
+        if (!matcher.find())
+        {
+            return;
+        }
+
+        String itemName = matcher.group(1).trim();
+        String playerName = client.getLocalPlayer() != null
+            ? client.getLocalPlayer().getName()
+            : "Unknown";
+
+        if (!isPlatformConfigured())
+        {
+            return;
+        }
+
+        final String pRsn = playerName;
+        final String pItem = itemName;
+        // Activity-feed / clog-leaderboard submit is gated on Clog Sync (its own toggle), independent
+        // of the drop-feed post below (Drops). This is the fix for live unlocks silently not posting
+        // when a member had Clog Sync on but Track Drops off.
+        if (config.enableClogSync())
+        {
+            executor.submit(() -> platformApiService.submitCollectionLogEntry(
+                getPlatformUrl(), getPlatformKey(), getPlatformSlug(), pRsn, pItem
+            ));
+        }
+
+        // A new unique can flip a rank requirement — this is one of the few moments the
+        // Ranks tab re-renders (with tab open/manual refresh and first bank open).
+        if (panel != null && panel.isRanksActive()) evaluateAndShowRanks();
+
+        // A new collection-log unlock is a one-time notable event, so post it to the drop feed
+        // exactly once here. Repeat drops of the same item never re-fire this message, which is
+        // how we avoid per-kill spam (e.g. araxyte sacks). This also covers pets, which arrive
+        // as a clog unlock rather than loot and never appear in the LootReceived item list.
+        if (config.enableDrops())
+        {
+            ensureClogCategoryMap();
+            WorldPoint wp = client.getLocalPlayer() != null
+                ? client.getLocalPlayer().getWorldLocation() : new WorldPoint(0, 0, 0);
+            int unlockItemId = clogNameToId != null ? clogNameToId.getOrDefault(itemName.toLowerCase(), -1) : -1;
+            // Only attribute to the last boss if it was killed recently; otherwise it's a skilling
+            // unlock (no associated kill) — avoid mislabeling it with a stale boss name.
+            boolean recentKill = System.currentTimeMillis() - lastKillTime < 60_000
+                && lastKilledNpc != null && !lastKilledNpc.isEmpty();
+            String unlockSource = recentKill ? lastKilledNpc : null;
+            // No recent kill: the item's collection-log CATEGORY names its boss (Eternal
+            // crystal -> "Cerberus", Crimson kisten -> "Maggot King") - far better than
+            // defaulting to "Skilling" on stale kill context.
+            if (unlockSource == null && unlockItemId > 0 && clogItemCategoryMap != null)
+            {
+                String[] meta = clogItemCategoryMap.get(unlockItemId);
+                if (meta != null && meta[1] != null && !meta[1].isEmpty())
+                {
+                    unlockSource = meta[1];
+                }
+            }
+            if (unlockSource == null) unlockSource = "Skilling";
+
+            int unlockValue = unlockItemId > 0 ? itemManager.getItemPrice(unlockItemId) : 0;
+
+            // Post EVERY collection-log unlock to the shared drops/clog feed with a screenshot (no
+            // value filter). The "New item added to your collection log" message only fires once per
+            // NEW unique, so this is per-unlock, never per-kill, and cannot re-fire for repeats.
+            {
+                // Only stamp a KC if this unlock came from the boss the KC counter belongs to.
+                // Pets often arrive with NO loot event (recentKill=false, e.g. Nexling) — fall
+                // back to the chat KC counter when its boss matches the resolved source.
+                int unlockKc = 0;
+                if (recentKill && kcAppliesTo(unlockSource, pbDetector.getLastBossName()))
+                {
+                    unlockKc = lastKillCount;
+                }
+                else if (kcAppliesTo(unlockSource, pbDetector.getLastBossName()))
+                {
+                    unlockKc = pbDetector.getLastKillCount();
+                }
+                DropEntry unlockDrop = new DropEntry(
+                    itemName, unlockValue, unlockSource, unlockKc,
+                    wp.getX(), wp.getY(), wp.getPlane(), playerName, unlockItemId
+                );
+                // Read the authoritative counts HERE, on the client thread. They cannot be read in
+                // the callback below: that runs off the client thread after the screenshot encodes,
+                // and varp reads are client-thread only. The server's stored counts are no
+                // substitute either, they only refresh when the player opens their collection log,
+                // so a post would otherwise show a stale total.
+                //
+                // The +1 is not a fudge. We detect the unlock from its CHAT MESSAGE, and the game
+                // has not incremented varp 2943 yet at that point, so reading it here returns the
+                // count from BEFORE this slot. Observed consistently: posts read exactly one short.
+                // Guarded on > 0 so an unavailable varp stays unavailable instead of becoming 1.
+                final int rawClogObtained = client.getVarpValue(VARP_CLOG_OBTAINED);
+                final int liveClogObtained = rawClogObtained > 0 ? rawClogObtained + 1 : 0;
+                final int liveClogTotal = client.getVarpValue(VARP_CLOG_TOTAL);
+                withScreenshot(true, screenshot ->
+                    platformApiService.submitDrop(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), unlockDrop, screenshot,
+                        config.sendScreenshotsToDiscord(), config.dropPhrase(), true /* fromClog: post every clog unlock */,
+                        liveClogObtained, liveClogTotal));
+                log.debug("Clog-unlock drop logged: {} from {}", itemName, unlockSource);
+            }
+        }
+    }
+
+    /**
+     * Handle any boss/raid completion time — checks against clan hiscores
+     * even when it's not a personal best, since a player can set a clan
+     * record without beating their own PB.
+     */
+    private void handleCompletionTime(String cleanedMessage)
+    {
+        if (!localPlayerInClan()) return; // non-clan alt on a member client - do not submit times
+        PbDetector.CompletionResult completion = pbDetector.detectCompletion(cleanedMessage);
+        if (completion == null)
+        {
+            // Inferno/Fight Caves/Colosseum: the duration line arrives BEFORE the kill-count
+            // line, so the detector parks it — the KC message that just went through
+            // processMessage() may have claimed it into a full completion.
+            completion = pbDetector.drainPendingCompletion();
+        }
+        if (completion == null)
+        {
+            return;
+        }
+
+        String group = completion.getGroup();
+        if ("unknown".equals(group))
+        {
+            log.debug("Completion time detected but could not identify activity");
+            return;
+        }
+
+        // Sanity floor: no real boss/raid completion is under 15 seconds. Sub-floor times are
+        // phase/split lines from other plugins that slipped past the message filter.
+        if (completion.getTimeSeconds() < 15)
+        {
+            log.debug("Ignoring implausible completion time {}s for {} (phase/split line?)",
+                completion.getTimeSeconds(), group);
+            return;
+        }
+
+        // Gather party members — use fight tracker for instanced bosses, fallback to snapshot
+        List<String> partyMembers;
+        if (fightTracker != null && fightTracker.getTrackedPartySize() > 0)
+        {
+            partyMembers = fightTracker.getTrackedMembers();
+        }
+        else
+        {
+            partyMembers = getPartyMembers();
+        }
+        int partySize = partyMembers.size();
+
+        // Resolve the specific BossCategory
+        BossCategory bossCategory = resolveBossCategory(group, partySize);
+
+        if (bossCategory == null)
+        {
+            log.warn("Could not resolve category for group={} size={}", group, partySize);
+            return;
+        }
+
+        boolean isGroupContent = bossCategory.isGroupContent();
+        String categoryName = bossCategory.getDisplayName();
+
+        // Validate clan membership for group content. Solo is ALWAYS clan-verified — the
+        // only participant is this clan member; requiring them to idle in clan chat made
+        // solo times land as "unverified" and drop off the Clan Only boards.
+        boolean allClanMembers = partySize == 1 || !isGroupContent || validateClanMembership(partyMembers);
+        if (!allClanMembers)
+        {
+            log.debug("Not all party members in clan chat — PB will be submitted as unverified");
+            if (config.chatConfirmation())
+            {
+                clientThread.invokeLater(() ->
+                    client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+                        "[" + getClanName() + "] Time recorded (unverified: not all party members in clan chat)", "")
+                );
+            }
+        }
+
+        // Sort party members for a stable roster string. EVERY plugin-running member submits the
+        // full roster (no designated-submitter election — that silently lost the time whenever the
+        // alphabetically-first member didn't run the plugin). Duplicates are safe: the server
+        // upserts per member keeping the fastest time, and Discord posts fire only when a row
+        // actually improves (isNewRecord), so the first submission to arrive posts and the rest no-op.
+        List<String> sortedMembers = new ArrayList<>(partyMembers);
+        Collections.sort(sortedMembers, String.CASE_INSENSITIVE_ORDER);
+        String rsns = String.join(", ", sortedMembers);
+
+        String date = new SimpleDateFormat("MM/dd").format(new Date());
+
+        // On a non-PB kill the game prints the player's TRUE personal best right in the message
+        // ("Fight duration: 2:41.40. Personal best: 2:02.40") — submit THAT as the quiet baseline,
+        // not the slower kill time. Solo only: for team content the historical PB was set with a
+        // different roster, so the current party names would be stored against a time they didn't do.
+        final boolean useGamePb = !completion.isPersonalBest()
+            && completion.getPersonalBestSeconds() > 0 && partySize == 1;
+        final String formattedTime = useGamePb ? completion.getPersonalBestTime() : completion.getFormattedTime();
+        final double timeSeconds = useGamePb ? completion.getPersonalBestSeconds() : completion.getTimeSeconds();
+        String categoryKey = bossCategory.getKey();
+        String sizeLabel = bossCategory.getSizeLabel();
+
+        log.debug("Completion time: {} {} — {} (key={}, party: {})",
+            formattedTime, categoryName, sizeLabel, categoryKey, rsns);
+
+        final int finalPartySize = partySize;
+        final String finalCategoryName = categoryName;
+        final boolean finalAllClan = allClanMembers;
+        final boolean isNewPb = completion.isPersonalBest();
+
+        // Capture a screenshot only on a genuine new personal best (avoids encoding on every kill).
+        withScreenshot(isNewPb, screenshot ->
+        {
+            // Submit PB to platform API — one entry per party member
+            // "live" = all party members in clan chat (clan-verified)
+            // "unverified" = not all members in clan chat
+            if (isPlatformConfigured())
+            {
+                int timeMs = (int) (timeSeconds * 1000);
+                String source = finalAllClan ? "live" : "unverified";
+
+                // Build everyone's PBs NATURALLY: the first completion each session sets a
+                // baseline and only improvements submit after that (the server keeps the fastest
+                // per player/boss/size, and Discord posts fire only on genuine records). This
+                // matters for bosses the adventure log cannot import - without it, a member whose
+                // real PB predates the plugin never gets a time on the board at all.
+                String sessionKey = categoryKey + "|" + finalPartySize;
+                Integer sessionBest = sessionBestTimes.get(sessionKey);
+                if (!isNewPb && sessionBest != null && timeMs >= sessionBest)
+                {
+                    log.debug("{} {} is not an improvement this session - skipping submit", categoryKey, formattedTime);
+                    return;
+                }
+                sessionBestTimes.merge(sessionKey, timeMs, Math::min);
+
+                // Submit each party member's time. The first submit is synchronous so we learn
+                // the clan placement (clanRank 1 = new clan record); the rest are fire-and-forget.
+                // All members share the same time, so the rank is stable regardless of order.
+                // Roster string stored on every member's row so a team PB can show all names
+                // (e.g. a duo best renders "BlG Woody, BlG Moby"). Null for solo content.
+                final String teamMembers = finalPartySize > 1 ? rsns : null;
+
+                int clanRank = 0;
+                boolean firstMember = true;
+                for (String member : sortedMembers)
+                {
+                    if (firstMember)
+                    {
+                        clanRank = platformApiService.submitPbSync(getPlatformUrl(), getPlatformKey(), getPlatformSlug(),
+                            member.trim(), categoryKey, finalPartySize, timeMs, source, teamMembers, screenshot, isNewPb,
+                            config.sendScreenshotsToDiscord(), config.pbPhrase());
+                        firstMember = false;
+                    }
+                    else
+                    {
+                        platformApiService.submitPb(getPlatformUrl(), getPlatformKey(), getPlatformSlug(),
+                            member.trim(), categoryKey, finalPartySize, timeMs, source, teamMembers, isNewPb);
+                    }
+                }
+                log.debug("Speed time submitted for {}: {} (clanRank {})", categoryKey, formattedTime, clanRank);
+
+                // Invalidate cache so next UI view fetches fresh data
+                hiscoreCacheV2.remove(categoryKey);
+                saveHiscoreCacheV2ToDisk();
+
+                // Chat notification — highlight when it's a clan-verified placement (top 3),
+                // and especially a new clan record (#1). Quiet natural baselines stay silent:
+                // "Speed time recorded" on an ordinary kill reads like a bogus PB submission,
+                // and the server no-ops anything that isn't actually faster anyway.
+                if (config.chatConfirmation() && isNewPb)
+                {
+                    final int rank = clanRank;
+                    String msg;
+                    if (finalAllClan && rank == 1)
+                    {
+                        msg = String.format("[%s] 🏆 NEW CLAN PB! %s in %s", getClanName(), formattedTime, finalCategoryName);
+                    }
+                    else if (finalAllClan && rank >= 2 && rank <= 3)
+                    {
+                        msg = String.format("[%s] Clan #%d — %s in %s", getClanName(), rank, formattedTime, finalCategoryName);
+                    }
+                    else
+                    {
+                        msg = String.format("[%s] Speed time recorded: %s in %s", getClanName(), formattedTime, finalCategoryName);
+                    }
+                    clientThread.invokeLater(() ->
+                        client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", msg, "")
+                    );
+                }
+            }
+        });
+    }
+
+    /**
+     * Resolve the BossCategory (v2) based on group key and party size.
+     * Group keys from PbDetector are now specific enough that BossCategory.find() handles most cases.
+     */
+    private BossCategory resolveBossCategory(String group, int partySize)
+    {
+        // For raids, the group key maps directly
+        // For most bosses, the group key is now specific (e.g. "bandos", "duke")
+        // BossCategory.find() picks the best match for the given party size
+        return BossCategory.find(group, partySize);
+    }
+
+    /**
+     * Get all party members. In instanced areas, uses visible players
+     * on the same plane as the local player (filters out spectators).
+     * Otherwise returns just the local player.
+     */
+    private List<String> getPartyMembers()
+    {
+        List<String> members = new ArrayList<>();
+        Player localPlayer = client.getLocalPlayer();
+        if (localPlayer == null)
+        {
+            return members;
+        }
+
+        String localName = localPlayer.getName();
+        if (localName != null)
+        {
+            members.add(localName);
+        }
+
+        if (client.isInInstancedRegion())
+        {
+            int localPlane = localPlayer.getWorldLocation().getPlane();
+
+            for (Player player : client.getPlayers())
+            {
+                if (player == localPlayer)
+                {
+                    continue;
+                }
+                String name = player.getName();
+                if (name == null || name.isEmpty())
+                {
+                    continue;
+                }
+                // Filter out spectators — they're on a different plane (e.g. ToB spectators)
+                if (player.getWorldLocation().getPlane() != localPlane)
+                {
+                    continue;
+                }
+                members.add(name);
+            }
+        }
+
+        return members;
+    }
+
+    /**
+     * Validate that all party members are in the player's clan chat.
+     */
+    private boolean validateClanMembership(List<String> partyMembers)
+    {
+        ClanChannel clanChannel = client.getClanChannel();
+        if (clanChannel == null)
+        {
+            log.warn("Cannot validate clan membership — not in a clan chat");
+            return false;
+        }
+
+        Set<String> clanNames = new HashSet<>();
+        for (ClanChannelMember member : clanChannel.getMembers())
+        {
+            clanNames.add(Text.toJagexName(member.getName()).toLowerCase());
+        }
+
+        for (String partyMember : partyMembers)
+        {
+            String normalized = Text.toJagexName(partyMember).toLowerCase();
+            if (!clanNames.contains(normalized))
+            {
+                log.debug("Party member {} is not in clan chat", partyMember);
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    @Subscribe
+    public void onNpcLootReceived(NpcLootReceived event)
+    {
+        if (isNonStandardWorld()) return;
+
+        NPC npc = event.getNpc();
+        if (npc != null)
+        {
+            lastKilledNpc = npc.getName();
+            lastKillCount = pbDetector.getLastKillCount();
+            lastKillTime = System.currentTimeMillis();
+        }
+    }
+
+    /**
+     * True when a loot source is the same boss/counter the latest KC message belongs to, so its
+     * kill count can be trusted. Handles bosses whose loot NPC name differs from the KC name
+     * (Araxxor→Araxyte, Grotesque Guardians→Dusk/Dawn). Returns false for non-counter sources.
+     */
+    private boolean kcAppliesTo(String source, String kcBoss)
+    {
+        if (source == null || kcBoss == null) return false;
+        String s = source.toLowerCase().trim();
+        String b = kcBoss.toLowerCase().trim();
+        if (s.isEmpty() || b.isEmpty()) return false;
+        if (s.equals(b) || s.contains(b) || b.contains(s)) return true;
+        if (s.contains("araxyte") && b.contains("araxxor")) return true;
+        if ((s.equals("dusk") || s.equals("dawn")) && b.contains("grotesque")) return true;
+        return false;
+    }
+
+    /**
+     * Log clan drops from the actual loot event. Using LootReceived (vs the "Valuable drop" chat
+     * line) gives the real source name and exact item IDs, so we attribute the monster correctly
+     * AND post only the rare/unique items — collection-log entries or curated whitelist items —
+     * instead of every valuable drop (e.g. a bulk green d'hide stack from Corp).
+     */
+    @Subscribe
+    public void onLootReceived(LootReceived event)
+    {
+        if (isNonStandardWorld()) return;
+        if (!config.enableDrops() || !isPlatformConfigured()) return;
+        if (!localPlayerInClan()) return; // this account isn't in the clan — don't post its drops
+        if (event.getItems() == null || event.getItems().isEmpty()) return;
+
+        String source = event.getName();
+        // Only attach a KC when the loot source is the boss/counter the KC actually belongs to.
+        // Otherwise a stale "last boss" KC gets stamped onto unrelated NPC drops (clue NPCs, etc.).
+        // Non-counter sources post with no KC at all.
+        // NPC kills AND event loot (raid chests, Barrows) can carry a KC — but only when the loot
+        // source matches the boss/counter the latest count message belongs to.
+        boolean kcCapable = event.getType() == LootRecordType.NPC || event.getType() == LootRecordType.EVENT;
+        int killCount = (kcCapable && kcAppliesTo(source, pbDetector.getLastBossName()))
+            ? pbDetector.getLastKillCount() : 0;
+        String playerName = client.getLocalPlayer() != null ? client.getLocalPlayer().getName() : "Unknown";
+        WorldPoint wp = client.getLocalPlayer() != null
+            ? client.getLocalPlayer().getWorldLocation() : new WorldPoint(0, 0, 0);
+
+        // Live clog quantities: any looted clog-catalog item bumps its count server-side
+        // immediately (already-unlocked rows only; the clog-open bulk sync stays authoritative).
+        java.util.Map<Integer, Integer> clogBumps = new java.util.HashMap<>();
+        for (ItemStack stack : event.getItems())
+        {
+            if (clogCatalogIds.contains(stack.getId()))
+            {
+                clogBumps.merge(stack.getId(), Math.max(1, stack.getQuantity()), Integer::sum);
+            }
+        }
+        if (!clogBumps.isEmpty())
+        {
+            platformApiService.submitClogIncrements(getPlatformUrl(), getPlatformKey(), getPlatformSlug(),
+                playerName, clogBumps);
+        }
+
+        for (ItemStack stack : event.getItems())
+        {
+            int itemId = stack.getId();
+            ItemComposition comp = itemManager.getItemComposition(itemId);
+            String itemName = comp.getName();
+            long total = (long) itemManager.getItemPrice(itemId) * Math.max(1, stack.getQuantity());
+            int value = (int) Math.min(total, Integer.MAX_VALUE);
+
+            // Post when whitelisted OR notable by value. Value matters for REPEAT uniques the
+            // member already has clogged (a second Nightmare staff fires no clog message, and
+            // if the item isn't whitelisted it used to vanish entirely). The value path only
+            // applies to unstackable, unnoted items, and at 10x the normal drop floor —
+            // 100k-class commons (dragon metal sheets and the like) drop far too often to be
+            // feed-worthy; a true repeat unique clears the higher bar.
+            if (!isPostableDrop(itemId))
+            {
+                boolean stackLike = comp.isStackable() || comp.getNote() != -1;
+                if (stackLike || value < fetchedMinDropValue * 10L) continue;
+            }
+
+            DropEntry drop = new DropEntry(itemName, value, source, killCount,
+                wp.getX(), wp.getY(), wp.getPlane(), playerName, itemId);
+
+            withScreenshot(true, screenshot ->
+                platformApiService.submitDrop(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), drop, screenshot,
+                    config.sendScreenshotsToDiscord(), config.dropPhrase()));
+            log.debug("Rare drop logged: {} x{} from {}", itemName, stack.getQuantity(), source);
+        }
+    }
+
+    /**
+     * A loot drop is postable only if it's on the clan's curated whitelist. Collection-log
+     * uniques are NOT posted from loot — they'd spam the feed on every kill (e.g. araxyte sacks
+     * from Araxxor). Instead a clog unlock posts once via handleCollectionLogEntry the first
+     * time it's obtained.
+     */
+    private boolean isPostableDrop(int itemId)
+    {
+        if (cachedClanWhitelist != null && !cachedClanWhitelist.isEmpty())
+        {
+            String name = itemManager.getItemComposition(itemId).getName();
+            for (Map<String, String> entry : cachedClanWhitelist)
+            {
+                String wl = entry.get("item");
+                if (wl != null && wl.equalsIgnoreCase(name)) return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Build the collection-log item-id → [tab, category] map for drop filtering, without the
+     * server catalog sync that buildClogCategoryMap does (that one runs when the clog is opened).
+     * Cheap and cached after the first build; reads game enums so must run on the client thread.
+     */
+    /**
+     * Read the open Combat Achievements task list and sync each task's completion to the platform.
+     * Each rendered row in the task-name column (component 715,10) is a task whose text is the
+     * exact task name (matches the wiki catalog) and whose text color encodes completion
+     * (green = done, grey = not done). The list isn't virtualized, so every row matching the
+     * player's current filter is present at once. Sync is per-task upsert, so any filter is safe —
+     * an "All" filter syncs everything in one open, a narrower filter just updates a subset.
+     */
+    // Matches the in-game CA completion message, e.g.
+    //   "Congratulations, you've completed a Hard combat achievement task: Peach Conjurer."
+    // (also the shorter "combat task:" wording). Group 1 is the task name; the server matches it to
+    // the catalog by name.
+    private static final java.util.regex.Pattern CA_COMPLETION_PATTERN = java.util.regex.Pattern.compile(
+        "you've completed an? .+? combat (?:achievement )?task: (.+?)\\.?$");
+
+    // Live-track a combat achievement the instant it's earned, rather than only when the player opens
+    // the CA interface. Submits just that one task as completed; the server upserts it without touching
+    // the player's other tasks and handles the Discord/activity announce.
+    private void detectCombatAchievement(String message)
+    {
+        if (message == null || !isPlatformConfigured()) return;
+        java.util.regex.Matcher m = CA_COMPLETION_PATTERN.matcher(message);
+        if (!m.find()) return;
+        String task = m.group(1).trim();
+        if (task.isEmpty()) return;
+        String rsn = client.getLocalPlayer() != null ? client.getLocalPlayer().getName() : null;
+        if (rsn == null || rsn.isEmpty()) return;
+        final String fRsn = rsn;
+        final String fTask = task;
+        // A live CA completion is worth a screenshot (like drops/PBs). Capture one when the player has
+        // the screenshots toggle on; withScreenshot passes null when off, so the sync still records.
+        withScreenshot(config.sendScreenshotsToDiscord(), screenshot ->
+            platformApiService.syncCombatAchievements(
+                getPlatformUrl(), getPlatformKey(), getPlatformSlug(), fRsn,
+                java.util.Collections.singletonList(new PlatformApiService.CaTask(fTask, true)), screenshot));
+    }
+
+    private void readCombatAchievements()
+    {
+        if (!isPlatformConfigured()) return;
+        String rsn = client.getLocalPlayer() != null ? client.getLocalPlayer().getName() : null;
+        if (rsn == null || rsn.isEmpty()) return;
+
+        Widget list = client.getWidget(InterfaceID.CA_TASKS, CA_TASK_NAME_COMPONENT);
+        if (list == null) return;
+        Widget[] rows = list.getDynamicChildren();
+        if (rows == null || rows.length == 0) return;
+
+        List<PlatformApiService.CaTask> tasks = new ArrayList<>();
+        int completed = 0;
+        for (Widget row : rows)
+        {
+            String name = row.getText();
+            if (name == null || name.isEmpty()) continue;
+            boolean done = row.getTextColor() == CA_COMPLETE_COLOR;
+            if (done) completed++;
+            tasks.add(new PlatformApiService.CaTask(name.trim(), done));
+        }
+        if (tasks.isEmpty()) return;
+
+        final String fRsn = rsn;
+        final List<PlatformApiService.CaTask> fTasks = tasks;
+        final int fCompleted = completed;
+        executor.submit(() -> platformApiService.syncCombatAchievements(
+            getPlatformUrl(), getPlatformKey(), getPlatformSlug(), fRsn, fTasks));
+        log.debug("Synced {} combat achievements ({} complete) for {}", tasks.size(), fCompleted, fRsn);
+        // readCombatAchievements runs on the client thread (it reads the CA interface widgets), so
+        // the confirmation can post directly.
+        client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+            "[" + getClanName() + "] Combat achievements synced (" + fCompleted + "/" + tasks.size() + " complete)", "");
+    }
+
+    // Read the Slayer Rewards shop (group 426) and sync which unlocks the player owns. Each unlock is a
+    // row where a status sprite is immediately followed by the name text; owned = SLAYER_UNLOCK_OWNED_SPRITE.
+    private void readSlayerUnlocks()
+    {
+        if (!isPlatformConfigured()) return;
+        String rsn = client.getLocalPlayer() != null ? client.getLocalPlayer().getName() : null;
+        if (rsn == null || rsn.isEmpty()) return;
+
+        java.util.Set<String> owned = new java.util.LinkedHashSet<>();
+        for (int c = 0; c < 90; c++)
+        {
+            net.runelite.api.widgets.Widget list = client.getWidget(SLAYER_REWARDS_GROUP, c);
+            if (list == null) continue;
+            net.runelite.api.widgets.Widget[] dyn = list.getDynamicChildren();
+            if (dyn == null || dyn.length < 2) continue;
+            for (int i = 0; i + 1 < dyn.length; i++)
+            {
+                net.runelite.api.widgets.Widget status = dyn[i];
+                if (status == null || status.getSpriteId() != SLAYER_UNLOCK_OWNED_SPRITE) continue;
+                net.runelite.api.widgets.Widget nameW = dyn[i + 1];
+                if (nameW == null) continue;
+                String name = nameW.getText();
+                if (name != null && !name.trim().isEmpty()) owned.add(name.trim());
+            }
+        }
+        if (owned.isEmpty()) return; // shop not populated / nothing owned — don't wipe on an empty read
+
+        // Persist for offline rank evaluation (buildRankSnapshot reads this back). "|" separates names
+        // since an unlock can contain a comma-free apostrophe (e.g. "Absolutely Slayin'").
+        configManager.setConfiguration("droplogger", "slayerUnlocks", String.join("|", owned));
+
+        final String fRsn = rsn;
+        final java.util.List<String> fOwned = new java.util.ArrayList<>(owned);
+        executor.submit(() -> platformApiService.syncSlayerUnlocks(
+            getPlatformUrl(), getPlatformKey(), getPlatformSlug(), fRsn, fOwned));
+        log.debug("Synced {} Slayer unlocks for {}", fOwned.size(), fRsn);
+        client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+            "[" + getClanName() + "] Slayer unlocks synced (" + fOwned.size() + ")", "");
+    }
+
+    /**
+     * Read the GIM Group side panel (interface 726) and report its texts for automatic team
+     * detection (client thread). The exact component layout isn't documented, so this walks every
+     * widget in the group and collects visible texts; the SERVER keeps only strings matching clan
+     * roster names, which makes stray labels harmless.
+     */
+    private void readGimGroupPanel()
+    {
+        if (!isPlatformConfigured() || gimGroupReported) return;
+        net.runelite.api.Player lp = client.getLocalPlayer();
+        if (lp == null || lp.getName() == null) return;
+        final String rsn = lp.getName();
+        final String accountType = readAccountType();
+        // Only group irons have a group panel worth reading.
+        if (accountType == null || !(accountType.equals("gim") || accountType.equals("hcgim") || accountType.equals("unranked_gim"))) return;
+
+        java.util.LinkedHashSet<String> texts = new java.util.LinkedHashSet<>();
+        for (int child = 0; child < 60 && texts.size() < 70; child++)
+        {
+            Widget w = client.getWidget(GIM_SIDEPANEL_GROUP, child);
+            if (w == null) continue;
+            collectWidgetTexts(w, texts, 0);
+        }
+        if (texts.isEmpty()) return;
+
+        gimGroupReported = true;
+        final java.util.List<String> payload = new java.util.ArrayList<>(texts);
+        executor.submit(() ->
+        {
+            JsonObject res = platformApiService.reportGimGroup(
+                getPlatformUrl(), getPlatformKey(), getPlatformSlug(), rsn, accountType, payload);
+            if (res != null && res.has("team") && !res.get("team").isJsonNull())
+            {
+                final String team = res.get("team").getAsString();
+                final boolean created = res.has("created") && res.get("created").getAsBoolean();
+                clientThread.invokeLater(() -> client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+                    "[" + getClanName() + "] GIM group " + (created ? "detected" : "synced") + ": " + team, ""));
+            }
+        });
+    }
+
+    /** Collect visible texts from a widget and its children (bounded depth). */
+    private void collectWidgetTexts(Widget w, java.util.Set<String> out, int depth)
+    {
+        if (w == null || depth > 3 || out.size() >= 70) return;
+        String t = w.getText();
+        if (t != null && !t.isEmpty())
+        {
+            String clean = Text.removeTags(t).trim();
+            if (!clean.isEmpty() && clean.length() <= 60) out.add(clean);
+        }
+        Widget[][] childSets = { w.getDynamicChildren(), w.getStaticChildren(), w.getNestedChildren() };
+        for (Widget[] set : childSets)
+        {
+            if (set == null) continue;
+            for (Widget c : set) collectWidgetTexts(c, out, depth + 1);
+        }
+    }
+
+    // PRIVACY: these item caches are IN-MEMORY ONLY and are NEVER sent anywhere. They exist solely
+    // to tick rank requirement boxes locally. Accumulated across the session (so items stay checked
+    // after the bank closes / you switch tabs) and cleared on logout. See RankSystem for the full note.
+    private final java.util.Set<String> rankOwnedCache = new java.util.HashSet<>();   // lowercased item names seen
+    private final java.util.Map<String, Integer> rankOwnedIds = new java.util.HashMap<>(); // name -> id (for icons)
+
+    // Admin-controlled eval mode for THIS player, fetched from the server (sticky override).
+    // "default" = bank/equipment auto-eval; "clog_only" = evaluate from the local collection log;
+    // "admin_set" = rank is assigned manually by an admin (no auto-eval).
+    private volatile long lastAuthWarnAt = 0; // debounce for the key-rejected chat warning
+    // Fastest time seen THIS session per "categoryKey|partySize" - gates natural PB submissions.
+    private final java.util.Map<String, Integer> sessionBestTimes = new java.util.concurrent.ConcurrentHashMap<>();
+
+    private volatile String rankMode = "default";
+    private volatile String rankAssigned = null;
+    private volatile java.util.Set<String> rankHeld = new java.util.HashSet<>(); // ranks held via Discord
+    // Clog item ids from the server catalog — filters loot events for live quantity bumps.
+    private volatile java.util.Set<Integer> clogCatalogIds = java.util.Collections.emptySet();
+    private volatile java.util.Map<String, Integer> rankKc = new java.util.HashMap<>(); // WOM boss key -> KC
+    private volatile java.util.Set<String> rankCaDone = new java.util.HashSet<>(); // completed CA task names (lowercased)
+
+    // Achievement Diary completion varbits per region {varbitId, completeThreshold}. Standard regions
+    // use the boolean _COMPLETE varbit (>=1); Karamja easy/medium/hard use the legacy varbit (>=2).
+    private static final int[][] DIARY_EASY = {
+        {4458,1},{4462,1},{4466,1},{4471,1},{4475,1},{4479,1},{4483,1},{4487,1},{4491,1},{4495,1},{7925,1},{3578,2}};
+    private static final int[][] DIARY_MEDIUM = {
+        {4459,1},{4463,1},{4467,1},{4472,1},{4476,1},{4480,1},{4484,1},{4488,1},{4492,1},{4496,1},{7926,1},{3599,2}};
+    private static final int[][] DIARY_HARD = {
+        {4460,1},{4464,1},{4468,1},{4473,1},{4477,1},{4481,1},{4485,1},{4489,1},{4493,1},{4497,1},{7927,1},{3611,2}};
+    private static final int[][] DIARY_ELITE = {
+        {4461,1},{4465,1},{4469,1},{4474,1},{4478,1},{4482,1},{4486,1},{4490,1},{4494,1},{4498,1},{7928,1},{4566,1}};
+
+    /** Tab-open / refresh entry point: fetch this player's eval mode from the server, then evaluate. */
+    private void loadRanksWithMode()
+    {
+        if (!isPlatformConfigured() || client.getLocalPlayer() == null) { panel.showRanks(null, null, "default"); return; }
+        String rsn = client.getLocalPlayer().getName();
+        if (rsn == null || rsn.isEmpty()) { panel.showRanks(null, null, "default"); return; }
+        // Read the account type on the client thread (varbit), then do the network work off-thread.
+        clientThread.invokeLater(() ->
+        {
+        final String acctType = readAccountType();
+        executor.submit(() ->
+        {
+            PlatformApiService.RankMode rm = platformApiService.fetchRankMode(
+                getPlatformUrl(), getPlatformKey(), getPlatformSlug(), rsn);
+            rankMode = rm.mode != null ? rm.mode : "default";
+            rankAssigned = rm.assignedRank;
+            rankHeld = rm.heldRanks != null ? new java.util.HashSet<>(rm.heldRanks) : new java.util.HashSet<>();
+            // Boss KCs from WiseOldMan (via our server) — public hiscore data, drives KC requirements.
+            rankKc = platformApiService.fetchPlayerKc(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), rsn);
+            // Completed Combat Achievement tasks (we already sync these) — drives named-CA requirements.
+            PlatformApiService.PlayerCa ca = platformApiService.fetchPlayerCa(
+                getPlatformUrl(), getPlatformKey(), getPlatformSlug(), rsn);
+            java.util.Set<String> done = new java.util.HashSet<>();
+            if (ca != null && ca.tasks != null)
+            {
+                for (PlatformApiService.CaTaskInfo t : ca.tasks)
+                {
+                    if (t.completed && t.name != null) done.add(t.name.toLowerCase());
+                }
+            }
+            rankCaDone = done;
+            // Server-managed rank tree (data, not code). Parse + swap the active tree; on any
+            // failure keep the plugin's bundled default so ranks still evaluate offline.
+            try
+            {
+                // GIM accounts evaluate against their own rank tree; fall back to the default tree if
+                // the GIM tree has not been set up yet, so a GIM is never left with no ranks.
+                boolean isGim = "gim".equals(acctType) || "hcgim".equals(acctType) || "unranked_gim".equals(acctType);
+                String ranksJson = platformApiService.fetchRanks(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), isGim ? "gim" : null);
+                java.util.List<RankSystem.Rank> parsed = ranksJson != null ? RankSystem.parseRanks(ranksJson) : null;
+                if (isGim && (parsed == null || parsed.isEmpty()))
+                {
+                    String defJson = platformApiService.fetchRanks(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), null);
+                    if (defJson != null) parsed = RankSystem.parseRanks(defJson);
+                }
+                if (parsed != null && !parsed.isEmpty()) RankSystem.setRanks(parsed);
+            }
+            catch (Exception ex)
+            {
+                log.warn("Server rank tree unavailable; using bundled default", ex);
+            }
+            evaluateAndShowRanks();
+        });
+        });
+    }
+
+    /** (Re)evaluate the local player's ranks per the cached mode and push to the panel. Nothing is sent out. */
+    private void evaluateAndShowRanks()
+    {
+        if (client.getLocalPlayer() == null) { panel.showRanks(null, null, "default"); return; }
+        if ("admin_set".equals(rankMode))
+        {
+            panel.showAdminAssignedRank(rankAssigned, rankMode);
+            return;
+        }
+        final boolean modeClogOnly = "clog_only".equals(rankMode);
+        clientThread.invokeLater(() ->
+        {
+            // Item requirements evaluate by ACTUAL possession for every account type, GIMs included.
+            // Proving by collection log was gameable for groups (trade an item to a teammate, they log
+            // the slot, trade it back), so possession is the honest check. Only the manual clog-only
+            // mode forces clog proof now.
+            boolean clogOnly = modeClogOnly;
+            RankSystem.PlayerSnapshot snap = buildRankSnapshot(clogOnly);
+            java.util.List<RankSystem.RankStatus> results = RankSystem.evaluateAll(snap, rankHeld);
+            panel.showRanks(results, snap.itemIds, rankMode);
+        });
+    }
+
+    // The first bank open each session is the one container event worth a re-render: the bank
+    // flooding the item cache is the big accuracy jump for item requirements.
+    private boolean rankBankRefreshed = false;
+
+    /** Cache items from worn/inventory/bank as they change so checks stay accurate after the bank closes. */
+    @Subscribe
+    public void onItemContainerChanged(ItemContainerChanged event)
+    {
+        int id = event.getContainerId();
+        if (id != InventoryID.BANK && id != InventoryID.INV && id != InventoryID.WORN) return;
+        cacheContainerItems(id);
+        // Do NOT re-render the Ranks tab here on every event — inventory/equipment events fire
+        // constantly during play and rebuilding the tab per event made it flicker. The cache
+        // above always stays fresh; the tab re-renders on: tab open, the manual ↻ button,
+        // first bank open of the session, or a new collection-log unlock.
+        if (id == InventoryID.BANK && !rankBankRefreshed)
+        {
+            rankBankRefreshed = true;
+            if (panel != null && panel.isRanksActive()) evaluateAndShowRanks();
+        }
+    }
+
+    // Ornate pool of Rejuvenation (object 29241) proves the TzKal stat-restoration requirement. When
+    // seen (in a POH) persist a flag so it survives sessions; the rank snapshot reads it as an unlock.
+    private static final int ORNATE_POOL_OBJECT_ID = 29241;
+    private boolean seenOrnatePool;
+
+    /**
+     * Accounts that can stand in someone ELSE's house, where seeing a pool proves nothing about
+     * owning one. Solo irons (ironman / hardcore / ultimate) cannot enter another player's POH at
+     * all, so for them the sighting IS the proof and demanding build mode would be busywork.
+     * Group irons can visit their team's houses, and mains can visit anyone's, so both must prove it.
+     */
+    private boolean canEnterOtherPlayersHouses()
+    {
+        String type = readAccountType();
+        if (type == null) return true; // unknown: assume the permissive account, demand the proof
+        switch (type)
+        {
+            case "ironman":
+            case "hardcore":
+            case "ultimate":
+                return false;
+            default:
+                return true; // regular, gim, hcgim, unranked_gim
+        }
+    }
+
+    @Subscribe
+    public void onGameObjectSpawned(net.runelite.api.events.GameObjectSpawned event)
+    {
+        if (seenOrnatePool || event.getGameObject().getId() != ORNATE_POOL_OBJECT_ID)
+        {
+            return;
+        }
+        // Build mode is only possible in your OWN house, so it is the one unambiguous proof of
+        // ownership. Required only for accounts that could be standing in someone else's house.
+        if (canEnterOtherPlayersHouses() && client.getVarbitValue(VarbitID.POH_BUILDING_MODE) != 1)
+        {
+            return;
+        }
+        seenOrnatePool = true;
+        // Deliberately a NEW config key. The old "seenOrnatePool" was set by seeing ANY pool in ANY
+        // house and persists forever, so reusing it would carry every existing false pass straight
+        // through this fix. Starting a fresh key makes everyone re-prove it.
+        try { configManager.setConfiguration("droplogger", "seenOwnOrnatePool", true); } catch (Exception ignored) {}
+    }
+
+    /** Build a snapshot of the local player's state for clan-rank validation. Client thread only.
+     *  Reads are LOCAL; nothing here is transmitted. */
+    private RankSystem.PlayerSnapshot buildRankSnapshot(boolean clogOnly)
+    {
+        RankSystem.PlayerSnapshot s = new RankSystem.PlayerSnapshot();
+        // The clog name→id map resolves UNTRADEABLE item icons (fire cape, void, infernal cape…) that
+        // itemManager.search can't find. Build it once and hand it to the panel for icon rendering.
+        ensureClogCategoryMap();
+        if (clogNameToId != null) panel.setClogNameToId(clogNameToId);
+        for (Skill sk : Skill.values())
+        {
+            if (sk == Skill.OVERALL) continue;
+            s.skills.put(sk.getName().toLowerCase(), client.getRealSkillLevel(sk));
+        }
+        s.totalLevel = client.getTotalLevel();
+        s.totalXp = client.getOverallExperience();
+        s.combatLevel = client.getLocalPlayer() != null ? client.getLocalPlayer().getCombatLevel() : 0;
+        addCaTier(s, "easy", VarbitID.CA_TIER_STATUS_EASY);
+        addCaTier(s, "medium", VarbitID.CA_TIER_STATUS_MEDIUM);
+        addCaTier(s, "hard", VarbitID.CA_TIER_STATUS_HARD);
+        addCaTier(s, "elite", VarbitID.CA_TIER_STATUS_ELITE);
+        addCaTier(s, "master", VarbitID.CA_TIER_STATUS_MASTER);
+        addCaTier(s, "grandmaster", VarbitID.CA_TIER_STATUS_GRANDMASTER);
+        // Prayer-scroll unlocks read from the prayer book (the scroll itself is consumed on use).
+        addUnlock(s, "rigour", VarbitID.PRAYER_RIGOUR_UNLOCKED);
+        addUnlock(s, "augury", VarbitID.PRAYER_AUGURY_UNLOCKED);
+        addUnlock(s, "preserve", VarbitID.PRAYER_PRESERVE_UNLOCKED);
+        addUnlock(s, "deadeye", VarbitID.PRAYER_DEADEYE_UNLOCKED);
+        addUnlock(s, "mystic vigour", VarbitID.PRAYER_MYSTIC_VIGOUR_UNLOCKED);
+
+        // Collection log slots obtained (varp 2943, server-synced) — drives Log Beast.
+        try { s.clogSlots = Math.max(client.getVarpValue(VARP_CLOG_OBTAINED), clogObtainedCount); }
+        catch (Exception ignored) { s.clogSlots = clogObtainedCount; }
+        // Achievement Diary completion (in-game varbits) → count complete per tier.
+        s.diaryComplete.put("easy", countDiaries(DIARY_EASY));
+        s.diaryComplete.put("medium", countDiaries(DIARY_MEDIUM));
+        s.diaryComplete.put("hard", countDiaries(DIARY_HARD));
+        s.diaryComplete.put("elite", countDiaries(DIARY_ELITE));
+        // Per-region diary completion for DIARY_REGION checks ("region:tier", lowercased).
+        for (int i = 0; i < DIARY_REGIONS.length; i++)
+        {
+            if (diaryTierDone(DIARY_EASY, i)) s.diaryRegionsComplete.add((DIARY_REGIONS[i] + ":easy").toLowerCase());
+            if (diaryTierDone(DIARY_MEDIUM, i)) s.diaryRegionsComplete.add((DIARY_REGIONS[i] + ":medium").toLowerCase());
+            if (diaryTierDone(DIARY_HARD, i)) s.diaryRegionsComplete.add((DIARY_REGIONS[i] + ":hard").toLowerCase());
+            if (diaryTierDone(DIARY_ELITE, i)) s.diaryRegionsComplete.add((DIARY_REGIONS[i] + ":elite").toLowerCase());
+        }
+        // Finished quests for QUEST checks (lowercased names; skip miniquests/RFD subquests).
+        for (net.runelite.api.Quest q : net.runelite.api.Quest.values())
+        {
+            if (NON_QUEST_ENTRIES.contains(q.name())) continue;
+            try { if (q.getState(client) == net.runelite.api.QuestState.FINISHED) s.questsComplete.add(q.getName().toLowerCase()); }
+            catch (Exception ignored) { /* a quest's varbit may be unavailable this version */ }
+        }
+        // Completed CA tasks (fetched from our server in loadRanksWithMode).
+        s.caDone.addAll(rankCaDone);
+        // Slayer Rewards unlocks: read from the last shop scan cached in config (the shop must be open
+        // to scan, so this persists it for offline rank evaluation, same as the achievement signature).
+        String slayerCsv = configManager.getConfiguration("droplogger", "slayerUnlocks");
+        if (slayerCsv != null && !slayerCsv.isEmpty())
+        {
+            for (String u : slayerCsv.split("\\|")) if (!u.trim().isEmpty()) s.slayerUnlocks.add(u.trim().toLowerCase());
+        }
+
+        if (clogOnly)
+        {
+            // Collection-log-only mode (admin-assigned): treat items the player has OBTAINED per their
+            // collection log as owned, instead of their current bank/equipment. Read locally from the
+            // clog synced this session (open the collection log to populate it); never sent anywhere.
+            synchronized (clogSyncItems)
+            {
+                for (ClogItem ci : clogSyncItems.values())
+                {
+                    String key = ci.name.toLowerCase();
+                    s.ownedItems.add(key);
+                    s.itemIds.putIfAbsent(key, ci.itemId);
+                }
+            }
+        }
+        else
+        {
+            // Default: refresh the cache from whatever's readable now, then use the session cache.
+            cacheContainerItems(InventoryID.WORN);
+            cacheContainerItems(InventoryID.INV);
+            cacheContainerItems(InventoryID.BANK);
+            s.ownedItems.addAll(rankOwnedCache);
+            s.itemIds.putAll(rankOwnedIds);
+            // ALSO count a TIGHT whitelist of collection-log items: only things CONSUMED into a
+            // permanent unlock that leave NO holdable trace (e.g. Slepey tablet). Everything else
+            // must be proven by CURRENT possession (bank/equipment), so a sold, lost, hacked, or
+            // Jagex-stripped item never counts. Icons still resolve from the clog id map regardless.
+            synchronized (clogSyncItems)
+            {
+                for (ClogItem ci : clogSyncItems.values())
+                {
+                    String key = ci.name.toLowerCase();
+                    s.itemIds.putIfAbsent(key, ci.itemId);
+                    if (CLOG_OWNED_WHITELIST.contains(key)) s.ownedItems.add(key);
+                }
+            }
+        }
+        // Clog-slot proofs (CLOG_SLOT checks): every synced clog slot name, independent of the
+        // ownership tightening above (these are permanent unlocks/proofs, not held items).
+        synchronized (clogSyncItems)
+        {
+            for (ClogItem ci : clogSyncItems.values())
+            {
+                String key = ci.name.toLowerCase();
+                s.clogObtained.add(key);
+                s.clogQty.merge(key, ci.quantity, Integer::max); // for CLOG_SLOT quantity checks
+            }
+        }
+        // Ornate pool of Rejuvenation (persisted flag) proves the TzKal stat-restoration req.
+        if (seenOrnatePool || Boolean.TRUE.equals(configManager.getConfiguration("droplogger", "seenOwnOrnatePool", Boolean.class)))
+            s.unlocks.add("ornate pool");
+        RankSystem.expandOwned(s.ownedItems); // own Ultor → Berserker ring (i) ticks, etc.
+
+        // Boss KCs (WiseOldMan via our server) + synthetic aggregates the rank checks reference.
+        java.util.Map<String, Integer> kc = rankKc;
+        s.kc.putAll(kc);
+        int cox = kcSum(kc, "chambers_of_xeric", "chambers_of_xeric:_challenge_mode");
+        int tob = kcSum(kc, "theatre_of_blood", "theatre_of_blood:_hard_mode");
+        int toa = kcSum(kc, "tombs_of_amascut", "tombs_of_amascut:_expert_mode");
+        s.kc.put("cox_total", cox);
+        s.kc.put("tob_total", tob);
+        s.kc.put("toa_total", toa);
+        s.kc.put("raids_combined", cox + tob + toa);
+        s.kc.put("god_wars_dungeon", kcSum(kc, "general_graardor", "commander_zilyana", "kreearra", "kril_tsutsaroth"));
+        return s;
+    }
+
+    /** Count completed diaries in a tier (client thread). Each entry is {varbitId, completeThreshold}. */
+    private int countDiaries(int[][] varbits)
+    {
+        int n = 0;
+        for (int[] vt : varbits)
+        {
+            try { if (client.getVarbitValue(vt[0]) >= vt[1]) n++; }
+            catch (Exception ignored) { /* varbit id may differ across versions */ }
+        }
+        return n;
+    }
+
+    // Quest points live in a long-standing player varp. Read best-effort; a wrong value just shows
+    // an odd QP count, it never blocks the diary/quest sync.
+    private static final int VARP_QUEST_POINTS = 101;
+
+    // Account type varbit (Varbits.ACCOUNT_TYPE). The GAME is the only source that knows the GIM
+    // flavours — WOM reports every group iron as plain "ironman" — so the plugin reports the exact
+    // type and the server treats it as authoritative over the WOM bulk sync.
+    private static final int VARBIT_ACCOUNT_TYPE = 1777;
+
+    private boolean accountTypeIconsSent = false; // chat-badge sprites handed to the panel once per client
+
+    /**
+     * Hand the panel the game's own chat-badge sprites (mod icons) for each iron type, so the
+     * Members list can show the exact helm the game renders before names. Client thread; the mod
+     * icons are IndexedSprites (palette + pixel indices), converted here to ARGB images.
+     */
+    private void sendAccountTypeIcons()
+    {
+        if (accountTypeIconsSent) return;
+        try
+        {
+            net.runelite.api.IndexedSprite[] modIcons = client.getModIcons();
+            if (modIcons == null) return;
+            java.util.Map<String, java.awt.image.BufferedImage> out = new java.util.HashMap<>();
+            java.util.Map<String, net.runelite.api.IconID> wanted = new java.util.HashMap<>();
+            wanted.put("ironman", net.runelite.api.IconID.IRONMAN);
+            wanted.put("hardcore", net.runelite.api.IconID.HARDCORE_IRONMAN);
+            wanted.put("ultimate", net.runelite.api.IconID.ULTIMATE_IRONMAN);
+            wanted.put("gim", net.runelite.api.IconID.GROUP_IRONMAN);
+            wanted.put("hcgim", net.runelite.api.IconID.HARDCORE_GROUP_IRONMAN);
+            wanted.put("unranked_gim", net.runelite.api.IconID.UNRANKED_GROUP_IRONMAN);
+            for (java.util.Map.Entry<String, net.runelite.api.IconID> e : wanted.entrySet())
+            {
+                int idx = e.getValue().getIndex();
+                if (idx < 0 || idx >= modIcons.length || modIcons[idx] == null) continue;
+                java.awt.image.BufferedImage img = indexedSpriteToImage(modIcons[idx]);
+                if (img != null) out.put(e.getKey(), img);
+            }
+            if (!out.isEmpty())
+            {
+                panel.setAccountTypeIcons(out);
+                accountTypeIconsSent = true;
+            }
+        }
+        catch (Exception ex)
+        {
+            log.debug("Account-type icon extraction failed", ex);
+        }
+    }
+
+    /** Palette-indexed sprite → ARGB image (index 0 = transparent, as the game renders it). */
+    private static java.awt.image.BufferedImage indexedSpriteToImage(net.runelite.api.IndexedSprite s)
+    {
+        int w = s.getWidth(), h = s.getHeight();
+        if (w <= 0 || h <= 0) return null;
+        byte[] pixels = s.getPixels();
+        int[] palette = s.getPalette();
+        java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(w, h, java.awt.image.BufferedImage.TYPE_INT_ARGB);
+        for (int y = 0; y < h; y++)
+        {
+            for (int x = 0; x < w; x++)
+            {
+                int idx = pixels[y * w + x] & 0xFF;
+                if (idx == 0) continue; // transparent
+                img.setRGB(x, y, 0xFF000000 | palette[idx]);
+            }
+        }
+        return img;
+    }
+
+    /** Map varbit 1777 to the platform's account-type string (client thread). */
+    private String readAccountType()
+    {
+        try
+        {
+            switch (client.getVarbitValue(VARBIT_ACCOUNT_TYPE))
+            {
+                case 0: return "regular";
+                case 1: return "ironman";
+                case 2: return "ultimate";
+                case 3: return "hardcore";
+                case 4: return "gim";
+                case 5: return "hcgim";
+                case 6: return "unranked_gim";
+                default: return null;
+            }
+        }
+        catch (Exception ignored) { return null; }
+    }
+
+    // Region names aligned INDEX-FOR-INDEX with the DIARY_* varbit arrays above. Verified against
+    // the runelite-api Varbits constants (4458=Ardougne, 4462=Falador, 4466=Wilderness, 4471=Western,
+    // 4475=Kandarin, 4479=Varrock, 4483=Desert, 4487=Morytania, 4491=Fremennik, 4495=Lumbridge,
+    // 7925=Kourend, 3578=Karamja) — do not reorder one without the other.
+    private static final String[] DIARY_REGIONS = {
+        "Ardougne", "Falador", "Wilderness", "Western Provinces", "Kandarin", "Varrock",
+        "Desert", "Morytania", "Fremennik", "Lumbridge & Draynor", "Kourend & Kebos", "Karamja"};
+
+    // RuneLite's Quest enum mixes in the miniquests and the 10 Recipe for Disaster SUBquests, so
+    // the clan count only matches the in-game quest list once those are excluded (RECIPE_FOR_DISASTER
+    // itself stays: it's the real quest). Matched by ENUM NAME, not enum constant, because the client
+    // we run inside ships a NEWER runelite-api than the compile pin: a just-released miniquest exists
+    // at runtime but not compile time (THE_BLOOD_MOON_LEGACY is exactly that case). Unknown names are
+    // harmless, so new miniquests can be added here ahead of a version bump.
+    private static final java.util.Set<String> NON_QUEST_ENTRIES = java.util.Set.of(
+        "ALFRED_GRIMHANDS_BARCRAWL",
+        "BARBARIAN_TRAINING",
+        "BEAR_YOUR_SOUL",
+        "CURSE_OF_THE_EMPTY_LORD",
+        "DADDYS_HOME",
+        "THE_ENCHANTED_KEY",
+        "ENTER_THE_ABYSS",
+        "FAMILY_PEST",
+        "THE_FROZEN_DOOR",
+        "THE_GENERALS_SHADOW",
+        "HIS_FAITHFUL_SERVANTS",
+        "HOPESPEARS_WILL",
+        "IN_SEARCH_OF_KNOWLEDGE",
+        "INTO_THE_TOMBS",
+        "LAIR_OF_TARN_RAZORLOR",
+        "MAGE_ARENA_I",
+        "MAGE_ARENA_II",
+        "SKIPPY_AND_THE_MOGRES",
+        "VALE_TOTEMS",
+        "THE_BLOOD_MOON_LEGACY",
+        "RECIPE_FOR_DISASTER__ANOTHER_COOKS_QUEST",
+        "RECIPE_FOR_DISASTER__MOUNTAIN_DWARF",
+        "RECIPE_FOR_DISASTER__WARTFACE__BENTNOZE",
+        "RECIPE_FOR_DISASTER__PIRATE_PETE",
+        "RECIPE_FOR_DISASTER__LUMBRIDGE_GUIDE",
+        "RECIPE_FOR_DISASTER__EVIL_DAVE",
+        "RECIPE_FOR_DISASTER__SKRACH_UGLOGWEE",
+        "RECIPE_FOR_DISASTER__SIR_AMIK_VARZE",
+        "RECIPE_FOR_DISASTER__KING_AWOWOGEI",
+        "RECIPE_FOR_DISASTER__CULINAROMANCER");
+
+    /**
+     * Read this player's Achievement Diary + Quest standing (client thread) and sync it to the
+     * platform, then confirm in chat. Diaries: completed regions per tier (out of 12). Quests:
+     * how many of the game's quests are FINISHED, plus quest points. Runs once per session.
+     */
+    private void readAchievements()
+    {
+        if (!isPlatformConfigured()) return;
+        net.runelite.api.Player lp = client.getLocalPlayer();
+        if (lp == null || lp.getName() == null || lp.getName().isEmpty()) return;
+        final String rsn = lp.getName();
+        achievementsSyncedThisSession = true; // player is present; mark done so it fires once per login
+
+        final int diaryEasy = countDiaries(DIARY_EASY);
+        final int diaryMedium = countDiaries(DIARY_MEDIUM);
+        final int diaryHard = countDiaries(DIARY_HARD);
+        final int diaryElite = countDiaries(DIARY_ELITE);
+
+        // Per-region tier detail for the profile drill-downs (same varbit arrays, per index).
+        final java.util.List<PlatformApiService.DiaryRegion> diaryDetail = new ArrayList<>();
+        for (int i = 0; i < DIARY_REGIONS.length; i++)
+        {
+            diaryDetail.add(new PlatformApiService.DiaryRegion(DIARY_REGIONS[i],
+                diaryTierDone(DIARY_EASY, i), diaryTierDone(DIARY_MEDIUM, i),
+                diaryTierDone(DIARY_HARD, i), diaryTierDone(DIARY_ELITE, i)));
+        }
+
+        int complete = 0, total = 0;
+        final java.util.List<String> questsMissing = new ArrayList<>();
+        for (net.runelite.api.Quest q : net.runelite.api.Quest.values())
+        {
+            if (NON_QUEST_ENTRIES.contains(q.name())) continue; // miniquests / RFD subquests aren't quests
+            total++;
+            try
+            {
+                if (q.getState(client) == net.runelite.api.QuestState.FINISHED) complete++;
+                else questsMissing.add(q.getName());
+            }
+            catch (Exception ignored) { /* a quest's varbit may be unavailable this version */ }
+        }
+        int qp = 0;
+        try { qp = client.getVarpValue(VARP_QUEST_POINTS); }
+        catch (Exception ignored) { /* best-effort */ }
+
+        final int fQp = qp, fComplete = complete, fTotal = total;
+
+        final String accountType = readAccountType();
+
+        // Diaries and quests barely change, so this is a one-time import and then a no-op on every
+        // routine login. We only POST + announce when the reading actually differs from the last
+        // sync for THIS character (signature persisted in config, so it survives client restarts).
+        // "v3" = accountType joined the payload (v2 added the per-region/missing-quest detail);
+        // bumping forces one re-sync so existing characters upload their exact type (incl. GIM).
+        final String sig = "v3:" + accountType + ":" + fQp + ":" + fComplete + ":" + fTotal + ":"
+            + diaryEasy + ":" + diaryMedium + ":" + diaryHard + ":" + diaryElite;
+        final String sigKey = "achSig." + rsn.toLowerCase();
+        final String prev = configManager.getConfiguration("droplogger", sigKey);
+        if (sig.equals(prev))
+        {
+            log.debug("Achievements unchanged for {} - skipping sync", rsn);
+            return;
+        }
+        final int diaryTotal = diaryEasy + diaryMedium + diaryHard + diaryElite;
+        final String verb = prev == null ? "synced" : "updated"; // first import vs a later change
+        executor.submit(() ->
+        {
+            boolean ok = platformApiService.syncAchievementSummary(
+                getPlatformUrl(), getPlatformKey(), getPlatformSlug(), rsn,
+                fQp, fComplete, fTotal, diaryEasy, diaryMedium, diaryHard, diaryElite,
+                diaryDetail, questsMissing, accountType);
+            if (!ok)
+            {
+                // Server rejected it (e.g. this character isn't on the clan roster). Don't persist the
+                // signature or announce — otherwise a non-clan alt shows a misleading "updated for
+                // <alt>" and never retries once the reading settles.
+                log.debug("Achievement sync not accepted for {} - not announcing", rsn);
+                return;
+            }
+            configManager.setConfiguration("droplogger", sigKey, sig);
+            clientThread.invokeLater(() -> client.addChatMessage(ChatMessageType.GAMEMESSAGE, "",
+                "[" + getClanName() + "] Diaries & quests " + verb + " (" + diaryTotal + "/48 diaries, "
+                    + fComplete + " quests, " + fQp + " QP)", ""));
+            log.debug("Achievements {} for {}: {} diaries, {} quests, {} QP", verb, rsn, diaryTotal, fComplete, fQp);
+        });
+    }
+
+    /** Is one region's tier complete? (client thread; index into a DIARY_* varbit array) */
+    private boolean diaryTierDone(int[][] varbits, int i)
+    {
+        try { return client.getVarbitValue(varbits[i][0]) >= varbits[i][1]; }
+        catch (Exception ignored) { return false; }
+    }
+
+    /** Sum the KC of several WiseOldMan boss keys (for GWD / combined-raid aggregates). */
+    private int kcSum(java.util.Map<String, Integer> kc, String... keys)
+    {
+        int total = 0;
+        for (String k : keys) total += kc.getOrDefault(k, 0);
+        return total;
+    }
+
+    private void addCaTier(RankSystem.PlayerSnapshot s, String tier, int varbit)
+    {
+        try { if (client.getVarbitValue(varbit) >= 2) s.caTiersComplete.add(tier); }
+        catch (Exception ignored) { /* varbit id may differ across versions */ }
+    }
+
+    /** Record a persistent unlock (e.g. a learned prayer) when its unlock varbit is set. */
+    private void addUnlock(RankSystem.PlayerSnapshot s, String key, int varbit)
+    {
+        try { if (client.getVarbitValue(varbit) >= 1) s.unlocks.add(key); }
+        catch (Exception ignored) { /* varbit id may differ across versions */ }
+    }
+
+    /** Read a container and add its item names/ids to the in-memory session cache (never transmitted). */
+    private void cacheContainerItems(int containerId)
+    {
+        ItemContainer c = client.getItemContainer(containerId);
+        if (c == null) return;
+        for (Item it : c.getItems())
+        {
+            if (it == null || it.getId() <= 0) continue;
+            try
+            {
+                String name = itemManager.getItemComposition(it.getId()).getName();
+                if (name != null && !name.isEmpty())
+                {
+                    String key = name.toLowerCase();
+                    rankOwnedCache.add(key);
+                    rankOwnedIds.putIfAbsent(key, it.getId());
+                }
+            }
+            catch (Exception ignored) { /* skip unresolvable item */ }
+        }
+    }
+
+    private void ensureClogCategoryMap()
+    {
+        if (clogItemCategoryMap != null) return;
+        try
+        {
+            buildClogDupeRemap();
+            Map<Integer, String[]> map = new HashMap<>();
+            Map<String, Integer> nameToId = new HashMap<>();
+            EnumComposition tabsEnum = client.getEnum(CLOG_TABS_ENUM);
+            for (int tabStructId : tabsEnum.getIntVals())
+            {
+                StructComposition tabStruct = client.getStructComposition(tabStructId);
+                String tabName = tabStruct.getStringValue(PARAM_TAB_NAME);
+                EnumComposition categoriesEnum = client.getEnum(tabStruct.getIntValue(PARAM_TAB_CATEGORIES_ENUM));
+                for (int catStructId : categoriesEnum.getIntVals())
+                {
+                    StructComposition catStruct = client.getStructComposition(catStructId);
+                    String categoryName = catStruct.getStringValue(PARAM_CATEGORY_NAME);
+                    EnumComposition itemsEnum = client.getEnum(catStruct.getIntValue(PARAM_CATEGORY_ITEMS_ENUM));
+                    for (int rawItemId : itemsEnum.getIntVals())
+                    {
+                        int itemId = remapClogId(rawItemId);
+                        // Items can appear in MULTIPLE clog categories (Nexling is in "Nex" AND
+                        // "All Pets"). Tabs iterate Bosses-first, so keep the FIRST category seen -
+                        // the boss page - instead of letting Other/"All Pets" overwrite it.
+                        map.putIfAbsent(itemId, new String[]{tabName, categoryName});
+                        String nm = itemManager.getItemComposition(itemId).getName();
+                        if (nm != null && !nm.equals("null")) nameToId.put(nm.toLowerCase(), itemId);
+                    }
+                }
+            }
+            clogItemCategoryMap = map;
+            clogNameToId = nameToId;
+            log.debug("Built clog item map for drop filtering: {} items", map.size());
+        }
+        catch (Exception e)
+        {
+            log.warn("Failed to build clog item map for drop filtering", e);
+        }
+    }
+
+    private void startDataRefresh()
+    {
+        if (refreshTask != null)
+        {
+            refreshTask.cancel(false);
+        }
+
+        int interval = 60;
+        refreshTask = executor.scheduleAtFixedRate(
+            this::refreshData, 10, interval, TimeUnit.SECONDS);
+    }
+
+    /** Runs on the executor (off EDT); pushes the result to the panel either way. */
+    private void fetchRaidRace()
+    {
+        if (!isPlatformConfigured())
+        {
+            panel.updateRaidRace(null);
+            return;
+        }
+        try
+        {
+            // Fetch the unified schedule + the live clog race in the same cycle. Per-event signups
+            // are fetched lazily when an event card is expanded (panel.onFetchEventSignups), not here.
+            panel.setSchedule(platformApiService.fetchSchedule(getPlatformUrl(), getPlatformKey(), getPlatformSlug()));
+            panel.updateRaidRace(platformApiService.fetchClogRace(getPlatformUrl(), getPlatformKey(), getPlatformSlug()));
+        }
+        catch (Exception ex)
+        {
+            log.debug("raid race load failed", ex);
+            panel.updateRaidRace(null);
+        }
+    }
+
+    /** Started when the Raid Race tab is selected (from setOnLoadRaidRace). Each tick checks
+     *  whether the tab is still active and cancels itself the moment it isn't, so the board never
+     *  polls in the background after the user leaves the tab. Cancels its OWN future (captured via
+     *  selfRef) rather than the raidRaceTask field, so a fast reselect that reassigns the field to a
+     *  newer task can't have this stale task cancel that newer one out from under it. */
+    private void startRaidRacePoll()
+    {
+        if (raidRaceTask != null)
+        {
+            raidRaceTask.cancel(false);
+        }
+
+        final java.util.concurrent.atomic.AtomicReference<ScheduledFuture<?>> selfRef = new java.util.concurrent.atomic.AtomicReference<>();
+        ScheduledFuture<?> future = executor.scheduleAtFixedRate(() ->
+        {
+            if (panel == null || !panel.isRaidRaceActive())
+            {
+                ScheduledFuture<?> self = selfRef.get();
+                if (self != null)
+                {
+                    self.cancel(false);
+                }
+                return;
+            }
+            fetchRaidRace();
+        }, 20, 20, TimeUnit.SECONDS);
+        selfRef.set(future);
+        raidRaceTask = future;
+    }
+
+    private void refreshData()
+    {
+        if (!isPlatformConfigured())
+        {
+            panel.setConnected(false);
+            panel.setStatus("Enter your API key in plugin settings");
+            return;
+        }
+
+        // Fetch bootstrap config from platform (min drop value, active event)
+        fetchBootstrapConfig();
+
+        // Roster ranks (rsn -> Discord-derived LADDER rank id) — the rank ICON shown beside names.
+        // Discord is authoritative: the in-game CC title caps below the Heart-of-Solus tiers
+        // (e.g. a heart_3 member shows only "Beast" in-game).
+        try
+        {
+            java.util.Map<String, String> ranks = new java.util.HashMap<>();
+            for (PlatformApiService.RosterMember m : platformApiService.fetchRoster(
+                getPlatformUrl(), getPlatformKey(), getPlatformSlug()))
+            {
+                // Discord ladder rank first; members without one (staff, unlinked) fall back to
+                // their in-game STAR title (Master/Major/Proselyte) so they still get an icon.
+                String rankKey = m.ladderRank;
+                if (rankKey == null && m.rank != null)
+                {
+                    switch (m.rank.toLowerCase())
+                    {
+                        case "master": rankKey = "title_master"; break;
+                        case "major": rankKey = "title_major"; break;
+                        case "proselyte": rankKey = "title_proselyte"; break;
+                        default: break;
+                    }
+                }
+                if (m.rsn != null && rankKey != null)
+                {
+                    ranks.put(m.rsn.replace(' ', ' ').trim().toLowerCase(), rankKey);
+                }
+            }
+            panel.setRosterRanks(ranks);
+        }
+        catch (Exception e)
+        {
+            log.debug("Roster rank fetch failed", e);
+        }
+
+        // Load platform config on first successful connection
+        if (!serverConfigLoaded)
+        {
+            try
+            {
+                serverConfigLoaded = true;
+                panel.setConnected(true);
+                log.debug("Platform connected — clan={}", getClanName());
+
+                // Auto-load drops tab on first config load
+                executor.submit(this::refreshDropsTab);
+
+                // Auto-sync roster on login if admin. Role-based: the member's own personal key
+                // carries their admin permission (the shared admin key is gone).
+                if (platformIsAdmin)
+                {
+                    clientThread.invokeLater(() -> hiscoreTracker.onLoginIfAdmin(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), getPlatformKey()));
+                }
+            }
+            catch (Exception e)
+            {
+                log.warn("Failed to initialize platform connection — will retry next refresh", e);
+                serverConfigLoaded = false;
+            }
+        }
+
+        // Auto-refresh WOM data on same cycle
+        refreshWomData();
+
+        // Re-fetch speed times each cycle so the recent list updates live as other players sync
+        // their PBs (previously only fetched once per session, so new times never appeared).
+        batchFetchAllHiscores();
+        refreshClanActivity();
+        refreshEventLeaderboard();
+        refreshStatusBoxes();
+    }
+
+    private void refreshEventLeaderboard()
+    {
+        // Re-read which event is live on every cycle, not just at login. These fields are otherwise
+        // only populated by the bootstrap call, so a client that was already running when an event
+        // started never learned about it and sat on an empty board for the whole week. Cheap: the
+        // active-event endpoint is public and we are about to call the API for the board anyway.
+        refreshActiveEventFromServer();
+
+        if (activeEventType.isEmpty() || activeEventMetric.isEmpty())
+        {
+            panel.updateActiveEvent(null, null, null, null);
+            if (adminPanel != null) adminPanel.setActiveEvent(null, null, null);
+            return;
+        }
+
+        try
+        {
+            List<LeaderboardEntry> entries = platformApiService.fetchActiveEventLeaderboard(
+                getPlatformUrl(), getPlatformKey(), getPlatformSlug());
+            panel.updateActiveEvent(activeEventType, activeEventDisplayName, activeEventEndTime, entries);
+            if (adminPanel != null) adminPanel.setActiveEvent(activeEventType, activeEventDisplayName, activeEventEndTime);
+        }
+        catch (Exception e)
+        {
+            log.debug("Failed to fetch event leaderboard", e);
+            panel.updateActiveEvent(activeEventType, activeEventDisplayName, activeEventEndTime, null);
+            if (adminPanel != null) adminPanel.setActiveEvent(activeEventType, activeEventDisplayName, activeEventEndTime);
+        }
+    }
+
+    /**
+     * Refresh which event is currently live. Mirrors the assignment the bootstrap response does, so
+     * an event that starts (or ends) mid-session is picked up on the normal refresh cycle instead of
+     * requiring a client restart. Failure leaves the previous values alone: a transient API blip
+     * should not blank a live event off the panel.
+     */
+    private void refreshActiveEventFromServer()
+    {
+        try
+        {
+            JsonObject root = platformApiService.fetchActiveEvent(getPlatformUrl(), getPlatformKey(), getPlatformSlug());
+            if (root == null) return;
+            if (root.has("event") && !root.get("event").isJsonNull())
+            {
+                JsonObject event = root.getAsJsonObject("event");
+                activeEventType = event.has("type") ? event.get("type").getAsString() : "";
+                activeEventMetric = event.has("metric") ? event.get("metric").getAsString() : "";
+                activeEventDisplayName = event.has("displayName") ? event.get("displayName").getAsString() : "";
+                activeEventEndTime = event.has("endTime") ? event.get("endTime").getAsString() : "";
+                activeEventId = event.has("id") ? event.get("id").getAsString() : "";
+            }
+            else
+            {
+                // Explicitly cleared: the event ended, so stop showing its board.
+                activeEventType = "";
+                activeEventMetric = "";
+                activeEventDisplayName = "";
+                activeEventEndTime = "";
+                activeEventId = "";
+            }
+        }
+        catch (Exception e)
+        {
+            log.debug("Failed to refresh active event", e);
+        }
+    }
+
+    private String getLocalPlayerName()
+    {
+        if (client.getLocalPlayer() != null)
+        {
+            return client.getLocalPlayer().getName();
+        }
+        return null;
+    }
+
+    /**
+     * Batch-fetch all speed times from the platform API, populate entire cache.
+     */
+    private void batchFetchAllHiscores()
+    {
+        if (!isPlatformConfigured())
+        {
+            return;
+        }
+
+        try
+        {
+            Map<String, List<HiscoreEntry>> allTimes = platformApiService.fetchAllPbs(
+                getPlatformUrl(), getPlatformKey(), getPlatformSlug(), pbMode);
+            if (allTimes != null)
+            {
+                // Replace, don't merge — a merge left stale categories behind (e.g. imported lists
+                // lingering after a mode change), and the fetch order carries the Recent sorting.
+                hiscoreCacheV2.clear();
+                hiscoreCacheV2.putAll(allTimes);
+                hiscoreV2BatchFetched = true;
+                saveHiscoreCacheV2ToDisk();
+                panel.setRecentCategories(new java.util.LinkedHashSet<>(hiscoreCacheV2.keySet()), new java.util.LinkedHashMap<>(hiscoreCacheV2));
+                log.debug("Batch-fetched speed times from platform API: {} categories", allTimes.size());
+            }
+        }
+        catch (Exception e)
+        {
+            log.warn("Failed to batch-fetch speed times from platform API", e);
+        }
+    }
+
+    private void fetchAndDisplayTimesV2(BossCategory cat, javax.swing.JPanel timesPanel)
+    {
+        java.awt.Color accentColor = new java.awt.Color(100, 149, 237);
+
+        // If we haven't done a batch fetch this session and cache is empty, do it now
+        if (!hiscoreV2BatchFetched && hiscoreCacheV2.isEmpty())
+        {
+            batchFetchAllHiscores();
+        }
+
+        // Serve from cache (may be empty list for categories with no entries — that's fine)
+        List<HiscoreEntry> cached = hiscoreCacheV2.get(cat.getKey());
+        if (cached != null)
+        {
+            panel.populateTimesPanel(timesPanel, cached, accentColor);
+            return;
+        }
+
+        // Category not in cache — we've batch-fetched everything from the platform API,
+        // so this category simply has no times yet.
+        if (hiscoreV2BatchFetched)
+        {
+            panel.populateTimesPanel(timesPanel, new ArrayList<>(), accentColor);
+            return;
+        }
+
+        // Batch fetch hasn't succeeded (platform not configured or fetch failed)
+        javax.swing.SwingUtilities.invokeLater(() ->
+        {
+            timesPanel.removeAll();
+            String msg = !isPlatformConfigured()
+                ? "Speed Times API not configured"
+                : "Failed to load times";
+            javax.swing.JLabel err = new javax.swing.JLabel(msg);
+            err.setFont(err.getFont().deriveFont(java.awt.Font.ITALIC, 10f));
+            err.setForeground(new java.awt.Color(120, 120, 120));
+            err.setBorder(javax.swing.BorderFactory.createEmptyBorder(12, 10, 12, 10));
+            timesPanel.add(err);
+            timesPanel.revalidate();
+            timesPanel.repaint();
+        });
+    }
+
+    private void refreshDropsTab()
+    {
+        if (!isPlatformConfigured())
+        {
+            log.debug("Platform not configured — skipping drops tab refresh");
+            // Try to show cached data if available
+            if (cachedLeaderboard != null)
+            {
+                String playerName = client.getLocalPlayer() != null
+                    ? client.getLocalPlayer().getName() : null;
+                panel.updateDropsLeaderboard(cachedLeaderboard, playerName);
+            }
+            if (cachedRecentDrops != null)
+            {
+                panel.updateRecentDrops(cachedRecentDrops);
+            }
+            return;
+        }
+
+        String playerName = client.getLocalPlayer() != null
+            ? client.getLocalPlayer().getName()
+            : null;
+
+        try
+        {
+            List<Map<String, Object>> leaderboard = boardDataService.fetchLeaderboard(
+                getPlatformUrl(), getPlatformSlug(), getPlatformKey(), "monthly");
+            cachedLeaderboard = leaderboard;
+            panel.updateDropsLeaderboard(leaderboard, playerName);
+        }
+        catch (Exception e)
+        {
+            log.warn("Failed to fetch drops leaderboard", e);
+            // Show cached if available
+            if (cachedLeaderboard != null)
+            {
+                panel.updateDropsLeaderboard(cachedLeaderboard, playerName);
+            }
+        }
+
+        try
+        {
+            List<Map<String, Object>> recent = boardDataService.fetchRecentDrops(
+                getPlatformUrl(), getPlatformSlug(), getPlatformKey(), 20);
+            cachedRecentDrops = recent;
+            panel.updateRecentDrops(recent);
+            saveDropsCacheToDisk();
+        }
+        catch (Exception e)
+        {
+            log.warn("Failed to fetch recent drops", e);
+            if (cachedRecentDrops != null)
+            {
+                panel.updateRecentDrops(cachedRecentDrops);
+            }
+        }
+
+        // Also refresh the clan whitelist browser
+        refreshClanWhitelist();
+
+        dropsTabLoaded = true;
+    }
+
+    private void fetchPlayerDrops(String rsn)
+    {
+        if (!isPlatformConfigured())
+        {
+            return;
+        }
+
+        try
+        {
+            List<Map<String, Object>> drops = boardDataService.fetchPlayerDrops(
+                getPlatformUrl(), getPlatformSlug(), getPlatformKey(), rsn);
+            panel.showPlayerDrops(rsn, drops);
+        }
+        catch (Exception e)
+        {
+            log.warn("Failed to fetch drops for {}", rsn, e);
+        }
+    }
+
+    private void refreshClanWhitelist()
+    {
+        if (!isPlatformConfigured())
+        {
+            // Show cached if available
+            if (cachedClanWhitelist != null && !cachedClanWhitelist.isEmpty())
+            {
+                panel.updateClanWhitelist(cachedClanWhitelist);
+            }
+            return;
+        }
+
+        try
+        {
+            List<Map<String, String>> whitelist = boardDataService.fetchClanWhitelist(
+                getPlatformUrl(), getPlatformSlug(), getPlatformKey());
+            cachedClanWhitelist = whitelist;
+            panel.updateClanWhitelist(whitelist);
+            saveWhitelistCacheToDisk();
+        }
+        catch (Exception e)
+        {
+            log.warn("Failed to fetch clan whitelist", e);
+            if (cachedClanWhitelist != null && !cachedClanWhitelist.isEmpty())
+            {
+                panel.updateClanWhitelist(cachedClanWhitelist);
+            }
+        }
+    }
+
+    // Track last WOM fetch settings so auto-refresh uses the same options
+    private String lastWomMetric = "overall";
+    private String lastWomPeriod = "week"; // null = hiscores mode
+
+    private void fetchWomData(String metric, String period)
+    {
+        lastWomMetric = metric;
+        lastWomPeriod = period;
+        doFetchWomData(metric, period);
+    }
+
+    private void refreshStatusBoxes()
+    {
+        if (!isPlatformConfigured()) return;
+
+        String baseUrl = getPlatformUrl();
+        String apiKey = getPlatformKey();
+        String slug = getPlatformSlug();
+        String rsn = getLocalPlayerName();
+        if (rsn == null || rsn.isEmpty()) return;
+
+        String encodedRsn = rsn.replace(" ", "%20");
+
+        // Collection log count
+        try
+        {
+            JsonObject clogData = platformApiService.getSync(
+                baseUrl + "/clans/" + slug + "/collection-log/" + encodedRsn, apiKey);
+            if (clogData != null)
+            {
+                // Prefer the authoritative game counts (varp 2943/2944) the plugin synced;
+                // fall back to reconstructed counts only if the backend hasn't got them yet.
+                int obtained = clogData.has("obtained") ? clogData.get("obtained").getAsInt()
+                    : (clogData.has("total") ? clogData.get("total").getAsInt() : 0);
+                int totalSlots = 0;
+                if (clogData.has("totalSlots") && !clogData.get("totalSlots").isJsonNull())
+                {
+                    totalSlots = clogData.get("totalSlots").getAsInt();
+                }
+                else if (clogData.has("catalog") && clogData.get("catalog").isJsonArray())
+                {
+                    Set<Integer> catalogIds = new HashSet<>();
+                    for (var el : clogData.getAsJsonArray("catalog"))
+                    {
+                        JsonObject ci = el.getAsJsonObject();
+                        if (ci.has("itemId")) catalogIds.add(ci.get("itemId").getAsInt());
+                    }
+                    totalSlots = catalogIds.size();
+                }
+                panel.setStatusClog(obtained, totalSlots);
+            }
+        }
+        catch (Exception e)
+        {
+            log.debug("Status box clog fetch failed", e);
+        }
+
+        // Stats (total XP)
+        try
+        {
+            JsonObject statsData = platformApiService.getSync(
+                baseUrl + "/clans/" + slug + "/stats/" + encodedRsn, apiKey);
+            if (statsData != null && statsData.has("skills"))
+            {
+                long totalXp = 0;
+                for (var entry : statsData.getAsJsonObject("skills").entrySet())
+                {
+                    JsonObject skill = entry.getValue().getAsJsonObject();
+                    if (skill.has("xp"))
+                    {
+                        totalXp += skill.get("xp").getAsLong();
+                    }
+                }
+                panel.setStatusXp(totalXp);
+            }
+        }
+        catch (Exception e)
+        {
+            log.debug("Status box stats fetch failed", e);
+        }
+
+        // Hiscores (any PBs?)
+        panel.setStatusHiscores(!panel.getRecentCategoryKeys().isEmpty());
+    }
+
+    private void refreshWomData()
+    {
+        doFetchWomData(lastWomMetric, lastWomPeriod);
+    }
+
+    private void doFetchWomData(String metric, String period)
+    {
+        if (!isPlatformConfigured())
+        {
+            panel.updateWomLeaderboard(null, false);
+            return;
+        }
+        try
+        {
+            // A ":records" suffix on the period selects the best-ever-window view (WOM records).
+            boolean records = period.endsWith(":records");
+            if (records) period = period.substring(0, period.length() - ":records".length());
+            // All-Time ranks by current total XP (no "+"); other periods rank by gain.
+            String apiPeriod = "all-time".equals(period) ? "all" : period;
+            boolean isGained = !"all".equals(apiPeriod);
+            List<LeaderboardEntry> entries = metric.startsWith("boss:")
+                ? platformApiService.fetchKcLeaderboard(
+                    getPlatformUrl(), getPlatformKey(), getPlatformSlug(), metric.substring(5), apiPeriod, records)
+                : platformApiService.fetchXpLeaderboard(
+                    getPlatformUrl(), getPlatformKey(), getPlatformSlug(), metric, apiPeriod, records);
+            panel.updateWomLeaderboard(entries, isGained);
+        }
+        catch (Exception e)
+        {
+            log.warn("Failed to fetch XP leaderboard: {}", e.getMessage());
+            panel.updateWomLeaderboard(null, false);
+        }
+    }
+
+    private void refreshClanActivity()
+    {
+        if (!isPlatformConfigured()) return;
+        try
+        {
+            List<PlatformApiService.ActivityItem> activity = platformApiService.fetchActivity(
+                getPlatformUrl(), getPlatformKey(), getPlatformSlug(), 25, activityFilter);
+            panel.updateActivity(activity);
+        }
+        catch (Exception e)
+        {
+            log.warn("Failed to fetch clan activity: {}", e.getMessage());
+        }
+    }
+
+    /** Plugin-specific data dir under .runelite — Hub rule: don't write loose files in the .runelite root. */
+    private static File pluginDataDir()
+    {
+        File dir = new File(net.runelite.client.RuneLite.RUNELITE_DIR, "clan-management");
+        if (!dir.exists())
+        {
+            dir.mkdirs();
+        }
+        return dir;
+    }
+
+    private void saveWhitelistCacheToDisk()
+    {
+        try
+        {
+            File cacheFile = new File(pluginDataDir(), "whitelist-cache.json");
+            java.util.Map<String, Object> cacheData = new java.util.LinkedHashMap<>();
+            cacheData.put("whitelist", cachedClanWhitelist);
+            String json = gson.toJson(cacheData);
+            java.nio.file.Files.write(cacheFile.toPath(), json.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        }
+        catch (Exception e)
+        {
+            log.debug("Failed to save whitelist cache", e);
+        }
+    }
+
+    private void loadWhitelistCacheFromDisk()
+    {
+        try
+        {
+            File cacheFile = new File(pluginDataDir(), "whitelist-cache.json");
+            if (!cacheFile.exists()) return;
+
+            String json = new String(
+                java.nio.file.Files.readAllBytes(cacheFile.toPath()), java.nio.charset.StandardCharsets.UTF_8);
+            com.google.gson.JsonObject root = new com.google.gson.JsonParser().parse(json).getAsJsonObject();
+
+            if (root.has("whitelist"))
+            {
+                com.google.gson.JsonArray arr = root.getAsJsonArray("whitelist");
+                List<Map<String, String>> whitelist = new java.util.ArrayList<>();
+                for (com.google.gson.JsonElement elem : arr)
+                {
+                    com.google.gson.JsonObject obj = elem.getAsJsonObject();
+                    Map<String, String> item = new java.util.LinkedHashMap<>();
+                    for (Map.Entry<String, com.google.gson.JsonElement> entry : obj.entrySet())
+                    {
+                        item.put(entry.getKey(),
+                            entry.getValue().isJsonPrimitive()
+                                ? entry.getValue().getAsString() : "");
+                    }
+                    whitelist.add(item);
+                }
+                cachedClanWhitelist = whitelist;
+                log.debug("Loaded {} whitelist items from disk cache", whitelist.size());
+            }
+        }
+        catch (Exception e)
+        {
+            log.debug("Failed to load whitelist cache from disk", e);
+        }
+    }
+
+    // ── Hiscore cache ──
+
+    private File getHiscoreCacheFile()
+    {
+        // v2 name retired the old file on purpose: caches written by the "All PBs" era contain
+        // imported lists that must not resurface on the live-only board.
+        return new File(pluginDataDir(), "hiscore-cache-live.json");
+    }
+
+    private void saveHiscoreCacheV2ToDisk()
+    {
+        // Only persist the default (clan-verified) view. Persisting whatever mode was last
+        // browsed meant an "All PBs" session wrote imports to disk, and the next startup loaded
+        // them straight into the Clan Only recent view.
+        if (!"clan".equals(pbMode)) return;
+        try
+        {
+            Map<String, List<Map<String, Object>>> toSave = new LinkedHashMap<>();
+            for (Map.Entry<String, List<HiscoreEntry>> entry : hiscoreCacheV2.entrySet())
+            {
+                List<Map<String, Object>> entryList = new ArrayList<>();
+                for (HiscoreEntry he : entry.getValue())
+                {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("rank", he.getRank());
+                    m.put("timeSeconds", he.getTimeSeconds());
+                    m.put("formattedTime", he.getFormattedTime());
+                    m.put("rsns", he.getRsns());
+                    m.put("date", he.getDate());
+                    m.put("categoryKey", he.getCategoryKey());
+                    m.put("partySize", he.getPartySize());
+                    entryList.add(m);
+                }
+                toSave.put(entry.getKey(), entryList);
+            }
+
+            File cacheFile = getHiscoreCacheFile();
+            try (FileWriter writer = new FileWriter(cacheFile))
+            {
+                gson.toJson(toSave, writer);
+            }
+        }
+        catch (Exception e)
+        {
+            log.warn("Failed to save hiscore cache", e);
+        }
+    }
+
+    private void loadHiscoreCacheFromDisk()
+    {
+        try
+        {
+            File cacheFile = getHiscoreCacheFile();
+            if (!cacheFile.exists()) return;
+
+            Type type = new TypeToken<LinkedHashMap<String, List<Map<String, Object>>>>(){}.getType();
+            try (FileReader reader = new FileReader(cacheFile))
+            {
+                Map<String, List<Map<String, Object>>> raw = gson.fromJson(reader, type);
+                if (raw == null) return;
+
+                for (Map.Entry<String, List<Map<String, Object>>> entry : raw.entrySet())
+                {
+                    List<HiscoreEntry> entries = new ArrayList<>();
+                    for (Map<String, Object> m : entry.getValue())
+                    {
+                        entries.add(new HiscoreEntry(
+                            ((Number) m.getOrDefault("rank", 0)).intValue(),
+                            ((Number) m.getOrDefault("timeSeconds", 0.0)).doubleValue(),
+                            (String) m.getOrDefault("formattedTime", ""),
+                            (String) m.getOrDefault("rsns", ""),
+                            (String) m.getOrDefault("date", ""),
+                            (String) m.getOrDefault("categoryKey", null),
+                            ((Number) m.getOrDefault("partySize", 1)).intValue()
+                        ));
+                    }
+                    hiscoreCacheV2.put(entry.getKey(), entries);
+                }
+                panel.setRecentCategories(new java.util.LinkedHashSet<>(hiscoreCacheV2.keySet()), new java.util.LinkedHashMap<>(hiscoreCacheV2));
+                log.debug("Loaded hiscore cache from disk: {} categories", hiscoreCacheV2.size());
+            }
+        }
+        catch (Exception e)
+        {
+            log.warn("Failed to load hiscore cache from disk", e);
+        }
+    }
+
+    // ── Drops tab cache ──
+
+    private void saveDropsCacheToDisk()
+    {
+        try
+        {
+            Map<String, Object> cache = new LinkedHashMap<>();
+            cache.put("leaderboard", cachedLeaderboard);
+            cache.put("recent", cachedRecentDrops);
+
+            File cacheFile = new File(pluginDataDir(), "drops-cache.json");
+            try (FileWriter writer = new FileWriter(cacheFile))
+            {
+                gson.toJson(cache, writer);
+            }
+        }
+        catch (Exception e)
+        {
+            log.warn("Failed to save drops cache", e);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private void loadDropsCacheFromDisk()
+    {
+        try
+        {
+            File cacheFile = new File(pluginDataDir(), "drops-cache.json");
+            if (!cacheFile.exists()) return;
+
+            Type type = new TypeToken<LinkedHashMap<String, Object>>(){}.getType();
+            try (FileReader reader = new FileReader(cacheFile))
+            {
+                Map<String, Object> cache = gson.fromJson(reader, type);
+                if (cache == null) return;
+
+                if (cache.containsKey("leaderboard"))
+                {
+                    cachedLeaderboard = (List<Map<String, Object>>) cache.get("leaderboard");
+                }
+                if (cache.containsKey("recent"))
+                {
+                    cachedRecentDrops = (List<Map<String, Object>>) cache.get("recent");
+                }
+
+                if (cachedLeaderboard != null || cachedRecentDrops != null)
+                {
+                    log.debug("Loaded drops cache from disk");
+                }
+            }
+        }
+        catch (Exception e)
+        {
+            log.warn("Failed to load drops cache from disk", e);
+        }
+    }
+
+    /** "yyyy-MM-dd HH:mm" ET wall clock -> ISO instant; null when blank/invalid. */
+    private static String etToIso(String text)
+    {
+        if (text == null || text.trim().isEmpty()) return null;
+        try
+        {
+            java.time.LocalDateTime local = java.time.LocalDateTime.parse(text.trim(),
+                java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"));
+            return local.atZone(java.time.ZoneId.of("America/New_York")).toInstant().toString();
+        }
+        catch (Exception e)
+        {
+            return null;
+        }
+    }
+
+    /** Fetch running + scheduled events and hand formatted rows to the admin calendar. */
+    private void loadAdminEventsList()
+    {
+        if (adminPanel == null || !isPlatformConfigured()) return;
+        try
+        {
+            java.util.List<String[]> rows = new java.util.ArrayList<>();
+            java.time.format.DateTimeFormatter fmt = java.time.format.DateTimeFormatter.ofPattern("MMM d");
+            for (com.google.gson.JsonObject ev : adminService.fetchEventsList(getPlatformUrl(), getPlatformKey(), getPlatformSlug()))
+            {
+                String status = ev.get("status").getAsString();
+                if (!"active".equals(status) && !"scheduled".equals(status)) continue;
+                String window;
+                try
+                {
+                    java.time.ZonedDateTime st = java.time.Instant.parse(ev.get("startTime").getAsString())
+                        .atZone(java.time.ZoneId.of("America/New_York"));
+                    java.time.ZonedDateTime en = java.time.Instant.parse(ev.get("endTime").getAsString())
+                        .atZone(java.time.ZoneId.of("America/New_York"));
+                    long daysUntil = java.time.Duration.between(java.time.ZonedDateTime.now(st.getZone()), st).toDays();
+                    window = st.format(fmt) + " \u2192 " + en.format(fmt)
+                        + ("scheduled".equals(status) && daysUntil >= 0 ? " (in " + (daysUntil + 1) + "d)" : "");
+                }
+                catch (Exception ex)
+                {
+                    window = "";
+                }
+                String evType = ev.has("type") ? ev.get("type").getAsString() : "";
+                String glyph = "boss".equals(evType) ? "\u2694 " : "skill".equals(evType) ? "\u2692 "
+                    : "clue".equals(evType) ? "\ud83d\udcdc " : "gamer".equals(evType) ? "\ud83c\udfae " : "";
+                rows.add(new String[]{ev.get("id").getAsString(), status, ev.get("displayName").getAsString(), window, glyph});
+            }
+            adminPanel.setEventsList(rows);
+        }
+        catch (Exception e)
+        {
+            log.debug("admin events list load failed", e);
+        }
+    }
+
+    private void setupAdminPanel()
+    {
+        if (adminPanel != null)
+        {
+            return; // already shown (e.g. set up once from the legacy key, then again post-bootstrap)
+        }
+
+        // Admin unlocks purely by role: the personal key's Discord user must have an admin
+        // permission (bootstrap `permissions`). The legacy shared admin key is retired.
+        if (!platformIsAdmin)
+        {
+            return;
+        }
+
+        panel.setPlatformAdmin(true); // unlock the per-member rank-override controls in the Members tab
+
+        this.adminPanel = new AdminPanel();
+        panel.showAdminTab(adminPanel);
+
+        // Announcements — create/edit/pin/delete via the platform (uses the caller's key).
+        adminPanel.setOnCreateAnnouncement(a -> executor.submit(() -> {
+            if (platformApiService.createAnnouncement(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), (String) a[0], (Boolean) a[1]))
+                refreshAnnouncements();
+            else adminPanel.setStatus("Failed to post announcement");
+        }));
+        adminPanel.setOnEditAnnouncement(a -> executor.submit(() -> {
+            if (platformApiService.updateAnnouncement(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), a[0], a[1], null))
+                refreshAnnouncements();
+            else adminPanel.setStatus("Failed to edit announcement");
+        }));
+        adminPanel.setOnTogglePinAnnouncement(a -> executor.submit(() -> {
+            if (platformApiService.updateAnnouncement(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), (String) a[0], null, (Boolean) a[1]))
+                refreshAnnouncements();
+        }));
+        adminPanel.setOnDeleteAnnouncement(id -> executor.submit(() -> {
+            if (platformApiService.deleteAnnouncement(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), id))
+                refreshAnnouncements();
+            else adminPanel.setStatus("Failed to delete announcement");
+        }));
+        executor.submit(this::refreshAnnouncements);
+
+        // Load shared settings — uses platform bootstrap data
+        adminPanel.setOnLoadSettings(() -> executor.submit(() -> {
+            try
+            {
+                adminPanel.setStatus("Loading settings...");
+                adminPanel.setClanName(getClanName());
+                adminPanel.setStatus("Settings loaded from platform");
+            }
+            catch (Exception e)
+            {
+                adminPanel.setStatus("Error: " + e.getMessage());
+            }
+        }));
+
+        // Shared settings have no plugin-side save — they're edited on the web dashboard. Don't
+        // report a fake "saved"; just refresh the local cache so dashboard edits show up.
+        adminPanel.setOnSaveSettings(args -> executor.submit(() -> {
+            adminPanel.setStatus("Settings are managed from the web dashboard");
+            serverConfigLoaded = false;
+        }));
+
+        // Speed times moderation — managed via web dashboard
+        adminPanel.setOnRemoveHiscore(args -> executor.submit(() -> {
+            adminPanel.setStatus("Speed times are managed from the web dashboard");
+            hiscoreCacheV2.remove(args[0]);
+        }));
+
+        // Rotate API key — managed via web dashboard
+        adminPanel.setOnRotateApiKey(newKey -> executor.submit(() -> {
+            adminPanel.setStatus("API keys are managed from the web dashboard");
+        }));
+
+        // Start weekly event
+        adminPanel.setOnStartEvent(args -> executor.submit(() -> {
+            try
+            {
+                String type = args[0];
+                String metric = args[1];
+                String displayName = args[2];
+                String startIso = etToIso(args[3]);
+                String endIso = etToIso(args[4]);
+                if ((args[3] != null && !args[3].isEmpty() && startIso == null)
+                    || (args[4] != null && !args[4].isEmpty() && endIso == null))
+                {
+                    adminPanel.setStatus("Bad date format \u2014 use yyyy-MM-dd HH:mm (ET)");
+                    return;
+                }
+                boolean startsNow = startIso == null;
+                adminPanel.setStatus(startsNow ? "Starting event..." : "Scheduling event...");
+                adminService.startEventPlatform(getPlatformUrl(), getPlatformKey(), getPlatformSlug(),
+                    type, metric, displayName, startIso, endIso);
+                adminPanel.setStatus((startsNow ? "Event started: " : "Event scheduled: ") + displayName);
+                loadAdminEventsList();
+
+                // Update local state
+                activeEventType = type;
+                activeEventMetric = metric;
+                activeEventDisplayName = displayName;
+                // End time will be fetched on next config refresh, but estimate for immediate display
+                java.time.ZonedDateTime endZoned = java.time.ZonedDateTime.now(
+                    java.time.ZoneId.of("America/New_York")).plusDays(7);
+                activeEventEndTime = endZoned.toLocalDateTime()
+                    .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm"));
+
+                serverConfigLoaded = false; // Force config re-fetch
+
+                // Immediately refresh event display
+                refreshEventLeaderboard();
+            }
+            catch (Exception e)
+            {
+                adminPanel.setStatus("Error: " + e.getMessage());
+            }
+        }));
+
+        // End a live event / cancel a scheduled one (from the calendar rows)
+        adminPanel.setOnCancelEvent(eventId -> executor.submit(() -> {
+            try
+            {
+                adminPanel.setStatus("Ending event...");
+                adminService.endEventPlatform(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), eventId);
+                adminPanel.setStatus("Event ended");
+                serverConfigLoaded = false;
+                refreshEventLeaderboard();
+                loadAdminEventsList();
+            }
+            catch (Exception e)
+            {
+                adminPanel.setStatus("Error: " + e.getMessage());
+            }
+        }));
+
+        adminPanel.setOnLoadEvents(() -> executor.submit(this::loadAdminEventsList));
+        executor.submit(this::loadAdminEventsList);
+
+        adminPanel.setOnSyncRoster(() -> {
+            // ClanSettings is only readable on the client thread. Called straight from the Swing
+            // EDT (as this used to be) getClanSettings() returns null, so the sync bailed out
+            // before posting anything and the roster never pruned leavers. The auto-sync path
+            // already hops threads the same way.
+            adminPanel.setStatus("Syncing roster…");
+            clientThread.invokeLater(() -> {
+                int count = hiscoreTracker.syncRoster(getPlatformUrl(), getPlatformKey(), getPlatformSlug());
+                javax.swing.SwingUtilities.invokeLater(() -> adminPanel.setStatus(count > 0
+                    ? "Synced " + count + " members"
+                    : "Roster sync failed — join a clan first"));
+            });
+        });
+
+        // Show active event state in admin panel on load
+        if (!activeEventType.isEmpty())
+        {
+            adminPanel.setActiveEvent(activeEventType, activeEventDisplayName, activeEventEndTime);
+        }
+
+        log.debug("Admin panel enabled");
+    }
+}

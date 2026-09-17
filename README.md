@@ -1,129 +1,86 @@
-# Clan Management Plugin for RuneLite
+# Solus Clan Plugin for RuneLite
 
-A RuneLite plugin that tracks drops, boss hiscores, and XP for your OSRS clan using Google Sheets as a backend.
+A companion plugin for the **Solus** OSRS clan. It connects to the clan's own server
+(`https://api.solusosrs.com`) to share your in-game progress (drops, personal-best boss times,
+collection log, combat achievements, and XP/KC) so the clan can run leaderboards, events, and a
+Discord bot.
+
+It is a clan-specific plugin: it only talks to one fixed, hardcoded endpoint, and the only thing you
+enter is the API key your clan admin gives you.
 
 ## Features
 
-- **Drop Logging** -- Automatically logs valuable drops to a shared Google Sheet
-- **Clan Hiscores** -- Tracks boss completion times across the clan (top 3 per category)
-- **XP Tracking** -- Clan XP leaderboards and gains via Wise Old Man integration
-- **Activity Feed** -- Recent clan member joins, leaves, and rank changes
-- **Discord Notifications** -- Posts drops and hiscore placements to a Discord webhook
-- **Admin Tools** -- Manage clan settings, rotate API keys, and moderate hiscores from the panel
+- **Drops**: log valuable drops to the clan drop feed and value/points leaderboards.
+- **Speed Times**: submit personal-best boss times, including automatic detection of live raid
+  completions (Chambers, Theatre, and Tombs team times) for the clan speed-time boards.
+- **Collection Log**: sync your collection log progress for clan clog tracking.
+- **Combat Achievements**: sync your CA completions and track new ones the moment you earn them.
+- **XP / KC**: clan XP and boss-KC leaderboards (read from the official OSRS hiscores).
+- **Events**: browse the clan's event schedule (Skill/Boss of the Week, collection-log races,
+  bingo), sign up for events, and follow a live clog-race board and draft for your team.
+- **Ranks**: check your rank-up requirements (evaluated locally on your client) and request a rank.
+- **Discord sharing** *(opt-in)*: post your own drops, personal bests, and deaths, with a
+  screenshot, to your clan's Discord.
+- **Discord linking**: link your in-game account to your Discord profile on the clan site.
 
-## Setup Guide
+## Data & Privacy
 
-### 1. Create the Google Sheet
+This is the important part, so it is spelled out in full.
 
-1. Create a new Google Sheet (this will be your clan's database)
-2. Go to **Extensions > Apps Script**
-3. Delete the default `Code.gs` file
-4. Create three script files and paste the contents from the `google-apps-script/` folder:
-   - `ClanDropLog.gs` -- Main API handler
-   - `ClanDropLogSetup.gs` -- Sheet structure and formatting
-   - `ClanDropWhitelist.gs` -- Drop whitelist management
-5. In the Apps Script editor, run the `setupClanDropLog()` function
-   - This creates the tabs: Dashboard, Drops, Leaderboard, Hiscores, Drop Whitelist
-   - Grant permissions when prompted
+- **Nothing is shared unless you turn it on.** Every data-sharing toggle is **off by default.**
+- **Data only goes to the Solus clan's own server** (`https://api.solusosrs.com`), a fixed,
+  hardcoded URL. There are no third parties, and the plugin never fetches a URL to call from
+  anywhere; the endpoint is compiled into the plugin.
 
-### 2. Configure the Settings Tab
+| Setting | What it sends | What it's used for |
+|---|---|---|
+| **Track Drops** | each valuable drop (item, GP value, source monster, kill count) plus your RSN and account hash | the clan drop feed and value/points leaderboards |
+| **Track Speed Times** | your personal-best boss times (boss, time, team members) plus your RSN and account hash | the clan speed-time boards; your raid party is read **locally** at the start only, to credit the right team |
+| **Sync Collection Log** | your collection log items and obtained/total counts (only when you open the log) plus your RSN and account hash | clan collection-log tracking and the clog leaderboard |
+| **Sync Combat Achievements** | the names of your completed CA tasks plus your RSN and account hash | clan combat-achievement tracking and leaderboard. Read from the CA interface, and, in real time, from the in-game "task completed" message |
+| **Track Stats** | your RSN only; the server then reads your **public** XP/KC from the official OSRS hiscores | clan XP and boss-KC leaderboards. No private game data is sent for this |
+| **Discord Sharing** *(opt-in)* | a **screenshot** of your drop, personal best, or death, plus an optional caption, plus your RSN | posts to your clan's Discord via the server. Off by default; nothing is captured or sent unless you enable it |
+| **Rank Requests** | the rank you request and which requirements you meet, plus your RSN | lets an admin review your rank-up. Requirements (skills, diaries, CAs, KC, item possession) are checked **locally on your client**; only the yes/no result is sent, never your bank or item list |
+| **Link Code** (one-time) | the short code you paste plus your account hash and RSN | links your in-game account to your Discord on the clan website; the code is cleared from settings right after use |
 
-After running setup, a **Settings** tab is created with these fields:
+Notes:
 
-| Setting | Description |
-|---------|-------------|
-| `apiKey` | Shared secret for all clan members (change from default!) |
-| `adminKey` | Admin-only secret for managing settings |
-| `clanName` | Your clan's display name |
-| `discordWebhookUrl` | Discord webhook URL for notifications (optional) |
-| `womGroupId` | Your Wise Old Man group ID for XP tracking (optional) |
-| `announcement` | Message shown to all members on the Home tab (optional) |
+- **Account hash** is RuneLite's stable, per-account identifier (`client.getAccountHash()`). We key
+  your data on it so your history follows you if you change your RSN. It is **not** a password or
+  personal information.
+- **In-game position / party** is read **locally only**, to figure out who is in your raid team for
+  PB attribution. Your location is **never sent** to the server.
+- **Bank and item data never leave your client.** Rank requirements that depend on owning an item
+  are checked locally; only the pass/fail result is sent.
+- The plugin writes small cache files (whitelist / hiscores / drops, for offline panel display)
+  under `~/.runelite/clan-management/`.
 
-**Change `apiKey` and `adminKey` from their defaults before sharing with anyone.**
+## Setup
 
-### 3. Deploy as a Web App
-
-1. In Apps Script, click **Deploy > New deployment**
-2. Select type: **Web app**
-3. Set "Execute as" to **Me**
-4. Set "Who has access" to **Anyone**
-5. Click **Deploy** and copy the deployment URL
-
-### 4. Generate a Clan Code
-
-The clan code encodes the deployment URL and API key together. Generate it in your browser console or any Base64 tool:
-
-```
-btoa("YOUR_DEPLOYMENT_URL|YOUR_API_KEY")
-```
-
-For example:
-```
-btoa("https://script.google.com/macros/s/ABC123/exec|my-secret-key")
-```
-
-Share this code with clan members. They paste it into the plugin's **Clan Code** setting.
-
-### 5. Install the Plugin
-
-**From RuneLite Plugin Hub:**
-Search for "Clan Management" in the Plugin Hub and install.
-
-**As an external plugin:**
-1. Build with `./gradlew build`
-2. Copy `build/libs/drop-logger-plugin-1.0.0.jar` to `~/.runelite/externalPlugins/`
-
-### 6. Configure the Plugin
-
-In RuneLite settings for Clan Management:
-
-1. **Clan Code** -- Paste the code from step 4
-2. **Enable Clan Drop Log** -- Toggle on to start logging drops
-3. **Enable PB Submission** -- Toggle on to submit boss completion times
-4. **Discord toggles** -- Enable to post drops/PBs to Discord
-5. **Admin API Key** -- Admins enter their admin key to access the Admin tab
-
-### 7. Optional: Discord Hiscores Wall
-
-The script can post a formatted hiscores summary to Discord on a schedule:
-
-1. In Apps Script, run `setupDiscordHiscores()` once to create the time-driven trigger
-2. It posts to your configured Discord webhook hourly
-
-### 8. Optional: Wise Old Man Integration
-
-To enable XP tracking:
-
-1. Create a group on [Wise Old Man](https://wiseoldman.net)
-2. Copy the group ID from the URL (e.g., `wiseoldman.net/groups/4983` -> ID is `4983`)
-3. Set `womGroupId` in the Settings tab (or via the Admin panel)
+1. **Get your API key** from your Solus clan admin or dashboard.
+2. **Install the plugin** from the RuneLite Plugin Hub (search "Solus"), or as an external plugin:
+   `./gradlew build`, then copy `build/libs/drop-logger-plugin-1.0.0.jar` into
+   `~/.runelite/externalPlugins/`.
+3. In the plugin settings:
+   - **Connection > API Key**: paste your key.
+   - **Data Sharing**: turn on what you want to share (all off by default).
+   - **Discord Sharing** *(optional)*: enable it to post your own drops/PBs/deaths with a screenshot.
+   - **Link Code** *(optional)*: paste a code from the clan website to link your Discord.
+   - **Admin > Admin API Key** *(admins only)*: paste your admin key for the admin tools.
 
 ## Plugin Tabs
 
-| Tab | Description |
-|-----|-------------|
-| **Home** | Connection status, announcements, and navigation |
-| **Drops** | Recent clan drops with item icons and values |
-| **Hiscores** | Boss completion time leaderboards (select group/boss/size) |
-| **XP** | Wise Old Man XP gained and total XP leaderboards |
-| **Activity** | Recent clan member activity from WOM |
-| **Admin** | Manage shared settings, rotate keys, moderate hiscores |
-
-## Admin Features
-
-Admins (users with the admin key) can:
-
-- **Edit shared settings** -- Clan name, Discord webhook, WOM group ID, announcements
-- **Rotate the API key** -- Generates a new clan code (all members must update)
-- **Moderate hiscores** -- Remove individual entries by boss/category and rank
-
-## Google Apps Script Files
-
-| File | Purpose |
-|------|---------|
-| `ClanDropLog.gs` | API endpoints for drops, hiscores, config, and admin actions |
-| `ClanDropLogSetup.gs` | Creates and formats sheet tabs (run once) |
-| `ClanDropWhitelist.gs` | Manages the drop whitelist from wiki data |
+| Tab | What it shows |
+|---|---|
+| **Home** | Connection status, announcements, active event, your clog/CA/XP summary |
+| **Speed Times** | Boss PB leaderboards (pick boss and team size), Clan Only or All |
+| **Drops** | Recent clan drops and drop leaderboards |
+| **XP** | Clan XP leaderboard (per skill, by period) |
+| **Events** | Event schedule, sign-ups, the live clog-race board for your team, and the draft |
+| **Members** | Clan roster with each member's collection log, combat achievements, and stats |
+| **Ranks** | Your rank-up progress and the request button |
+| **Activity** | Recent clan achievements, PBs, and notable drops |
+| **Admin** | Roster sync, key rotation, events, and moderation (admin key required) |
 
 ## License
 
