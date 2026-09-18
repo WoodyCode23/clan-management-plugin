@@ -21,13 +21,14 @@ enter is the API key your clan admin gives you.
 - **Ranks**: check your rank-up requirements (evaluated locally on your client) and request a rank.
 - **Discord sharing** *(opt-in)*: post your own drops, personal bests, and deaths, with a
   screenshot, to your clan's Discord.
-- **Discord linking**: link your in-game account to your Discord profile on the clan site.
 
 ## Data & Privacy
 
 This is the important part, so it is spelled out in full.
 
-- **Nothing is shared unless you turn it on.** Every data-sharing toggle is **off by default.**
+- **Nothing is shared until you connect.** The plugin does nothing at all without the API key your
+  clan admin gives you, and every data-sharing toggle is **off by default.** The one exception is
+  combat achievements, which sync once you are connected (see the table below).
 - **Data only goes to the Solus clan's own server** (`https://api.solusosrs.com`), a fixed,
   hardcoded URL. There are no third parties, and the plugin never fetches a URL to call from
   anywhere; the endpoint is compiled into the plugin.
@@ -37,11 +38,10 @@ This is the important part, so it is spelled out in full.
 | **Track Drops** | each valuable drop (item, GP value, source monster, kill count) plus your RSN and account hash | the clan drop feed and value/points leaderboards |
 | **Track Speed Times** | your personal-best boss times (boss, time, team members) plus your RSN and account hash | the clan speed-time boards; your raid party is read **locally** at the start only, to credit the right team |
 | **Sync Collection Log** | your collection log items and obtained/total counts (only when you open the log) plus your RSN and account hash | clan collection-log tracking and the clog leaderboard |
-| **Sync Combat Achievements** | the names of your completed CA tasks plus your RSN and account hash | clan combat-achievement tracking and leaderboard. Read from the CA interface, and, in real time, from the in-game "task completed" message |
+| **Combat Achievements** *(no separate toggle)* | the names of your completed CA tasks plus your RSN and account hash | clan combat-achievement tracking and leaderboard. Completions are picked up in real time from the in-game "task completed" message once you are connected; the bulk read of the CA interface also needs **Sync Collection Log** on |
 | **Track Stats** | your RSN only; the server then reads your **public** XP/KC from the official OSRS hiscores | clan XP and boss-KC leaderboards. No private game data is sent for this |
-| **Discord Sharing** *(opt-in)* | a **screenshot** of your drop, personal best, or death, plus an optional caption, plus your RSN | posts to your clan's Discord via the server. Off by default; nothing is captured or sent unless you enable it |
+| **Send screenshots to Discord** *(opt-in)* | a **screenshot** of your drop, personal best, or death, plus an optional caption, plus your RSN | posts to your clan's Discord via the server. Off by default; nothing is captured or sent unless you enable it. You can also black out chat, or just private messages, before a screenshot is sent |
 | **Rank Requests** | the rank you request and which requirements you meet, plus your RSN | lets an admin review your rank-up. Requirements (skills, diaries, CAs, KC, item possession) are checked **locally on your client**; only the yes/no result is sent, never your bank or item list |
-| **Link Code** (one-time) | the short code you paste plus your account hash and RSN | links your in-game account to your Discord on the clan website; the code is cleared from settings right after use |
 
 Notes:
 
@@ -58,29 +58,27 @@ Notes:
 ## Setup
 
 1. **Get your API key** from your Solus clan admin or dashboard.
-2. **Install the plugin** from the RuneLite Plugin Hub (search "Solus"), or as an external plugin:
-   `./gradlew build`, then copy `build/libs/drop-logger-plugin-1.0.0.jar` into
-   `~/.runelite/externalPlugins/`.
+2. **Install the plugin** from the RuneLite Plugin Hub (search "Solus").
 3. In the plugin settings:
    - **Connection > API Key**: paste your key.
    - **Data Sharing**: turn on what you want to share (all off by default).
-   - **Discord Sharing** *(optional)*: enable it to post your own drops/PBs/deaths with a screenshot.
-   - **Link Code** *(optional)*: paste a code from the clan website to link your Discord.
-   - **Admin > Admin API Key** *(admins only)*: paste your admin key for the admin tools.
+   - **Screenshots > Send screenshots to Discord** *(optional)*: enable it to post your own
+     drops/PBs/deaths with a screenshot, and choose whether chat is blacked out first.
+
+Admin tools need no extra key: the Admin tab appears on its own if the Discord account your key
+belongs to holds an admin role in the clan.
 
 ## Plugin Tabs
 
 | Tab | What it shows |
 |---|---|
 | **Home** | Connection status, announcements, active event, your clog/CA/XP summary |
-| **Speed Times** | Boss PB leaderboards (pick boss and team size), Clan Only or All |
-| **Drops** | Recent clan drops and drop leaderboards |
-| **XP** | Clan XP leaderboard (per skill, by period) |
-| **Events** | Event schedule, sign-ups, the live clog-race board for your team, and the draft |
-| **Members** | Clan roster with each member's collection log, combat achievements, and stats |
-| **Ranks** | Your rank-up progress and the request button |
+| **Leaderboards** | Drops, Speed Times, XP and Boss KC, picked from one selector |
 | **Activity** | Recent clan achievements, PBs, and notable drops |
-| **Admin** | Roster sync, key rotation, events, and moderation (admin key required) |
+| **Members** | Clan roster with each member's collection log, combat achievements, and stats; members who recently joined the clan are marked with a leaf |
+| **Ranks** | Your rank-up progress and the request button |
+| **Events** | Event schedule, sign-ups, the live clog-race board for your team, and the draft |
+| **Admin** | Roster sync, key rotation, and speed-times moderation. Only shown if your account has an admin role in the clan |
 
 ## License
 
