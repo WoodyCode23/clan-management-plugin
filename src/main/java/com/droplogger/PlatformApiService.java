@@ -1074,8 +1074,10 @@ public class PlatformApiService
         public final String rank;       // in-game CC title (Senator, Xerician…)
         public final String ladderRank; // Discord-derived ladder rank id (heart_3, maxed…) — null if unlinked
         public final String accountType; // regular | ironman | hardcore | ultimate | gim | hcgim | unranked_gim
-        public RosterMember(String rsn, String rank, String ladderRank, String accountType)
-        { this.rsn = rsn; this.rank = rank; this.ladderRank = ladderRank; this.accountType = accountType; }
+        public final boolean isNew;     // inside the clan's new-member window -> show the leaf. Decided
+                                        // by the server so the panel, website and feed agree on the day.
+        public RosterMember(String rsn, String rank, String ladderRank, String accountType, boolean isNew)
+        { this.rsn = rsn; this.rank = rank; this.ladderRank = ladderRank; this.accountType = accountType; this.isNew = isNew; }
     }
 
     /** Fetch the clan roster (names + ranks) for the Members tab. */
@@ -1091,7 +1093,9 @@ public class PlatformApiService
                 o.has("rsn") ? o.get("rsn").getAsString() : "",
                 o.has("rank") && !o.get("rank").isJsonNull() ? o.get("rank").getAsString() : null,
                 o.has("ladderRank") && !o.get("ladderRank").isJsonNull() ? o.get("ladderRank").getAsString() : null,
-                o.has("accountType") && !o.get("accountType").isJsonNull() ? o.get("accountType").getAsString() : null));
+                o.has("accountType") && !o.get("accountType").isJsonNull() ? o.get("accountType").getAsString() : null,
+                // Absent on older servers: no field simply means no leaf, never a parse failure.
+                o.has("isNew") && !o.get("isNew").isJsonNull() && o.get("isNew").getAsBoolean()));
         }
         return out;
     }

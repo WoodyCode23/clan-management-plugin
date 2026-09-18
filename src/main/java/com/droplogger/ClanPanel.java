@@ -937,6 +937,44 @@ public class ClanPanel extends PluginPanel
         return l;
     }
 
+    /**
+     * The new-member leaf, drawn rather than typed. A 🌱 emoji renders as a blank box in the panel's
+     * RuneScape font, so the icon is painted with Graphics2D: two mirrored curves for the blade and a
+     * midrib, in the same green as the GIM badge. Cached — it is identical for every member.
+     */
+    private javax.swing.ImageIcon newMemberLeafIcon;
+
+    private javax.swing.ImageIcon newMemberLeaf()
+    {
+        if (newMemberLeafIcon != null) return newMemberLeafIcon;
+        int s = 10;
+        java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(s, s, java.awt.image.BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = img.createGraphics();
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        java.awt.geom.Path2D.Float blade = new java.awt.geom.Path2D.Float();
+        blade.moveTo(1.5f, 8.5f);                       // stem end
+        blade.quadTo(1.5f, 1.5f, 8.5f, 1.5f);           // outer edge, up and over
+        blade.quadTo(8.5f, 8.5f, 1.5f, 8.5f);           // inner edge, back down
+        blade.closePath();
+        g.setColor(new Color(90, 190, 120));
+        g.fill(blade);
+        g.setColor(new Color(60, 140, 85));
+        g.setStroke(new BasicStroke(1f));
+        g.draw(new java.awt.geom.Line2D.Float(2f, 8f, 7.5f, 2.5f)); // midrib
+        g.dispose();
+        newMemberLeafIcon = new javax.swing.ImageIcon(img);
+        return newMemberLeafIcon;
+    }
+
+    /** The leaf as a label, or null when the member is not new. */
+    private JLabel newMemberBadge(boolean isNew)
+    {
+        if (!isNew) return null;
+        JLabel l = new JLabel(newMemberLeaf());
+        l.setToolTipText("New to the clan — say hi!");
+        return l;
+    }
+
     // The six ironman account types in display order (Solus is ironman-only, so no Main), each with
     // a short text fallback for when the game's helm sprites aren't loaded yet. Keys match accountType.
     private static final String[][] GAME_MODE_MODES = {
@@ -1258,28 +1296,28 @@ public class ClanPanel extends PluginPanel
         name.setFont(READABLE_FONT);
         name.setForeground(Color.WHITE);
         javax.swing.ImageIcon typeIcon = accountTypeIcon(m.accountType);
+        JLabel leaf = newMemberBadge(m.isNew);
         if (typeIcon != null)
         {
             // In-game style: the helm icon sits BEFORE the name, exactly like chat.
             name.setIcon(typeIcon);
             name.setIconTextGap(4);
-            row.add(name, BorderLayout.WEST);
+        }
+        // Anything trailing the name (the account-type text badge when there is no helm sprite, and
+        // the new-member leaf) needs a row of its own; a bare name goes straight into WEST.
+        JLabel typeBadge = typeIcon != null ? null : accountTypeBadge(m.accountType);
+        if (typeBadge != null || leaf != null)
+        {
+            JPanel west = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
+            west.setOpaque(false);
+            west.add(name);
+            if (typeBadge != null) west.add(typeBadge);
+            if (leaf != null) west.add(leaf);
+            row.add(west, BorderLayout.WEST);
         }
         else
         {
-            JLabel typeBadge = accountTypeBadge(m.accountType);
-            if (typeBadge != null)
-            {
-                JPanel west = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
-                west.setOpaque(false);
-                west.add(name);
-                west.add(typeBadge);
-                row.add(west, BorderLayout.WEST);
-            }
-            else
-            {
-                row.add(name, BorderLayout.WEST);
-            }
+            row.add(name, BorderLayout.WEST);
         }
 
         if (m.rank != null && !m.rank.isEmpty())
