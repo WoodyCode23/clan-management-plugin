@@ -1402,7 +1402,10 @@ public class PlatformApiService
     {
         public final String teamId;
         public final String name;
-        public ClogRaceTeam(String teamId, String name) { this.teamId = teamId; this.name = name; }
+        public final String color;          // #RRGGBB (or a legacy name); null on older servers
+        public final List<String> members;  // captains + picks for THIS event; empty on older servers
+        public ClogRaceTeam(String teamId, String name, String color, List<String> members)
+        { this.teamId = teamId; this.name = name; this.color = color; this.members = members; }
     }
 
     /** One board-item fill: a team obtaining a target item. */
@@ -1519,9 +1522,14 @@ public class PlatformApiService
                 for (JsonElement el : root.getAsJsonArray("teams"))
                 {
                     JsonObject o = el.getAsJsonObject();
+                    List<String> members = new ArrayList<>();
+                    if (o.has("members") && o.get("members").isJsonArray())
+                        for (JsonElement m : o.getAsJsonArray("members")) members.add(m.getAsString());
                     teams.add(new ClogRaceTeam(
                         o.has("teamId") && !o.get("teamId").isJsonNull() ? o.get("teamId").getAsString() : null,
-                        o.has("name") && !o.get("name").isJsonNull() ? o.get("name").getAsString() : ""));
+                        o.has("name") && !o.get("name").isJsonNull() ? o.get("name").getAsString() : "",
+                        o.has("color") && !o.get("color").isJsonNull() ? o.get("color").getAsString() : null,
+                        members));
                 }
             }
 

@@ -210,33 +210,16 @@ public class ClanManagementPlugin extends Plugin
                     synchronized (teamColorByRsn) { teamColorByRsn.clear(); }
                     return;
                 }
-                com.google.gson.JsonObject draft = boardDataService.fetchDraft(getPlatformUrl(), getPlatformSlug(), getPlatformKey());
+                // Teams for THIS event come straight from the event payload. Fetching "the draft"
+                // separately returned the clan's newest draft, which is a different event's teams as
+                // soon as two events exist.
                 java.util.Map<String, String> map = new java.util.HashMap<>();
-                if (draft != null && draft.has("teams") && draft.get("teams").isJsonArray())
-                {
-                    java.util.Map<String, String> colorByTeam = new java.util.HashMap<>();
-                    for (com.google.gson.JsonElement el : draft.getAsJsonArray("teams"))
+                if (race.teams != null)
+                    for (PlatformApiService.ClogRaceTeam t : race.teams)
                     {
-                        com.google.gson.JsonObject t = el.getAsJsonObject();
-                        String color = t.has("color") && !t.get("color").isJsonNull() ? t.get("color").getAsString() : null;
-                        if (color == null) continue;
-                        colorByTeam.put(t.get("id").getAsString(), color);
-                        if (t.has("captain1") && !t.get("captain1").isJsonNull()) map.put(normalizeName(t.get("captain1").getAsString()), color);
-                        if (t.has("captain2") && !t.get("captain2").isJsonNull()) map.put(normalizeName(t.get("captain2").getAsString()), color);
+                        if (t.color == null || TeamColors.parse(t.color) == null) continue;
+                        for (String rsn : t.members) map.put(normalizeName(rsn), t.color);
                     }
-                    java.util.Map<String, String> rsnByPool = new java.util.HashMap<>();
-                    if (draft.has("pool") && draft.get("pool").isJsonArray())
-                        for (com.google.gson.JsonElement el : draft.getAsJsonArray("pool"))
-                        { com.google.gson.JsonObject p = el.getAsJsonObject(); rsnByPool.put(p.get("id").getAsString(), p.get("rsn").getAsString()); }
-                    if (draft.has("picks") && draft.get("picks").isJsonArray())
-                        for (com.google.gson.JsonElement el : draft.getAsJsonArray("picks"))
-                        {
-                            com.google.gson.JsonObject pk = el.getAsJsonObject();
-                            String rsn = rsnByPool.get(pk.get("poolId").getAsString());
-                            String color = colorByTeam.get(pk.get("teamId").getAsString());
-                            if (rsn != null && color != null) map.put(normalizeName(rsn), color);
-                        }
-                }
                 synchronized (teamColorByRsn) { teamColorByRsn.clear(); teamColorByRsn.putAll(map); }
                 registerTeamColorIcons(new java.util.HashSet<>(map.values()));
             }
@@ -257,7 +240,8 @@ public class ClanManagementPlugin extends Plugin
                 if (color == null || teamIconIdByColor.containsKey(color)) continue;
                 try
                 {
-                    java.awt.Color c = java.awt.Color.decode(color);
+                    java.awt.Color c = TeamColors.parse(color);
+                    if (c == null) continue;
                     java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(12, 12, java.awt.image.BufferedImage.TYPE_INT_ARGB);
                     java.awt.Graphics2D g = img.createGraphics();
                     g.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
