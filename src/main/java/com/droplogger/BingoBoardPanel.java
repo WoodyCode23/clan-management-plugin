@@ -42,6 +42,17 @@ public class BingoBoardPanel extends JPanel
 
     public BingoBoardPanel(int rows, int cols, List<BingoTile> tiles, ItemManager itemManager, SpriteManager spriteManager)
     {
+        this(rows, cols, tiles, itemManager, spriteManager, null);
+    }
+
+    /**
+     * Same as the three-manager constructor, plus an optional onTileClick callback (null = no click
+     * behaviour, identical to the original constructor). Invoked on the EDT with the clicked tile;
+     * a click on an empty grid cell (no tile mapped to that row/col) is a no-op.
+     */
+    public BingoBoardPanel(int rows, int cols, List<BingoTile> tiles, ItemManager itemManager, SpriteManager spriteManager,
+        java.util.function.Consumer<BingoTile> onTileClick)
+    {
         setLayout(new GridLayout(rows, cols, GAP, GAP));
         setBackground(ColorScheme.DARK_GRAY_COLOR);
         setOpaque(true);
@@ -68,7 +79,7 @@ public class BingoBoardPanel extends JPanel
         {
             for (int c = 0; c < cols; c++)
             {
-                add(new TileComponent(grid[r][c], tileSize, itemManager, spriteManager));
+                add(new TileComponent(grid[r][c], tileSize, itemManager, spriteManager, onTileClick));
             }
         }
     }
@@ -85,7 +96,8 @@ public class BingoBoardPanel extends JPanel
         private final BingoTile tile;
         private volatile BufferedImage icon;
 
-        TileComponent(BingoTile tile, int size, ItemManager itemManager, SpriteManager spriteManager)
+        TileComponent(BingoTile tile, int size, ItemManager itemManager, SpriteManager spriteManager,
+            java.util.function.Consumer<BingoTile> onTileClick)
         {
             this.tile = tile;
             setPreferredSize(new Dimension(size, size));
@@ -94,6 +106,14 @@ public class BingoBoardPanel extends JPanel
             {
                 setToolTipText(tile.name + ": " + BingoTiles.formatPoints(tile.points, tile.threshold) + " pts");
                 loadIcon(itemManager, spriteManager);
+                if (onTileClick != null)
+                {
+                    setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+                    addMouseListener(new java.awt.event.MouseAdapter()
+                    {
+                        @Override public void mouseClicked(java.awt.event.MouseEvent e) { onTileClick.accept(tile); }
+                    });
+                }
             }
         }
 

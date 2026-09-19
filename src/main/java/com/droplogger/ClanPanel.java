@@ -110,9 +110,19 @@ public class ClanPanel extends PluginPanel
     private boolean ranksActive = false;
     private java.util.function.Consumer<Object[]> onRequestRank; // {rankName, eligible(Boolean), missing(List)}
     private SpriteManager spriteManager; // in-game clan-rank icon sprites
-    // Gates the bingo-board dev preview card at the top of the Events tab; false (the default) for
-    // every Plugin Hub install, true only in a RuneLite dev-mode client.
+    // Gates the bingo dev preview (sample data feeding the SAME team-view UI as the live card);
+    // false (the default) for every Plugin Hub install, true only in a RuneLite dev-mode client.
     private boolean developerMode = false;
+
+    // ── Bingo card (team boards; renders inside the Events tab, see buildBingoSection) ──
+    private PlatformApiService.BingoCard currentBingoCard; // live card from the server; null when none is running
+    private String selectedBingoTeamId;
+    private String localPlayerNameForBingo; // for "open on your own team" + highlighting your own contributions
+    private java.util.function.BiConsumer<String, String> onLoadBingoPlayer; // (eventId, rsn) -> fetch drill-in
+    private String expandedBingoRosterRsn; // roster row currently showing its drill-in, or null
+    private PlatformApiService.BingoPlayer bingoPlayerDrillIn; // last-fetched drill-in result for expandedBingoRosterRsn
+    private boolean bingoPlayerDrillInLoading = false;
+    private String expandedBingoTileCode; // tile currently showing its drops, or null
 
     // ── Raid Race tab (clog-race board/standings/countdown) ──
     private final JPanel raidRaceContent = new ScrollableColumn();
@@ -2099,6 +2109,36 @@ public class ClanPanel extends PluginPanel
     public void setOnLoadRanks(Runnable cb) { this.onLoadRanks = cb; }
     public void setOnLoadRaidRace(Runnable cb) { this.onLoadRaidRace = cb; }
     public boolean isRaidRaceActive() { return raidRaceActive; }
+
+    /** Push a fresh bingo snapshot (or null when there is none) plus the logged-in player's RSN
+     *  (read on the client thread by the caller, see ClanManagementPlugin#fetchRaidRace), so "your
+     *  own team" and "your own drops" can be resolved without any client-thread access from here. */
+    public void updateBingo(PlatformApiService.BingoCard card, String localPlayerName)
+    {
+        SwingUtilities.invokeLater(() ->
+        {
+            currentBingoCard = card;
+            localPlayerNameForBingo = localPlayerName;
+            updateRaidRace(currentRaidRace);
+        });
+    }
+
+    public void setOnLoadBingoPlayer(java.util.function.BiConsumer<String, String> cb) { this.onLoadBingoPlayer = cb; }
+
+    /** Result of an onLoadBingoPlayer fetch (possibly null on failure); only redraws if the roster
+     *  row for this rsn is still the one expanded (the user may have closed or switched it meanwhile). */
+    public void setBingoPlayerDrillIn(String rsn, PlatformApiService.BingoPlayer player)
+    {
+        SwingUtilities.invokeLater(() ->
+        {
+            bingoPlayerDrillInLoading = false;
+            if (rsn != null && rsn.equals(expandedBingoRosterRsn))
+            {
+                bingoPlayerDrillIn = player;
+                updateRaidRace(currentRaidRace);
+            }
+        });
+    }
     /** Store the latest unified schedule; it renders atop the Events tab on the next updateRaidRace. */
     public void setSchedule(PlatformApiService.Schedule schedule) { this.currentSchedule = schedule; }
     public void setOnFetchEventSignups(java.util.function.Consumer<String> cb) { this.onFetchEventSignups = cb; }
@@ -3007,12 +3047,15 @@ public class ClanPanel extends PluginPanel
             currentRaidRace = race;
             raidRaceContent.removeAll();
 
-            // Dev-mode-only bingo board preview: sits above everything else in the tab. This is
-            // re-added every rebuild (updateRaidRace wipes raidRaceContent above) rather than added
-            // once, since removeAll() would otherwise drop it along with the rest of the tab.
-            if (developerMode)
+            // Bingo card: sits above everything else in the tab. This is re-added every rebuild
+            // (updateRaidRace wipes raidRaceContent above) rather than added once, since removeAll()
+            // would otherwise drop it along with the rest of the tab. Shows the live card when a
+            // bingo event exists; otherwise (developer mode only) the same UI fed with sample data,
+            // so it never appears at all for a Plugin Hub install with no event running.
+            JPanel bingoSection = buildBingoSection();
+            if (bingoSection != null)
             {
-                raidRaceContent.add(bingoBoardPreviewCard());
+                raidRaceContent.add(bingoSection);
                 raidRaceContent.add(Box.createVerticalStrut(12));
             }
 
@@ -3129,67 +3172,653 @@ public class ClanPanel extends PluginPanel
     }
 
     // ══════════════════════════════════════════
-    // Bingo board (dev-mode-only preview, sample data)
+    // Bingo card (team boards, standings, roster drill-in)
     // ══════════════════════════════════════════
 
-    /** "Bingo board (dev preview)" card: a BingoBoardPanel fed with sample data, so the renderer
-     *  can be reviewed before the server has any real bingo board to send. Only ever built when
-     *  developerMode is true (see updateRaidRace above), so a Plugin Hub install never runs this. */
-    private JPanel bingoBoardPreviewCard()
+    /** The live card when a bingo event exists; else (developer mode only) the SAME UI fed with
+     *  sample data, so the whole view can be checked before the server route exists; else null (no
+     *  section at all (a Plugin Hub install with no event running shows nothing here). */
+    private JPanel buildBingoSection()
     {
-        JPanel card = new JPanel();
-        card.setLayout(new BoxLayout(card, BoxLayout.Y_AXIS));
-        card.setBackground(ColorScheme.DARK_GRAY_COLOR);
-        card.setAlignmentX(Component.LEFT_ALIGNMENT);
+        PlatformApiService.BingoCard card = currentBingoCard;
+        boolean sample = false;
+        if (card == null || card.event == null)
+        {
+            if (!developerMode) return null;
+            card = sampleBingoCard();
+            sample = true;
+        }
+        return buildBingoCard(card, sample);
+    }
 
-        card.add(clogTitle("Bingo board (dev preview)", ACCENT_GOLD, 13f));
-        card.add(Box.createVerticalStrut(4));
+    private JPanel buildBingoCard(PlatformApiService.BingoCard card, boolean sample)
+    {
+        JPanel outer = new JPanel();
+        outer.setLayout(new BoxLayout(outer, BoxLayout.Y_AXIS));
+        outer.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        outer.setAlignmentX(Component.LEFT_ALIGNMENT);
 
-        BingoBoardPanel board = new BingoBoardPanel(5, 5, sampleBingoTiles(), itemManager, spriteManager);
+        outer.add(clogTitle(sample ? "Bingo (dev preview)" : "Bingo", ACCENT_GOLD, 13f));
+        if (card.event != null && card.event.name != null && !card.event.name.isEmpty())
+        {
+            JLabel name = new JLabel(card.event.name);
+            name.setFont(READABLE_FONT.deriveFont(Font.BOLD, 14f));
+            name.setForeground(Color.WHITE);
+            name.setAlignmentX(Component.LEFT_ALIGNMENT);
+            name.setBorder(new EmptyBorder(2, 0, 4, 0));
+            outer.add(name);
+        }
+        outer.add(Box.createVerticalStrut(4));
+
+        // Default selection: your own team (by matching the logged-in RSN against rosters), else
+        // the standings leader, else the first team. Only re-derived when the current selection no
+        // longer exists on this card (e.g. first load, or a rebuild after teams changed).
+        if (selectedBingoTeamId == null || !bingoTeamExists(card, selectedBingoTeamId))
+        {
+            String own = BingoTeamView.findOwnTeamId(card, localPlayerNameForBingo);
+            if (own != null) selectedBingoTeamId = own;
+            else if (card.standings != null && !card.standings.isEmpty()) selectedBingoTeamId = card.standings.get(0).teamId;
+            else if (card.teams != null && !card.teams.isEmpty()) selectedBingoTeamId = card.teams.get(0).teamId;
+        }
+
+        outer.add(bingoStandingsPanel(card));
+        outer.add(Box.createVerticalStrut(8));
+        outer.add(bingoTeamSwitcher(card));
+        outer.add(Box.createVerticalStrut(6));
+
+        if (selectedBingoTeamId != null)
+        {
+            outer.add(bingoStatusLine(card, selectedBingoTeamId));
+            outer.add(Box.createVerticalStrut(6));
+            outer.add(bingoBoardSection(card, selectedBingoTeamId));
+            outer.add(Box.createVerticalStrut(8));
+            outer.add(bingoRosterPanel(card, selectedBingoTeamId));
+            outer.add(Box.createVerticalStrut(8));
+            outer.add(bingoRecentDropsPanel(card, selectedBingoTeamId));
+        }
+        else
+        {
+            outer.add(eventBodyNote("No teams yet"));
+        }
+
+        return outer;
+    }
+
+    private boolean bingoTeamExists(PlatformApiService.BingoCard card, String teamId)
+    {
+        if (card.teams == null) return false;
+        for (PlatformApiService.BingoTeam t : card.teams)
+        {
+            if (t != null && teamId.equals(t.teamId)) return true;
+        }
+        return false;
+    }
+
+    /** Standings (all teams ranked), shown above the team switcher; clicking a row selects that team. */
+    private JPanel bingoStandingsPanel(PlatformApiService.BingoCard card)
+    {
+        JPanel panel = new JPanel();
+        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        panel.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        panel.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        panel.add(clogTitle("Standings", ACCENT_GOLD, 12f));
+        panel.add(Box.createVerticalStrut(4));
+
+        if (card.standings == null || card.standings.isEmpty())
+        {
+            panel.add(eventBodyNote("No standings yet"));
+            return panel;
+        }
+        for (PlatformApiService.BingoStanding s : card.standings)
+        {
+            panel.add(bingoStandingRow(s));
+            panel.add(Box.createVerticalStrut(3));
+        }
+        return panel;
+    }
+
+    private JPanel bingoStandingRow(PlatformApiService.BingoStanding s)
+    {
+        JPanel row = new JPanel(new BorderLayout());
+        row.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+        row.setBorder(new EmptyBorder(4, 7, 4, 7));
+        row.setAlignmentX(Component.LEFT_ALIGNMENT);
+        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+
+        JPanel left = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 5, 0));
+        left.setBackground(row.getBackground());
+        left.add(bingoColorDot(s.color));
+        JLabel nameLbl = new JLabel(s.rank + ". " + (s.name != null && !s.name.isEmpty() ? s.name : "Team"));
+        nameLbl.setFont(READABLE_FONT);
+        nameLbl.setForeground(Color.WHITE);
+        left.add(nameLbl);
+        row.add(left, BorderLayout.WEST);
+
+        JLabel ptsLbl = new JLabel(formatBingoNumber(s.points) + " pts   " + s.tilesComplete + " tiles");
+        ptsLbl.setFont(READABLE_FONT_SMALL);
+        ptsLbl.setForeground(new Color(180, 180, 180));
+        row.add(ptsLbl, BorderLayout.EAST);
+
+        boolean selected = s.teamId != null && s.teamId.equals(selectedBingoTeamId);
+        if (selected)
+        {
+            row.setBackground(new Color(50, 45, 30));
+            row.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(ACCENT_GOLD, 1), new EmptyBorder(3, 6, 3, 6)));
+            left.setBackground(row.getBackground());
+        }
+        final String teamId = s.teamId;
+        makeCardClickable(row, () -> { if (teamId != null) { selectedBingoTeamId = teamId; updateRaidRace(currentRaidRace); } });
+        return row;
+    }
+
+    /** Team switcher: left/right arrows cycle through every team, with the current team's colour
+     *  dot and name in the middle. Client-side only (the card already carries every team). */
+    private JPanel bingoTeamSwitcher(PlatformApiService.BingoCard card)
+    {
+        JPanel row = new JPanel(new BorderLayout(6, 0));
+        row.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        row.setAlignmentX(Component.LEFT_ALIGNMENT);
+        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+
+        java.util.List<PlatformApiService.BingoTeam> teams = card.teams != null ? card.teams : new java.util.ArrayList<>();
+        int idx = -1;
+        for (int i = 0; i < teams.size(); i++)
+        {
+            PlatformApiService.BingoTeam t = teams.get(i);
+            if (t != null && t.teamId != null && t.teamId.equals(selectedBingoTeamId)) { idx = i; break; }
+        }
+        final int curIdx = idx;
+
+        JButton prev = new JButton("<");
+        prev.setFocusPainted(false);
+        prev.setEnabled(teams.size() > 1);
+        prev.addActionListener(ev ->
+        {
+            if (teams.isEmpty()) return;
+            int newIdx = curIdx <= 0 ? teams.size() - 1 : curIdx - 1;
+            selectedBingoTeamId = teams.get(newIdx).teamId;
+            updateRaidRace(currentRaidRace);
+        });
+
+        JButton next = new JButton(">");
+        next.setFocusPainted(false);
+        next.setEnabled(teams.size() > 1);
+        next.addActionListener(ev ->
+        {
+            if (teams.isEmpty()) return;
+            int newIdx = curIdx < 0 ? 0 : (curIdx + 1) % teams.size();
+            selectedBingoTeamId = teams.get(newIdx).teamId;
+            updateRaidRace(currentRaidRace);
+        });
+
+        JPanel center = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.CENTER, 6, 0));
+        center.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        PlatformApiService.BingoTeam selectedTeam = idx >= 0 ? teams.get(idx) : null;
+        if (selectedTeam != null)
+        {
+            center.add(bingoColorDot(selectedTeam.color));
+            JLabel nameLbl = new JLabel(selectedTeam.name != null && !selectedTeam.name.isEmpty() ? selectedTeam.name : "Team");
+            nameLbl.setFont(READABLE_FONT.deriveFont(Font.BOLD));
+            nameLbl.setForeground(Color.WHITE);
+            center.add(nameLbl);
+        }
+        else
+        {
+            center.add(eventBodyNote("No team selected"));
+        }
+
+        row.add(prev, BorderLayout.WEST);
+        row.add(center, BorderLayout.CENTER);
+        row.add(next, BorderLayout.EAST);
+        return row;
+    }
+
+    /** Small filled colour dot for a team, mirroring the clan-chat team-dot rendering technique
+     *  (ClanManagementPlugin#registerTeamColorIcons) but as a plain Swing component. */
+    private JComponent bingoColorDot(String colorHex)
+    {
+        Color parsed = TeamColors.parse(colorHex);
+        final Color dot = parsed != null ? parsed : new Color(120, 120, 120);
+        JComponent comp = new JComponent()
+        {
+            @Override protected void paintComponent(Graphics g)
+            {
+                Graphics2D g2 = (Graphics2D) g.create();
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g2.setColor(dot);
+                g2.fillOval(0, 1, 9, 9);
+                g2.dispose();
+            }
+        };
+        comp.setPreferredSize(new Dimension(11, 11));
+        return comp;
+    }
+
+    /** The points / tiles / rank / gap line for the selected team (BingoTeamView.formatTeamStatusLine). */
+    private JLabel bingoStatusLine(PlatformApiService.BingoCard card, String teamId)
+    {
+        PlatformApiService.BingoStanding s = BingoTeamView.standingForTeam(card, teamId);
+        String text = s != null
+            ? BingoTeamView.formatTeamStatusLine(s.points, s.tilesComplete, BingoTeamView.totalTiles(card), s.rank,
+                card.standings != null ? card.standings.size() : 0, s.gapToAbove, s.leadOverBelow)
+            : "No standings yet";
+        JLabel l = new JLabel(text);
+        l.setFont(READABLE_FONT_SMALL);
+        l.setForeground(new Color(200, 200, 200));
+        l.setAlignmentX(Component.LEFT_ALIGNMENT);
+        return l;
+    }
+
+    /** The selected team's board; clicking a tile toggles that tile's drop list beneath the board. */
+    private JPanel bingoBoardSection(PlatformApiService.BingoCard card, String teamId)
+    {
+        JPanel panel = new JPanel();
+        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        panel.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        panel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        panel.add(clogTitle("Board", ACCENT_GOLD, 12f));
+        panel.add(Box.createVerticalStrut(4));
+
+        if (card.board == null || card.board.tiles == null || card.board.tiles.isEmpty())
+        {
+            panel.add(eventBodyNote("No board yet"));
+            return panel;
+        }
+
+        java.util.List<BingoTile> tiles = BingoTeamView.toBoardTiles(card, teamId);
+        BingoBoardPanel board = new BingoBoardPanel(card.board.rows, card.board.cols, tiles, itemManager, spriteManager,
+            tile ->
+            {
+                String code = tile != null ? tile.code : null;
+                expandedBingoTileCode = code != null && code.equals(expandedBingoTileCode) ? null : code;
+                updateRaidRace(currentRaidRace);
+            });
         board.setAlignmentX(Component.LEFT_ALIGNMENT);
 
         JPanel holder = new JPanel(new BorderLayout());
         holder.setBackground(ColorScheme.DARK_GRAY_COLOR);
         holder.setAlignmentX(Component.LEFT_ALIGNMENT);
         holder.add(board, BorderLayout.NORTH);
-        card.add(holder);
+        panel.add(holder);
 
-        return card;
+        if (expandedBingoTileCode != null)
+        {
+            panel.add(Box.createVerticalStrut(6));
+            panel.add(bingoTileDetailPanel(card, teamId, expandedBingoTileCode));
+        }
+
+        return panel;
     }
 
-    /** 5x5 sample board: real boss names (plus a couple of item tiles) with progress spread across
-     *  every visual bucket the product owner asked to see (0%, ~10%, 25%, 50%, 75%, 99%, 100%),
-     *  and a scatter of other values so the rest of the grid isn't just seven repeated fills. */
-    private java.util.List<BingoTile> sampleBingoTiles()
+    /** "Click a tile -> that tile's drops": the selected team's already-fetched progress for this
+     *  tile, no extra request needed since the card carries every tile's drops up front. */
+    private JPanel bingoTileDetailPanel(PlatformApiService.BingoCard card, String teamId, String tileCode)
     {
-        java.util.List<BingoTile> tiles = new java.util.ArrayList<>();
-        tiles.add(BingoTile.boss("A1", "Vorkath", 0, 0, 0, 30, "Vorkath"));            // 0%
-        tiles.add(BingoTile.boss("B1", "Zulrah", 0, 1, 3, 30, "Zulrah"));              // 10%
-        tiles.add(BingoTile.boss("C1", "Kree'arra", 0, 2, 7.5, 30, "Kree'arra"));      // 25%
-        tiles.add(BingoTile.boss("D1", "Nex", 0, 3, 15, 30, "Nex"));                   // 50%
-        tiles.add(BingoTile.boss("E1", "Cerberus", 0, 4, 22.5, 30, "Cerberus"));       // 75%
-        tiles.add(BingoTile.boss("A2", "The Leviathan", 1, 0, 29.7, 30, "The Leviathan")); // 99%
-        tiles.add(BingoTile.boss("B2", "Vardorvis", 1, 1, 30, 30, "Vardorvis"));       // 100%
-        tiles.add(BingoTile.boss("C2", "Corporeal Beast", 1, 2, 12, 30, "Corporeal Beast")); // 40%
-        tiles.add(BingoTile.boss("D2", "Chambers of Xeric", 1, 3, 9, 30, "Chambers of Xeric")); // 30%
-        tiles.add(BingoTile.boss("E2", "Theatre of Blood", 1, 4, 18, 30, "Theatre of Blood")); // 60%
-        tiles.add(BingoTile.boss("A3", "Tombs of Amascut", 2, 0, 21, 30, "Tombs of Amascut")); // 70%
-        tiles.add(BingoTile.boss("B3", "Phosani's Nightmare", 2, 1, 6, 30, "Phosani's Nightmare")); // 20%
-        tiles.add(BingoTile.item("C3", "Twisted bow", 2, 2, 0, 1, 20997));             // 0%
-        tiles.add(BingoTile.item("D3", "Dragon warhammer", 2, 3, 1, 1, 13576));        // 100%
-        tiles.add(BingoTile.boss("E3", "Zalcano", 2, 4, 4.5, 30, "Zalcano"));          // 15%
-        tiles.add(BingoTile.boss("A4", "Giant Mole", 3, 0, 27, 30, "Giant Mole"));     // 90%
-        tiles.add(BingoTile.boss("B4", "Kraken", 3, 1, 13.5, 30, "Kraken"));           // 45%
-        tiles.add(BingoTile.boss("C4", "Sarachnis", 3, 2, 1.5, 30, "Sarachnis"));      // 5%
-        tiles.add(BingoTile.boss("D4", "Skotizo", 3, 3, 24, 30, "Skotizo"));           // 80%
-        tiles.add(BingoTile.boss("E4", "Vetion", 3, 4, 10.5, 30, "Vetion"));           // 35%
-        tiles.add(BingoTile.boss("A5", "King Black Dragon", 4, 0, 16.5, 30, "King Black Dragon")); // 55%
-        tiles.add(BingoTile.boss("B5", "Callisto", 4, 1, 19.5, 30, "Callisto"));       // 65%
-        tiles.add(BingoTile.boss("C5", "Venenatis", 4, 2, 25.5, 30, "Venenatis"));     // 85%
-        tiles.add(BingoTile.boss("D5", "Artio", 4, 3, 28.5, 30, "Artio"));             // 95%
-        tiles.add(BingoTile.boss("E5", "Scorpia", 4, 4, 15, 30, "Scorpia"));           // 50%
-        return tiles;
+        JPanel panel = new JPanel();
+        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        panel.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+        panel.setBorder(new EmptyBorder(6, 8, 6, 8));
+        panel.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        String tileName = tileCode;
+        if (card.board != null && card.board.tiles != null)
+        {
+            for (PlatformApiService.BingoBoardTile t : card.board.tiles)
+            {
+                if (t != null && tileCode.equals(t.code)) { tileName = t.name != null ? t.name : tileCode; break; }
+            }
+        }
+        JLabel title = new JLabel(tileName);
+        title.setFont(READABLE_FONT.deriveFont(Font.BOLD));
+        title.setForeground(ACCENT_GOLD);
+        title.setAlignmentX(Component.LEFT_ALIGNMENT);
+        panel.add(title);
+        panel.add(Box.createVerticalStrut(4));
+
+        java.util.Map<String, PlatformApiService.BingoTileProgress> byTile =
+            card.progress != null ? card.progress.get(teamId) : null;
+        PlatformApiService.BingoTileProgress progress = byTile != null ? byTile.get(tileCode) : null;
+        java.util.List<PlatformApiService.BingoDrop> drops = progress != null ? progress.drops : null;
+
+        if (drops == null || drops.isEmpty())
+        {
+            panel.add(eventBodyNote("No drops recorded for this tile yet"));
+            return panel;
+        }
+        for (PlatformApiService.BingoDrop d : drops)
+        {
+            panel.add(bingoDropRow(d, false));
+            panel.add(Box.createVerticalStrut(2));
+        }
+        return panel;
     }
+
+    /** Roster: click a player to open/close their contributions (fetched via onLoadBingoPlayer). */
+    private JPanel bingoRosterPanel(PlatformApiService.BingoCard card, String teamId)
+    {
+        JPanel panel = new JPanel();
+        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        panel.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        panel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        panel.add(clogTitle("Roster", ACCENT_GOLD, 12f));
+        panel.add(Box.createVerticalStrut(4));
+
+        PlatformApiService.BingoStanding s = BingoTeamView.standingForTeam(card, teamId);
+        java.util.List<PlatformApiService.BingoRosterEntry> roster = s != null ? s.roster : null;
+        if (roster == null || roster.isEmpty())
+        {
+            panel.add(eventBodyNote("No roster yet"));
+            return panel;
+        }
+
+        String eventId = card.event != null ? card.event.id : null;
+        for (PlatformApiService.BingoRosterEntry r : roster)
+        {
+            panel.add(bingoRosterRow(eventId, r));
+            panel.add(Box.createVerticalStrut(2));
+            if (r.rsn != null && r.rsn.equals(expandedBingoRosterRsn))
+            {
+                panel.add(bingoPlayerDrillInPanel(r.rsn));
+                panel.add(Box.createVerticalStrut(4));
+            }
+        }
+        return panel;
+    }
+
+    private JPanel bingoRosterRow(String eventId, PlatformApiService.BingoRosterEntry r)
+    {
+        boolean mine = BingoTeamView.isSamePlayer(r.rsn, localPlayerNameForBingo);
+        JPanel row = new JPanel(new BorderLayout());
+        row.setBackground(mine ? new Color(50, 45, 30) : ColorScheme.DARKER_GRAY_COLOR);
+        row.setBorder(new EmptyBorder(4, 7, 4, 7));
+        row.setAlignmentX(Component.LEFT_ALIGNMENT);
+        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
+
+        JLabel nameLbl = new JLabel(r.rsn != null ? r.rsn : "Unknown");
+        nameLbl.setFont(READABLE_FONT);
+        nameLbl.setForeground(mine ? ACCENT_GOLD : Color.WHITE);
+        row.add(nameLbl, BorderLayout.WEST);
+
+        JLabel statLbl = new JLabel(formatBingoNumber(r.points) + " pts   "
+            + r.dropCount + (r.dropCount == 1 ? " drop" : " drops"));
+        statLbl.setFont(READABLE_FONT_SMALL);
+        statLbl.setForeground(new Color(170, 170, 170));
+        row.add(statLbl, BorderLayout.EAST);
+
+        final String rsn = r.rsn;
+        makeCardClickable(row, () ->
+        {
+            if (rsn == null) return;
+            boolean wasOpen = rsn.equals(expandedBingoRosterRsn);
+            expandedBingoRosterRsn = wasOpen ? null : rsn;
+            if (!wasOpen)
+            {
+                bingoPlayerDrillIn = null;
+                bingoPlayerDrillInLoading = true;
+                if (onLoadBingoPlayer != null && eventId != null) onLoadBingoPlayer.accept(eventId, rsn);
+            }
+            updateRaidRace(currentRaidRace);
+        });
+        return row;
+    }
+
+    /** One player's drill-in: points per tile, then their counted drops (who/what/tile/points/when;
+     *  no proof link, the plugin never shows a server-supplied URL (see BingoDrop). */
+    private JPanel bingoPlayerDrillInPanel(String rsn)
+    {
+        JPanel panel = new JPanel();
+        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        panel.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+        panel.setBorder(new EmptyBorder(4, 14, 4, 6));
+        panel.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        PlatformApiService.BingoPlayer p = bingoPlayerDrillIn;
+        boolean have = p != null && rsn.equals(p.rsn);
+        if (!have)
+        {
+            panel.add(eventBodyNote(bingoPlayerDrillInLoading ? "Loading contributions..." : "Could not load this player's contributions."));
+            return panel;
+        }
+
+        if (p.tiles != null && !p.tiles.isEmpty())
+        {
+            StringBuilder sb = new StringBuilder("Points per tile: ");
+            for (int i = 0; i < p.tiles.size(); i++)
+            {
+                if (i > 0) sb.append(", ");
+                sb.append(p.tiles.get(i).code).append(" ").append(formatBingoNumber(p.tiles.get(i).points));
+            }
+            JLabel tilesLbl = new JLabel(sb.toString());
+            tilesLbl.setFont(READABLE_FONT_SMALL);
+            tilesLbl.setForeground(new Color(180, 180, 180));
+            tilesLbl.setAlignmentX(Component.LEFT_ALIGNMENT);
+            panel.add(tilesLbl);
+            panel.add(Box.createVerticalStrut(4));
+        }
+
+        if (p.drops == null || p.drops.isEmpty())
+        {
+            panel.add(eventBodyNote("No drops recorded yet"));
+        }
+        else
+        {
+            for (PlatformApiService.BingoDrop d : p.drops)
+            {
+                panel.add(bingoDropRow(d, true));
+                panel.add(Box.createVerticalStrut(2));
+            }
+        }
+        return panel;
+    }
+
+    /** Recent drops for the selected team (latest first, from the card's own recentDrops). */
+    private JPanel bingoRecentDropsPanel(PlatformApiService.BingoCard card, String teamId)
+    {
+        JPanel panel = new JPanel();
+        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        panel.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        panel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        panel.add(clogTitle("Recent Drops", ACCENT_GOLD, 12f));
+        panel.add(Box.createVerticalStrut(4));
+
+        PlatformApiService.BingoStanding s = BingoTeamView.standingForTeam(card, teamId);
+        java.util.List<PlatformApiService.BingoDrop> drops = s != null ? s.recentDrops : null;
+        if (drops == null || drops.isEmpty())
+        {
+            panel.add(eventBodyNote("No drops yet"));
+            return panel;
+        }
+        for (PlatformApiService.BingoDrop d : drops)
+        {
+            panel.add(bingoDropRow(d, true));
+            panel.add(Box.createVerticalStrut(2));
+        }
+        return panel;
+    }
+
+    /** One drop row: who, what, (optionally) which tile, points, when. Deliberately no proof link or
+     *  URL of any kind: the plugin never parses or shows a server-supplied URL (see BingoDrop). Your
+     *  own drops (RSN match on the logged-in player) are highlighted gold. */
+    private JPanel bingoDropRow(PlatformApiService.BingoDrop d, boolean showTile)
+    {
+        boolean mine = BingoTeamView.isSamePlayer(d.rsn, localPlayerNameForBingo);
+        JPanel row = new JPanel(new BorderLayout());
+        row.setBackground(mine ? new Color(50, 45, 30) : ColorScheme.DARKER_GRAY_COLOR);
+        row.setBorder(new EmptyBorder(3, 6, 3, 6));
+        row.setAlignmentX(Component.LEFT_ALIGNMENT);
+        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 22));
+
+        StringBuilder left = new StringBuilder(d.rsn != null ? d.rsn : "Unknown");
+        left.append(": ").append(d.item != null ? d.item : "?");
+        if (showTile && d.tileCode != null && !d.tileCode.isEmpty()) left.append(" (").append(d.tileCode).append(")");
+        JLabel leftLbl = new JLabel(left.toString());
+        leftLbl.setFont(READABLE_FONT_SMALL);
+        leftLbl.setForeground(mine ? ACCENT_GOLD : Color.WHITE);
+        row.add(leftLbl, BorderLayout.WEST);
+
+        JLabel rightLbl = new JLabel(formatBingoNumber(d.points) + " pts");
+        rightLbl.setFont(READABLE_FONT_SMALL);
+        rightLbl.setForeground(new Color(160, 160, 160));
+        row.add(rightLbl, BorderLayout.EAST);
+
+        return row;
+    }
+
+    private String formatBingoNumber(double v)
+    {
+        if (v == Math.rint(v) && !Double.isInfinite(v)) return String.valueOf((long) v);
+        return String.format(java.util.Locale.US, "%.1f", v);
+    }
+
+    /**
+     * Sample bingo card for developer-mode preview: the same 5x5 boss/item board the old dev-preview
+     * used, wrapped into a full BingoCard (event, 4 teams of 3-6 players, scattered per-team
+     * progress, computed standings with rank/gap/lead, rosters, and recent drops) so the WHOLE
+     * team-view UI can be checked in the dev client before the server route exists. Never used for a
+     * Plugin Hub install (buildBingoSection only calls this when developerMode is true).
+     */
+    private PlatformApiService.BingoCard sampleBingoCard()
+    {
+        Object[][] defs = {
+            {"A1", "Vorkath", "Vorkath", 0, 0, 30.0},
+            {"B1", "Zulrah", "Zulrah", 0, 1, 30.0},
+            {"C1", "Kree'arra", "Kree'arra", 0, 2, 30.0},
+            {"D1", "Nex", "Nex", 0, 3, 30.0},
+            {"E1", "Cerberus", "Cerberus", 0, 4, 30.0},
+            {"A2", "The Leviathan", "The Leviathan", 1, 0, 30.0},
+            {"B2", "Vardorvis", "Vardorvis", 1, 1, 30.0},
+            {"C2", "Corporeal Beast", "Corporeal Beast", 1, 2, 30.0},
+            {"D2", "Chambers of Xeric", "Chambers of Xeric", 1, 3, 30.0},
+            {"E2", "Theatre of Blood", "Theatre of Blood", 1, 4, 30.0},
+            {"A3", "Tombs of Amascut", "Tombs of Amascut", 2, 0, 30.0},
+            {"B3", "Phosani's Nightmare", "Phosani's Nightmare", 2, 1, 30.0},
+            {"C3", "Twisted bow", "", 2, 2, 1.0},
+            {"D3", "Dragon warhammer", "", 2, 3, 1.0},
+            {"E3", "Zalcano", "Zalcano", 2, 4, 30.0},
+            {"A4", "Giant Mole", "Giant Mole", 3, 0, 30.0},
+            {"B4", "Kraken", "Kraken", 3, 1, 30.0},
+            {"C4", "Sarachnis", "Sarachnis", 3, 2, 30.0},
+            {"D4", "Skotizo", "Skotizo", 3, 3, 30.0},
+            {"E4", "Vetion", "Vetion", 3, 4, 30.0},
+            {"A5", "King Black Dragon", "King Black Dragon", 4, 0, 30.0},
+            {"B5", "Callisto", "Callisto", 4, 1, 30.0},
+            {"C5", "Venenatis", "Venenatis", 4, 2, 30.0},
+            {"D5", "Artio", "Artio", 4, 3, 30.0},
+            {"E5", "Scorpia", "Scorpia", 4, 4, 30.0},
+        };
+        java.util.List<PlatformApiService.BingoBoardTile> tiles = new java.util.ArrayList<>();
+        for (Object[] d : defs)
+        {
+            String code = (String) d[0];
+            String name = (String) d[1];
+            String icon = (String) d[2];
+            int row = (Integer) d[3];
+            int col = (Integer) d[4];
+            double threshold = (Double) d[5];
+            java.util.List<PlatformApiService.BingoItem> items = new java.util.ArrayList<>();
+            if (icon.isEmpty())
+            {
+                int itemId = "C3".equals(code) ? 20997 : 13576;
+                items.add(new PlatformApiService.BingoItem(name, itemId, 1));
+            }
+            tiles.add(new PlatformApiService.BingoBoardTile(code, name, icon.isEmpty() ? "item" : "boss",
+                row, col, threshold, 0, icon, items));
+        }
+        PlatformApiService.BingoBoard board = new PlatformApiService.BingoBoard(5, 5, tiles);
+
+        java.util.List<PlatformApiService.BingoTeam> teams = new java.util.ArrayList<>();
+        teams.add(new PlatformApiService.BingoTeam("teamA", "Red Chinchompas", "#E53935",
+            java.util.Arrays.asList("Woody Code", "Alice", "Bob", "Carol")));
+        teams.add(new PlatformApiService.BingoTeam("teamB", "Blue Dragons", "#1E88E5",
+            java.util.Arrays.asList("Dave", "Erin", "Frank", "Grace", "Hank")));
+        teams.add(new PlatformApiService.BingoTeam("teamC", "Green Goblins", "#43A047",
+            java.util.Arrays.asList("Ivy", "Jack", "Kim")));
+        teams.add(new PlatformApiService.BingoTeam("teamD", "Purple Pengs", "#8E24AA",
+            java.util.Arrays.asList("Liam", "Mona", "Noah", "Opal", "Priya", "Quinn")));
+
+        java.util.Map<String, java.util.Map<String, PlatformApiService.BingoTileProgress>> progress = new java.util.HashMap<>();
+        progress.put("teamA", sampleBingoProgress(tiles,
+            new double[]{30, 15, 7.5, 0, 22.5, 29.7, 30, 12, 9, 18, 21, 6, 0, 1, 4.5, 27, 13.5, 1.5, 24, 10.5, 16.5, 19.5, 25.5, 28.5, 15},
+            "Woody Code"));
+        progress.put("teamB", sampleBingoProgress(tiles,
+            new double[]{30, 30, 20, 10, 0, 15, 30, 25, 5, 0, 30, 10, 1, 0, 15, 20, 0, 30, 5, 10, 0, 25, 15, 30, 5},
+            "Dave"));
+        progress.put("teamC", sampleBingoProgress(tiles,
+            new double[]{10, 5, 0, 0, 0, 5, 10, 0, 0, 0, 5, 0, 0, 0, 0, 10, 5, 0, 0, 0, 5, 0, 0, 0, 0},
+            "Ivy"));
+        progress.put("teamD", sampleBingoProgress(tiles,
+            new double[]{20, 10, 5, 0, 0, 15, 20, 10, 0, 5, 10, 0, 0, 0, 10, 15, 5, 0, 10, 0, 5, 10, 0, 15, 0},
+            "Liam"));
+
+        java.util.List<PlatformApiService.BingoStanding> unranked = new java.util.ArrayList<>();
+        for (PlatformApiService.BingoTeam t : teams)
+        {
+            java.util.Map<String, PlatformApiService.BingoTileProgress> p = progress.get(t.teamId);
+            double points = 0;
+            int complete = 0;
+            for (PlatformApiService.BingoTileProgress tp : p.values())
+            {
+                points += tp.points;
+                if (tp.complete) complete++;
+            }
+            java.util.List<PlatformApiService.BingoRosterEntry> roster = new java.util.ArrayList<>();
+            for (int i = 0; i < t.members.size(); i++)
+            {
+                double share = points / Math.max(1, t.members.size()) * (1 + i * 0.15);
+                roster.add(new PlatformApiService.BingoRosterEntry(t.members.get(i), Math.round(share * 10) / 10.0, 2 + i));
+            }
+            java.util.List<PlatformApiService.BingoDrop> recent = new java.util.ArrayList<>();
+            int n = 0;
+            for (PlatformApiService.BingoBoardTile tile : tiles)
+            {
+                PlatformApiService.BingoTileProgress tp = p.get(tile.code);
+                if (tp != null && tp.points > 0 && n < 4)
+                {
+                    recent.add(new PlatformApiService.BingoDrop(t.members.get(n % t.members.size()), tile.name, tile.code,
+                        tp.points, "2026-09-1" + (n + 1) + "T12:00:00Z"));
+                    n++;
+                }
+            }
+            unranked.add(new PlatformApiService.BingoStanding(t.teamId, t.name, t.color, 0, points, complete, null, null, roster, recent));
+        }
+        unranked.sort((a, b) -> Double.compare(b.points, a.points));
+
+        java.util.List<PlatformApiService.BingoStanding> standings = new java.util.ArrayList<>();
+        for (int i = 0; i < unranked.size(); i++)
+        {
+            PlatformApiService.BingoStanding s = unranked.get(i);
+            PlatformApiService.BingoGap gapAbove = i > 0
+                ? new PlatformApiService.BingoGap(unranked.get(i - 1).points - s.points, 0) : null;
+            PlatformApiService.BingoGap leadBelow = i < unranked.size() - 1
+                ? new PlatformApiService.BingoGap(s.points - unranked.get(i + 1).points, 0) : null;
+            standings.add(new PlatformApiService.BingoStanding(s.teamId, s.name, s.color, i + 1, s.points,
+                s.tilesComplete, gapAbove, leadBelow, s.roster, s.recentDrops));
+        }
+
+        PlatformApiService.BingoEvent event = new PlatformApiService.BingoEvent("sample-event", "Autumn Bingo (sample)",
+            "active", "2026-09-01T00:00:00Z", "2026-09-30T00:00:00Z", "most_points", null);
+        return new PlatformApiService.BingoCard(event, board, teams, standings, progress, new java.util.ArrayList<>());
+    }
+
+    private java.util.Map<String, PlatformApiService.BingoTileProgress> sampleBingoProgress(
+        java.util.List<PlatformApiService.BingoBoardTile> tiles, double[] points, String contributor)
+    {
+        java.util.Map<String, PlatformApiService.BingoTileProgress> map = new java.util.HashMap<>();
+        for (int i = 0; i < tiles.size() && i < points.length; i++)
+        {
+            PlatformApiService.BingoBoardTile t = tiles.get(i);
+            double pts = points[i];
+            boolean complete = t.threshold > 0 && pts >= t.threshold;
+            java.util.List<PlatformApiService.BingoDrop> drops = new java.util.ArrayList<>();
+            if (pts > 0) drops.add(new PlatformApiService.BingoDrop(contributor, t.name, t.code, pts, "2026-09-05T18:00:00Z"));
+            map.put(t.code, new PlatformApiService.BingoTileProgress(pts, complete, drops));
+        }
+        return map;
+    }
+
+    // ══════════════════════════════════════════
 
     private boolean raidRaceTeamExists(PlatformApiService.ClogRace race, String teamId)
     {

@@ -1585,6 +1585,422 @@ public class PlatformApiService
         }
     }
 
+    // ══════════════════════════════════════════
+    // Bingo (team boards, /clans/:slug/bingo/current and /players/:rsn)
+    // ══════════════════════════════════════════
+
+    /** Bingo event header. winCondition is "most_points" or "first_to_complete"; null on older servers. */
+    public static class BingoEvent
+    {
+        public final String id;
+        public final String name;
+        public final String status;
+        public final String startTime;
+        public final String endTime;
+        public final String winCondition;
+        public final String winnerTeamId;
+        public BingoEvent(String id, String name, String status, String startTime, String endTime,
+                           String winCondition, String winnerTeamId)
+        {
+            this.id = id; this.name = name; this.status = status;
+            this.startTime = startTime; this.endTime = endTime;
+            this.winCondition = winCondition; this.winnerTeamId = winnerTeamId;
+        }
+    }
+
+    /** One item that counts toward a tile (contract's items[]; onlyFrom/note are server-enforced and
+     *  not needed for display, so they are deliberately not carried into the client model). */
+    public static class BingoItem
+    {
+        public final String itemName;
+        public final int itemId;
+        public final double points;
+        public BingoItem(String itemName, int itemId, double points)
+        { this.itemName = itemName; this.itemId = itemId; this.points = points; }
+    }
+
+    /** One board tile definition (static: no progress). kind is free-form ("boss", "skill", "item", ...);
+     *  the client does not branch on it, only on whether an icon resolves to a boss sprite or an item. */
+    public static class BingoBoardTile
+    {
+        public final String code;
+        public final String name;
+        public final String kind;
+        public final int row;
+        public final int col;
+        public final double threshold;
+        public final double max;
+        public final String icon; // boss name, item name, item id (as text), or empty -> first item
+        public final List<BingoItem> items;
+        public BingoBoardTile(String code, String name, String kind, int row, int col, double threshold,
+                              double max, String icon, List<BingoItem> items)
+        {
+            this.code = code; this.name = name; this.kind = kind; this.row = row; this.col = col;
+            this.threshold = threshold; this.max = max; this.icon = icon; this.items = items;
+        }
+    }
+
+    public static class BingoBoard
+    {
+        public final int rows;
+        public final int cols;
+        public final List<BingoBoardTile> tiles;
+        public BingoBoard(int rows, int cols, List<BingoBoardTile> tiles)
+        { this.rows = rows; this.cols = cols; this.tiles = tiles; }
+    }
+
+    public static class BingoTeam
+    {
+        public final String teamId;
+        public final String name;
+        public final String color; // #RRGGBB
+        public final List<String> members;
+        public BingoTeam(String teamId, String name, String color, List<String> members)
+        { this.teamId = teamId; this.name = name; this.color = color; this.members = members; }
+    }
+
+    /** One counted drop, wherever it is shown: a tile's contributing drops, a team's recent drops, or
+     *  a player's drill-in. tileCode is null for a player-drill-in drop that has no tile context.
+     *  Deliberately carries NO proof/URL field: the server may include one, but the plugin never
+     *  parses or shows any server-supplied URL (Plugin Hub SSRF/link-opening concern). The website
+     *  keeps proof links; this is plugin-only. */
+    public static class BingoDrop
+    {
+        public final String rsn;
+        public final String item;
+        public final String tileCode;
+        public final double points;
+        public final String droppedAt;
+        public BingoDrop(String rsn, String item, String tileCode, double points, String droppedAt)
+        {
+            this.rsn = rsn; this.item = item; this.tileCode = tileCode;
+            this.points = points; this.droppedAt = droppedAt;
+        }
+    }
+
+    public static class BingoTileProgress
+    {
+        public final double points;
+        public final boolean complete;
+        public final List<BingoDrop> drops;
+        public BingoTileProgress(double points, boolean complete, List<BingoDrop> drops)
+        { this.points = points; this.complete = complete; this.drops = drops; }
+    }
+
+    public static class BingoGap
+    {
+        public final double points;
+        public final double tiles;
+        public BingoGap(double points, double tiles) { this.points = points; this.tiles = tiles; }
+    }
+
+    public static class BingoRosterEntry
+    {
+        public final String rsn;
+        public final double points;
+        public final int dropCount;
+        public BingoRosterEntry(String rsn, double points, int dropCount)
+        { this.rsn = rsn; this.points = points; this.dropCount = dropCount; }
+    }
+
+    /** One team's standing, including the A4-additions team-view fields (rank/gap/roster/recentDrops). */
+    public static class BingoStanding
+    {
+        public final String teamId;
+        public final String name;
+        public final String color;
+        public final int rank;
+        public final double points;
+        public final int tilesComplete;
+        public final BingoGap gapToAbove;    // null when rank 1 (or unknown)
+        public final BingoGap leadOverBelow; // null when last place (or unknown)
+        public final List<BingoRosterEntry> roster;
+        public final List<BingoDrop> recentDrops;
+        public BingoStanding(String teamId, String name, String color, int rank, double points, int tilesComplete,
+                              BingoGap gapToAbove, BingoGap leadOverBelow, List<BingoRosterEntry> roster,
+                              List<BingoDrop> recentDrops)
+        {
+            this.teamId = teamId; this.name = name; this.color = color; this.rank = rank;
+            this.points = points; this.tilesComplete = tilesComplete;
+            this.gapToAbove = gapToAbove; this.leadOverBelow = leadOverBelow;
+            this.roster = roster; this.recentDrops = recentDrops;
+        }
+    }
+
+    /** description is null/empty until release (server hides it, per the contract); released/claimed
+     *  are always safe to show. */
+    public static class BingoBounty
+    {
+        public final String id;
+        public final String title;
+        public final String description;
+        public final String releaseAt;
+        public final boolean released;
+        public final boolean claimed;
+        public final String claimedByTeamId;
+        public BingoBounty(String id, String title, String description, String releaseAt, boolean released,
+                            boolean claimed, String claimedByTeamId)
+        {
+            this.id = id; this.title = title; this.description = description; this.releaseAt = releaseAt;
+            this.released = released; this.claimed = claimed; this.claimedByTeamId = claimedByTeamId;
+        }
+    }
+
+    /** The full current-bingo snapshot for the Events tab. event == null means no card should show
+     *  at all (matches the contract's { "event": null } shape for "nothing running"). */
+    public static class BingoCard
+    {
+        public final BingoEvent event;
+        public final BingoBoard board;
+        public final List<BingoTeam> teams;
+        public final List<BingoStanding> standings;
+        public final Map<String, Map<String, BingoTileProgress>> progress; // teamId -> tileCode -> progress
+        public final List<BingoBounty> bounties;
+        public BingoCard(BingoEvent event, BingoBoard board, List<BingoTeam> teams, List<BingoStanding> standings,
+                          Map<String, Map<String, BingoTileProgress>> progress, List<BingoBounty> bounties)
+        {
+            this.event = event; this.board = board; this.teams = teams;
+            this.standings = standings; this.progress = progress; this.bounties = bounties;
+        }
+    }
+
+    public static class BingoPlayerTile
+    {
+        public final String code;
+        public final double points;
+        public BingoPlayerTile(String code, double points) { this.code = code; this.points = points; }
+    }
+
+    /** The player drill-in shape from GET .../bingo/:id/players/:rsn. */
+    public static class BingoPlayer
+    {
+        public final String rsn;
+        public final String teamId;
+        public final double points;
+        public final List<BingoPlayerTile> tiles;
+        public final List<BingoDrop> drops;
+        public BingoPlayer(String rsn, String teamId, double points, List<BingoPlayerTile> tiles, List<BingoDrop> drops)
+        {
+            this.rsn = rsn; this.teamId = teamId; this.points = points; this.tiles = tiles; this.drops = drops;
+        }
+    }
+
+    private static double jsonNum(JsonObject o, String key)
+    {
+        return o.has(key) && !o.get(key).isJsonNull() ? o.get(key).getAsDouble() : 0;
+    }
+
+    private static List<BingoItem> parseBingoItems(JsonObject o)
+    {
+        List<BingoItem> items = new ArrayList<>();
+        if (o.has("items") && o.get("items").isJsonArray())
+        {
+            for (JsonElement el : o.getAsJsonArray("items"))
+            {
+                if (!el.isJsonObject()) continue;
+                JsonObject i = el.getAsJsonObject();
+                items.add(new BingoItem(jsonStr(i, "itemName"),
+                    i.has("itemId") && !i.get("itemId").isJsonNull() ? i.get("itemId").getAsInt() : 0,
+                    jsonNum(i, "points")));
+            }
+        }
+        return items;
+    }
+
+    private static List<BingoDrop> parseBingoDrops(JsonObject o, String key)
+    {
+        List<BingoDrop> drops = new ArrayList<>();
+        if (o.has(key) && o.get(key).isJsonArray())
+        {
+            for (JsonElement el : o.getAsJsonArray(key))
+            {
+                if (!el.isJsonObject()) continue;
+                JsonObject d = el.getAsJsonObject();
+                drops.add(new BingoDrop(jsonStr(d, "rsn"), jsonStr(d, "item"), jsonStr(d, "tileCode"),
+                    jsonNum(d, "points"), jsonStr(d, "droppedAt")));
+            }
+        }
+        return drops;
+    }
+
+    private static BingoGap parseBingoGap(JsonObject o, String key)
+    {
+        if (!o.has(key) || !o.get(key).isJsonObject()) return null;
+        JsonObject g = o.getAsJsonObject(key);
+        return new BingoGap(jsonNum(g, "points"), jsonNum(g, "tiles"));
+    }
+
+    /**
+     * Pure parse of the /bingo/current (or /bingo/:id) response shape into {@link BingoCard}. Every
+     * field is optional and every list defaults to empty, so a partial or evolving server payload
+     * never throws; a missing/null "event" simply yields event == null (no card shown). No network
+     * or game-state access, so this is directly JUnit-testable with a hand-built JsonObject.
+     */
+    public static BingoCard parseBingoCard(JsonObject root)
+    {
+        if (root == null) return null;
+        try
+        {
+            BingoEvent event = null;
+            if (root.has("event") && root.get("event").isJsonObject())
+            {
+                JsonObject e = root.getAsJsonObject("event");
+                event = new BingoEvent(jsonStr(e, "id"), jsonStr(e, "name"), jsonStr(e, "status"),
+                    jsonStr(e, "startTime"), jsonStr(e, "endTime"), jsonStr(e, "winCondition"),
+                    jsonStr(e, "winnerTeamId"));
+            }
+
+            BingoBoard board = new BingoBoard(0, 0, new ArrayList<>());
+            if (root.has("board") && root.get("board").isJsonObject())
+            {
+                JsonObject b = root.getAsJsonObject("board");
+                int rows = b.has("rows") && !b.get("rows").isJsonNull() ? b.get("rows").getAsInt() : 0;
+                int cols = b.has("cols") && !b.get("cols").isJsonNull() ? b.get("cols").getAsInt() : 0;
+                List<BingoBoardTile> tiles = new ArrayList<>();
+                if (b.has("tiles") && b.get("tiles").isJsonArray())
+                {
+                    for (JsonElement el : b.getAsJsonArray("tiles"))
+                    {
+                        if (!el.isJsonObject()) continue;
+                        JsonObject t = el.getAsJsonObject();
+                        tiles.add(new BingoBoardTile(jsonStr(t, "code"), jsonStr(t, "name"), jsonStr(t, "kind"),
+                            t.has("row") && !t.get("row").isJsonNull() ? t.get("row").getAsInt() : 0,
+                            t.has("col") && !t.get("col").isJsonNull() ? t.get("col").getAsInt() : 0,
+                            jsonNum(t, "threshold"), jsonNum(t, "max"), jsonStr(t, "icon"), parseBingoItems(t)));
+                    }
+                }
+                board = new BingoBoard(rows, cols, tiles);
+            }
+
+            List<BingoTeam> teams = new ArrayList<>();
+            if (root.has("teams") && root.get("teams").isJsonArray())
+            {
+                for (JsonElement el : root.getAsJsonArray("teams"))
+                {
+                    if (!el.isJsonObject()) continue;
+                    JsonObject o = el.getAsJsonObject();
+                    List<String> members = new ArrayList<>();
+                    if (o.has("members") && o.get("members").isJsonArray())
+                        for (JsonElement m : o.getAsJsonArray("members"))
+                            if (!m.isJsonNull()) members.add(m.getAsString());
+                    teams.add(new BingoTeam(jsonStr(o, "teamId"), jsonStr(o, "name"), jsonStr(o, "color"), members));
+                }
+            }
+
+            List<BingoStanding> standings = new ArrayList<>();
+            if (root.has("standings") && root.get("standings").isJsonArray())
+            {
+                for (JsonElement el : root.getAsJsonArray("standings"))
+                {
+                    if (!el.isJsonObject()) continue;
+                    JsonObject o = el.getAsJsonObject();
+                    List<BingoRosterEntry> roster = new ArrayList<>();
+                    if (o.has("roster") && o.get("roster").isJsonArray())
+                    {
+                        for (JsonElement r : o.getAsJsonArray("roster"))
+                        {
+                            if (!r.isJsonObject()) continue;
+                            JsonObject ro = r.getAsJsonObject();
+                            roster.add(new BingoRosterEntry(jsonStr(ro, "rsn"), jsonNum(ro, "points"),
+                                ro.has("dropCount") && !ro.get("dropCount").isJsonNull() ? ro.get("dropCount").getAsInt() : 0));
+                        }
+                    }
+                    standings.add(new BingoStanding(jsonStr(o, "teamId"), jsonStr(o, "name"), jsonStr(o, "color"),
+                        o.has("rank") && !o.get("rank").isJsonNull() ? o.get("rank").getAsInt() : 0,
+                        jsonNum(o, "points"),
+                        o.has("tilesComplete") && !o.get("tilesComplete").isJsonNull() ? o.get("tilesComplete").getAsInt() : 0,
+                        parseBingoGap(o, "gapToAbove"), parseBingoGap(o, "leadOverBelow"),
+                        roster, parseBingoDrops(o, "recentDrops")));
+                }
+            }
+
+            Map<String, Map<String, BingoTileProgress>> progress = new HashMap<>();
+            if (root.has("progress") && root.get("progress").isJsonObject())
+            {
+                JsonObject p = root.getAsJsonObject("progress");
+                for (Map.Entry<String, JsonElement> teamEntry : p.entrySet())
+                {
+                    if (!teamEntry.getValue().isJsonObject()) continue;
+                    Map<String, BingoTileProgress> byTile = new HashMap<>();
+                    for (Map.Entry<String, JsonElement> tileEntry : teamEntry.getValue().getAsJsonObject().entrySet())
+                    {
+                        if (!tileEntry.getValue().isJsonObject()) continue;
+                        JsonObject o = tileEntry.getValue().getAsJsonObject();
+                        boolean complete = o.has("complete") && !o.get("complete").isJsonNull() && o.get("complete").getAsBoolean();
+                        byTile.put(tileEntry.getKey(), new BingoTileProgress(jsonNum(o, "points"), complete, parseBingoDrops(o, "drops")));
+                    }
+                    progress.put(teamEntry.getKey(), byTile);
+                }
+            }
+
+            List<BingoBounty> bounties = new ArrayList<>();
+            if (root.has("bounties") && root.get("bounties").isJsonArray())
+            {
+                for (JsonElement el : root.getAsJsonArray("bounties"))
+                {
+                    if (!el.isJsonObject()) continue;
+                    JsonObject o = el.getAsJsonObject();
+                    boolean released = o.has("released") && !o.get("released").isJsonNull() && o.get("released").getAsBoolean();
+                    boolean claimed = o.has("claimed") && !o.get("claimed").isJsonNull() && o.get("claimed").getAsBoolean();
+                    bounties.add(new BingoBounty(jsonStr(o, "id"), jsonStr(o, "title"), jsonStr(o, "description"),
+                        jsonStr(o, "releaseAt"), released, claimed, jsonStr(o, "claimedByTeamId")));
+                }
+            }
+
+            return new BingoCard(event, board, teams, standings, progress, bounties);
+        }
+        catch (Exception ex)
+        {
+            log.debug("parse bingo card failed: {}", ex.getMessage());
+            return null;
+        }
+    }
+
+    /** Fetch the clan's current bingo event (or the most recently ended one within the server's
+     *  window). Returns null when there is no event data at all (404) or on any request/parse failure;
+     *  a successful { "event": null } response instead returns a BingoCard whose event is null. */
+    public BingoCard fetchBingo(String baseUrl, String apiKey, String clanSlug)
+    {
+        return parseBingoCard(getSync(baseUrl + "/clans/" + clanSlug + "/bingo/current", apiKey));
+    }
+
+    /**
+     * Pure parse of the player drill-in shape (GET .../bingo/:id/players/:rsn). Every field optional;
+     * never throws.
+     */
+    public static BingoPlayer parseBingoPlayer(JsonObject root)
+    {
+        if (root == null) return null;
+        try
+        {
+            List<BingoPlayerTile> tiles = new ArrayList<>();
+            if (root.has("tiles") && root.get("tiles").isJsonArray())
+            {
+                for (JsonElement el : root.getAsJsonArray("tiles"))
+                {
+                    if (!el.isJsonObject()) continue;
+                    JsonObject o = el.getAsJsonObject();
+                    tiles.add(new BingoPlayerTile(jsonStr(o, "code"), jsonNum(o, "points")));
+                }
+            }
+            return new BingoPlayer(jsonStr(root, "rsn"), jsonStr(root, "teamId"), jsonNum(root, "points"),
+                tiles, parseBingoDrops(root, "drops"));
+        }
+        catch (Exception ex)
+        {
+            log.debug("parse bingo player failed: {}", ex.getMessage());
+            return null;
+        }
+    }
+
+    /** Fetch one player's bingo contributions (drops, points per tile) for the roster drill-in.
+     *  Returns null on 404 (no such event/player) or any request/parse failure. */
+    public BingoPlayer fetchBingoPlayer(String baseUrl, String apiKey, String clanSlug, String eventId, String rsn)
+    {
+        String url = baseUrl + "/clans/" + clanSlug + "/bingo/" + encodePath(eventId) + "/players/" + encodePath(rsn);
+        return parseBingoPlayer(getSync(url, apiKey));
+    }
+
     /** One row in the unified Events Center schedule (any event type). */
     public static class ScheduleEntry
     {

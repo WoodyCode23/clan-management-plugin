@@ -796,6 +796,18 @@ public class ClanManagementPlugin extends Plugin
             startRaidRacePoll();
         });
 
+        // Bingo roster drill-in: fetch one player's contributions (points per tile, drops) on demand
+        // when their roster row is clicked. No local-player-name read needed here.
+        panel.setOnLoadBingoPlayer((eventId, rsn) ->
+        {
+            if (!isPlatformConfigured() || eventId == null || rsn == null) return;
+            executor.submit(() ->
+            {
+                PlatformApiService.BingoPlayer p = platformApiService.fetchBingoPlayer(
+                    getPlatformUrl(), getPlatformKey(), getPlatformSlug(), eventId, rsn);
+                panel.setBingoPlayerDrillIn(rsn, p);
+            });
+        });
         panel.setOnLoadRanks(this::loadRanksWithMode);
         // Lazily fetch one event's signups when its card is expanded, then push them back to the panel.
         panel.setOnFetchEventSignups(eventId ->
@@ -3696,6 +3708,7 @@ public class ClanManagementPlugin extends Plugin
         if (!isPlatformConfigured())
         {
             panel.updateRaidRace(null);
+            panel.updateBingo(null, null);
             return;
         }
         try
@@ -3709,6 +3722,33 @@ public class ClanManagementPlugin extends Plugin
         {
             log.debug("raid race load failed", ex);
             panel.updateRaidRace(null);
+        }
+        fetchBingo();
+    }
+
+    /** Runs on the executor (off EDT), same cadence as fetchRaidRace above. The logged-in player's
+     *  name is read ON THE CLIENT THREAD (never from this background thread) and only then handed to
+     *  the panel, which needs it purely for "your own team" / "your own drops" matching. */
+    private void fetchBingo()
+    {
+        if (!isPlatformConfigured())
+        {
+            panel.updateBingo(null, null);
+            return;
+        }
+        try
+        {
+            PlatformApiService.BingoCard card = platformApiService.fetchBingo(getPlatformUrl(), getPlatformKey(), getPlatformSlug());
+            clientThread.invokeLater(() ->
+            {
+                String localName = client.getLocalPlayer() != null ? client.getLocalPlayer().getName() : null;
+                panel.updateBingo(card, localName);
+            });
+        }
+        catch (Exception ex)
+        {
+            log.debug("bingo load failed", ex);
+            panel.updateBingo(null, null);
         }
     }
 
