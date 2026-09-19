@@ -42,13 +42,16 @@ public class PlatformApiServiceBingoTest
 
     @Test public void fullShapeParsesEveryField()
     {
-        // Real route shape (src/routes/bingo.ts loadFullBingoEvent): winRule lives nested at
-        // event.settings.winRule (not a top-level winCondition); teams[] carries the rich per-team
-        // fields (members + points/tilesComplete/rank/gapToAbove/leadOverBelow/roster/recentDrops)
-        // together; standings[] is the plain leaderboard (teamId/name/color/points/tilesComplete/
-        // rank only - no gap/roster/recentDrops); a progress[team][tile].drops entry has no tileCode
-        // key of its own (it's implied by the outer tile-code key); bounties never send "released"/
-        // "claimed" booleans, only description (null pre-release) and claimedTeamId (null = unclaimed).
+        // Real route shape (src/routes/bingo.ts loadFullBingoEvent): event.settings is whitelisted
+        // down to { rows, cols, teamSize, hasDraft } for a public/full-detail read - no winRule, so
+        // this payload includes one anyway (as a real server response predating a settings change
+        // never would, but a stale/future field must still be silently ignored) to prove parsing
+        // never reads or stores it; teams[] carries the rich per-team fields (members + points/
+        // tilesComplete/rank/gapToAbove/leadOverBelow/roster/recentDrops) together; standings[] is
+        // the plain leaderboard (teamId/name/color/points/tilesComplete/rank only - no gap/roster/
+        // recentDrops); a progress[team][tile].drops entry has no tileCode key of its own (it's
+        // implied by the outer tile-code key); bounties never send "released"/"claimed" booleans,
+        // only description (null pre-release) and claimedTeamId (null = unclaimed).
         String payload = "{"
             + "\"event\":{\"id\":\"ev1\",\"name\":\"Autumn Bingo\",\"status\":\"active\","
             + "  \"startTime\":\"2026-09-01T00:00:00Z\",\"endTime\":\"2026-09-15T00:00:00Z\","
@@ -78,7 +81,6 @@ public class PlatformApiServiceBingoTest
         assertNotNull(card);
         assertEquals("ev1", card.event.id);
         assertEquals("active", card.event.status);
-        assertEquals("points", card.event.winRule);
         assertEquals(2, card.board.rows);
         assertEquals(2, card.board.tiles.size());
         assertEquals("Zulrah", card.board.tiles.get(0).icon);

@@ -1589,8 +1589,10 @@ public class PlatformApiService
     // Bingo (team boards, /clans/:slug/bingo/current and /players/:rsn)
     // ══════════════════════════════════════════
 
-    /** Bingo event header. winRule is "points" or "all_tiles" (read from the real API's nested
-     *  event.settings.winRule; null when settings is missing/older). */
+    /** Bingo event header. No win-rule field: the API's public settings whitelist is exactly
+     *  { rows, cols, teamSize, hasDraft } (GET .../current, .../:id) - winRule is never returned
+     *  to the client. The rule is fixed anyway (most points at end time; completing every tile ends
+     *  the event early), so there is nothing to read or show here. */
     public static class BingoEvent
     {
         public final String id;
@@ -1598,14 +1600,13 @@ public class PlatformApiService
         public final String status;
         public final String startTime;
         public final String endTime;
-        public final String winRule;
         public final String winnerTeamId;
         public BingoEvent(String id, String name, String status, String startTime, String endTime,
-                           String winRule, String winnerTeamId)
+                           String winnerTeamId)
         {
             this.id = id; this.name = name; this.status = status;
             this.startTime = startTime; this.endTime = endTime;
-            this.winRule = winRule; this.winnerTeamId = winnerTeamId;
+            this.winnerTeamId = winnerTeamId;
         }
     }
 
@@ -1869,15 +1870,11 @@ public class PlatformApiService
             if (root.has("event") && root.get("event").isJsonObject())
             {
                 JsonObject e = root.getAsJsonObject("event");
-                // winRule lives nested at event.settings.winRule ("points" | "all_tiles"), not as a
-                // top-level field - the real API has no top-level winCondition/winRule.
-                String winRule = null;
-                if (e.has("settings") && e.get("settings").isJsonObject())
-                {
-                    winRule = jsonStr(e.getAsJsonObject("settings"), "winRule");
-                }
+                // No winRule here: the public settings whitelist (event.settings on this same
+                // payload) is exactly { rows, cols, teamSize, hasDraft } - winRule never leaves the
+                // server. See BingoEvent's doc comment.
                 event = new BingoEvent(jsonStr(e, "id"), jsonStr(e, "name"), jsonStr(e, "status"),
-                    jsonStr(e, "startTime"), jsonStr(e, "endTime"), winRule,
+                    jsonStr(e, "startTime"), jsonStr(e, "endTime"),
                     jsonStr(e, "winnerTeamId"));
             }
 

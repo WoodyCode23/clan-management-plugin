@@ -3846,7 +3846,7 @@ public class ClanPanel extends PluginPanel
         }
 
         PlatformApiService.BingoEvent event = new PlatformApiService.BingoEvent("sample-event", "Autumn Bingo (sample)",
-            "active", "2026-09-01T00:00:00Z", "2026-09-30T00:00:00Z", "points", null);
+            "active", "2026-09-01T00:00:00Z", "2026-09-30T00:00:00Z", null);
         return new PlatformApiService.BingoCard(event, board, teams, standings, progress, new java.util.ArrayList<>());
     }
 
