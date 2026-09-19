@@ -3232,7 +3232,7 @@ public class ClanPanel extends PluginPanel
             outer.add(Box.createVerticalStrut(6));
             outer.add(bingoBoardSection(card, selectedBingoTeamId));
             outer.add(Box.createVerticalStrut(8));
-            outer.add(bingoRosterPanel(card, selectedBingoTeamId));
+            outer.add(bingoRosterPanel(card, selectedBingoTeamId, sample));
             outer.add(Box.createVerticalStrut(8));
             outer.add(bingoRecentDropsPanel(card, selectedBingoTeamId));
         }
@@ -3496,7 +3496,7 @@ public class ClanPanel extends PluginPanel
     }
 
     /** Roster: click a player to open/close their contributions (fetched via onLoadBingoPlayer). */
-    private JPanel bingoRosterPanel(PlatformApiService.BingoCard card, String teamId)
+    private JPanel bingoRosterPanel(PlatformApiService.BingoCard card, String teamId, boolean sample)
     {
         JPanel panel = new JPanel();
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
@@ -3516,7 +3516,7 @@ public class ClanPanel extends PluginPanel
         String eventId = card.event != null ? card.event.id : null;
         for (PlatformApiService.BingoRosterEntry r : roster)
         {
-            panel.add(bingoRosterRow(eventId, r));
+            panel.add(bingoRosterRow(card, teamId, eventId, r, sample));
             panel.add(Box.createVerticalStrut(2));
             if (r.rsn != null && r.rsn.equals(expandedBingoRosterRsn))
             {
@@ -3527,7 +3527,8 @@ public class ClanPanel extends PluginPanel
         return panel;
     }
 
-    private JPanel bingoRosterRow(String eventId, PlatformApiService.BingoRosterEntry r)
+    private JPanel bingoRosterRow(PlatformApiService.BingoCard card, String teamId, String eventId,
+        PlatformApiService.BingoRosterEntry r, boolean sample)
     {
         boolean mine = BingoTeamView.isSamePlayer(r.rsn, localPlayerNameForBingo);
         JPanel row = new JPanel(new BorderLayout());
@@ -3555,13 +3556,53 @@ public class ClanPanel extends PluginPanel
             expandedBingoRosterRsn = wasOpen ? null : rsn;
             if (!wasOpen)
             {
-                bingoPlayerDrillIn = null;
-                bingoPlayerDrillInLoading = true;
-                if (onLoadBingoPlayer != null && eventId != null) onLoadBingoPlayer.accept(eventId, rsn);
+                if (sample)
+                {
+                    // Dev preview: build the drill-in straight from the sample card's own progress
+                    // data (no network round trip), so it never gets stuck on a fetch that will
+                    // never fire because the plugin isn't configured against a real clan.
+                    bingoPlayerDrillIn = sampleBingoPlayerDrillIn(card, teamId, rsn);
+                    bingoPlayerDrillInLoading = false;
+                }
+                else
+                {
+                    bingoPlayerDrillIn = null;
+                    bingoPlayerDrillInLoading = true;
+                    if (onLoadBingoPlayer != null && eventId != null) onLoadBingoPlayer.accept(eventId, rsn);
+                }
             }
             updateRaidRace(currentRaidRace);
         });
         return row;
+    }
+
+    /** Builds a BingoPlayer drill-in for the sample card by scanning that team's already-rendered
+     *  progress for drops attributed to this rsn (mirrors what a real fetchBingoPlayer would return). */
+    private PlatformApiService.BingoPlayer sampleBingoPlayerDrillIn(PlatformApiService.BingoCard card, String teamId, String rsn)
+    {
+        java.util.Map<String, PlatformApiService.BingoTileProgress> byTile =
+            card.progress != null ? card.progress.get(teamId) : null;
+        java.util.List<PlatformApiService.BingoPlayerTile> tiles = new java.util.ArrayList<>();
+        java.util.List<PlatformApiService.BingoDrop> drops = new java.util.ArrayList<>();
+        double total = 0;
+        if (byTile != null)
+        {
+            for (java.util.Map.Entry<String, PlatformApiService.BingoTileProgress> e : byTile.entrySet())
+            {
+                PlatformApiService.BingoTileProgress tp = e.getValue();
+                if (tp == null || tp.drops == null) continue;
+                for (PlatformApiService.BingoDrop d : tp.drops)
+                {
+                    if (rsn.equals(d.rsn))
+                    {
+                        tiles.add(new PlatformApiService.BingoPlayerTile(e.getKey(), tp.points));
+                        drops.add(d);
+                        total += d.points;
+                    }
+                }
+            }
+        }
+        return new PlatformApiService.BingoPlayer(rsn, teamId, total, tiles, drops);
     }
 
     /** One player's drill-in: points per tile, then their counted drops (who/what/tile/points/when;
