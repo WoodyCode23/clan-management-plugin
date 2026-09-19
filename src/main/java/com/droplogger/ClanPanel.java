@@ -110,6 +110,9 @@ public class ClanPanel extends PluginPanel
     private boolean ranksActive = false;
     private java.util.function.Consumer<Object[]> onRequestRank; // {rankName, eligible(Boolean), missing(List)}
     private SpriteManager spriteManager; // in-game clan-rank icon sprites
+    // Gates the bingo-board dev preview card at the top of the Events tab; false (the default) for
+    // every Plugin Hub install, true only in a RuneLite dev-mode client.
+    private boolean developerMode = false;
 
     // ── Raid Race tab (clog-race board/standings/countdown) ──
     private final JPanel raidRaceContent = new ScrollableColumn();
@@ -1340,6 +1343,7 @@ public class ClanPanel extends PluginPanel
 
     public void setItemManager(ItemManager im) { this.itemManager = im; }
     public void setSpriteManager(SpriteManager sm) { this.spriteManager = sm; }
+    public void setDeveloperMode(boolean dev) { this.developerMode = dev; }
 
     /** Admin reference: render every clan-rank icon sprite with its ID so the right ones can be mapped. */
     private void showRankIconReference()
@@ -3003,6 +3007,15 @@ public class ClanPanel extends PluginPanel
             currentRaidRace = race;
             raidRaceContent.removeAll();
 
+            // Dev-mode-only bingo board preview: sits above everything else in the tab. This is
+            // re-added every rebuild (updateRaidRace wipes raidRaceContent above) rather than added
+            // once, since removeAll() would otherwise drop it along with the rest of the tab.
+            if (developerMode)
+            {
+                raidRaceContent.add(bingoBoardPreviewCard());
+                raidRaceContent.add(Box.createVerticalStrut(12));
+            }
+
             // The unified event schedule sits at the top of the Events tab, above the live clog
             // race detail, and shows even when no clog race is running.
             if (currentSchedule != null)
@@ -3113,6 +3126,69 @@ public class ClanPanel extends PluginPanel
             raidRaceContent.revalidate();
             raidRaceContent.repaint();
         });
+    }
+
+    // ══════════════════════════════════════════
+    // Bingo board (dev-mode-only preview, sample data)
+    // ══════════════════════════════════════════
+
+    /** "Bingo board (dev preview)" card: a BingoBoardPanel fed with sample data, so the renderer
+     *  can be reviewed before the server has any real bingo board to send. Only ever built when
+     *  developerMode is true (see updateRaidRace above), so a Plugin Hub install never runs this. */
+    private JPanel bingoBoardPreviewCard()
+    {
+        JPanel card = new JPanel();
+        card.setLayout(new BoxLayout(card, BoxLayout.Y_AXIS));
+        card.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        card.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        card.add(clogTitle("Bingo board (dev preview)", ACCENT_GOLD, 13f));
+        card.add(Box.createVerticalStrut(4));
+
+        BingoBoardPanel board = new BingoBoardPanel(5, 5, sampleBingoTiles(), itemManager, spriteManager);
+        board.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        JPanel holder = new JPanel(new BorderLayout());
+        holder.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        holder.setAlignmentX(Component.LEFT_ALIGNMENT);
+        holder.add(board, BorderLayout.NORTH);
+        card.add(holder);
+
+        return card;
+    }
+
+    /** 5x5 sample board: real boss names (plus a couple of item tiles) with progress spread across
+     *  every visual bucket the product owner asked to see (0%, ~10%, 25%, 50%, 75%, 99%, 100%),
+     *  and a scatter of other values so the rest of the grid isn't just seven repeated fills. */
+    private java.util.List<BingoTile> sampleBingoTiles()
+    {
+        java.util.List<BingoTile> tiles = new java.util.ArrayList<>();
+        tiles.add(BingoTile.boss("A1", "Vorkath", 0, 0, 0, 30, "Vorkath"));            // 0%
+        tiles.add(BingoTile.boss("B1", "Zulrah", 0, 1, 3, 30, "Zulrah"));              // 10%
+        tiles.add(BingoTile.boss("C1", "Kree'arra", 0, 2, 7.5, 30, "Kree'arra"));      // 25%
+        tiles.add(BingoTile.boss("D1", "Nex", 0, 3, 15, 30, "Nex"));                   // 50%
+        tiles.add(BingoTile.boss("E1", "Cerberus", 0, 4, 22.5, 30, "Cerberus"));       // 75%
+        tiles.add(BingoTile.boss("A2", "The Leviathan", 1, 0, 29.7, 30, "The Leviathan")); // 99%
+        tiles.add(BingoTile.boss("B2", "Vardorvis", 1, 1, 30, 30, "Vardorvis"));       // 100%
+        tiles.add(BingoTile.boss("C2", "Corporeal Beast", 1, 2, 12, 30, "Corporeal Beast")); // 40%
+        tiles.add(BingoTile.boss("D2", "Chambers of Xeric", 1, 3, 9, 30, "Chambers of Xeric")); // 30%
+        tiles.add(BingoTile.boss("E2", "Theatre of Blood", 1, 4, 18, 30, "Theatre of Blood")); // 60%
+        tiles.add(BingoTile.boss("A3", "Tombs of Amascut", 2, 0, 21, 30, "Tombs of Amascut")); // 70%
+        tiles.add(BingoTile.boss("B3", "Phosani's Nightmare", 2, 1, 6, 30, "Phosani's Nightmare")); // 20%
+        tiles.add(BingoTile.item("C3", "Twisted bow", 2, 2, 0, 1, 20997));             // 0%
+        tiles.add(BingoTile.item("D3", "Dragon warhammer", 2, 3, 1, 1, 13576));        // 100%
+        tiles.add(BingoTile.boss("E3", "Zalcano", 2, 4, 4.5, 30, "Zalcano"));          // 15%
+        tiles.add(BingoTile.boss("A4", "Giant Mole", 3, 0, 27, 30, "Giant Mole"));     // 90%
+        tiles.add(BingoTile.boss("B4", "Kraken", 3, 1, 13.5, 30, "Kraken"));           // 45%
+        tiles.add(BingoTile.boss("C4", "Sarachnis", 3, 2, 1.5, 30, "Sarachnis"));      // 5%
+        tiles.add(BingoTile.boss("D4", "Skotizo", 3, 3, 24, 30, "Skotizo"));           // 80%
+        tiles.add(BingoTile.boss("E4", "Vetion", 3, 4, 10.5, 30, "Vetion"));           // 35%
+        tiles.add(BingoTile.boss("A5", "King Black Dragon", 4, 0, 16.5, 30, "King Black Dragon")); // 55%
+        tiles.add(BingoTile.boss("B5", "Callisto", 4, 1, 19.5, 30, "Callisto"));       // 65%
+        tiles.add(BingoTile.boss("C5", "Venenatis", 4, 2, 25.5, 30, "Venenatis"));     // 85%
+        tiles.add(BingoTile.boss("D5", "Artio", 4, 3, 28.5, 30, "Artio"));             // 95%
+        tiles.add(BingoTile.boss("E5", "Scorpia", 4, 4, 15, 30, "Scorpia"));           // 50%
+        return tiles;
     }
 
     private boolean raidRaceTeamExists(PlatformApiService.ClogRace race, String teamId)

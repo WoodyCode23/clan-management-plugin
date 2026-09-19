@@ -57,6 +57,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.reflect.TypeToken;
 
 import javax.inject.Inject;
+import javax.inject.Named;
 import java.lang.ref.WeakReference;
 import java.awt.image.BufferedImage;
 import java.io.File;
@@ -176,6 +177,12 @@ public class ClanManagementPlugin extends Plugin
 
     @Inject
     private SpriteManager spriteManager;
+
+    // Gates the bingo-board dev preview card in the Events tab: true only for a RuneLite dev-mode
+    // client (e.g. runClient), never for a Plugin Hub install, so Hub users never see sample data.
+    @Inject
+    @Named("developerMode")
+    private boolean developerMode;
 
     // ── Bingo/clog-event team dots in clan chat ──
     @Inject
@@ -697,6 +704,7 @@ public class ClanManagementPlugin extends Plugin
         panel = new ClanPanel();
         panel.setItemManager(itemManager); // for local item-icon rendering in the Members clog grid
         panel.setSpriteManager(spriteManager); // for in-game clan-rank icons on the Ranks tab
+        panel.setDeveloperMode(developerMode); // gates the bingo-board dev preview card in Events tab
         panel.exportRankIcons(new File(pluginDataDir(), "rank-icons")); // inline rank icons beside names
         // Show tabs only if board code is configured
         panel.setConnected(isPlatformConfigured());
