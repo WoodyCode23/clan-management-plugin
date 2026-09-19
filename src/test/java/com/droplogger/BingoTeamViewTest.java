@@ -224,12 +224,15 @@ public class BingoTeamViewTest
         assertEquals(0, BingoTeamView.totalTiles(null));
     }
 
-    @Test public void standingForTeamFindsByTeamId()
+    @Test public void teamForTeamIdFindsByTeamId()
     {
-        List<PlatformApiService.BingoStanding> standings = new ArrayList<>();
-        standings.add(new PlatformApiService.BingoStanding("t1", "Alpha", "#FF0000", 1, 50, 3, null, null, new ArrayList<>(), new ArrayList<>()));
-        PlatformApiService.BingoCard card = new PlatformApiService.BingoCard(null, null, new ArrayList<>(), standings, new HashMap<>(), new ArrayList<>());
-        assertEquals("Alpha", BingoTeamView.standingForTeam(card, "t1").name);
-        assertNull(BingoTeamView.standingForTeam(card, "nope"));
+        // teamForTeamId reads card.teams (the rich per-team payload), not card.standings - the real
+        // API puts rank/gap/roster/recentDrops on teams[], while standings[] is the plain leaderboard.
+        List<PlatformApiService.BingoTeam> teams = new ArrayList<>();
+        teams.add(new PlatformApiService.BingoTeam("t1", "Alpha", "#FF0000", new ArrayList<>(), 50, 3, 1,
+            null, null, new ArrayList<>(), new ArrayList<>()));
+        PlatformApiService.BingoCard card = new PlatformApiService.BingoCard(null, null, teams, new ArrayList<>(), new HashMap<>(), new ArrayList<>());
+        assertEquals("Alpha", BingoTeamView.teamForTeamId(card, "t1").name);
+        assertNull(BingoTeamView.teamForTeamId(card, "nope"));
     }
 }

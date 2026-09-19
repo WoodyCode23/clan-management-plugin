@@ -42,10 +42,17 @@ public class PlatformApiServiceBingoTest
 
     @Test public void fullShapeParsesEveryField()
     {
+        // Real route shape (src/routes/bingo.ts loadFullBingoEvent): winRule lives nested at
+        // event.settings.winRule (not a top-level winCondition); teams[] carries the rich per-team
+        // fields (members + points/tilesComplete/rank/gapToAbove/leadOverBelow/roster/recentDrops)
+        // together; standings[] is the plain leaderboard (teamId/name/color/points/tilesComplete/
+        // rank only - no gap/roster/recentDrops); a progress[team][tile].drops entry has no tileCode
+        // key of its own (it's implied by the outer tile-code key); bounties never send "released"/
+        // "claimed" booleans, only description (null pre-release) and claimedTeamId (null = unclaimed).
         String payload = "{"
             + "\"event\":{\"id\":\"ev1\",\"name\":\"Autumn Bingo\",\"status\":\"active\","
             + "  \"startTime\":\"2026-09-01T00:00:00Z\",\"endTime\":\"2026-09-15T00:00:00Z\","
-            + "  \"winCondition\":\"most_points\",\"winnerTeamId\":null},"
+            + "  \"winnerTeamId\":null,\"settings\":{\"rows\":2,\"cols\":2,\"winRule\":\"points\"}},"
             + "\"board\":{\"rows\":2,\"cols\":2,\"tiles\":["
             + "  {\"code\":\"A1\",\"name\":\"Zulrah\",\"row\":0,\"col\":0,\"kind\":\"boss\","
             + "   \"threshold\":30,\"max\":0,\"icon\":\"Zulrah\",\"items\":["
@@ -53,42 +60,76 @@ public class PlatformApiServiceBingoTest
             + "  {\"code\":\"A2\",\"name\":\"Twisted bow\",\"row\":0,\"col\":1,\"kind\":\"item\","
             + "   \"threshold\":1,\"max\":0,\"icon\":\"20997\",\"items\":[]}"
             + "]},"
-            + "\"teams\":[{\"teamId\":\"t1\",\"name\":\"Alpha\",\"color\":\"#FF0000\",\"members\":[\"Alice\",\"Bob\"]}],"
-            + "\"standings\":[{\"teamId\":\"t1\",\"name\":\"Alpha\",\"color\":\"#FF0000\",\"rank\":1,\"points\":30,"
-            + "  \"tilesComplete\":1,\"gapToAbove\":null,\"leadOverBelow\":{\"points\":10,\"tiles\":0},"
+            + "\"teams\":[{\"teamId\":\"t1\",\"name\":\"Alpha\",\"color\":\"#FF0000\",\"members\":[\"Alice\",\"Bob\"],"
+            + "  \"points\":30,\"tilesComplete\":1,\"rank\":1,\"gapToAbove\":null,"
+            + "  \"leadOverBelow\":{\"points\":10,\"tiles\":0},"
             + "  \"roster\":[{\"rsn\":\"Alice\",\"points\":30,\"dropCount\":1}],"
             + "  \"recentDrops\":[{\"rsn\":\"Alice\",\"item\":\"Zulrah's scales\",\"tileCode\":\"A1\",\"points\":1,"
             + "     \"proofUrl\":\"https://discord.com/channels/1/2/3\",\"droppedAt\":\"2026-09-02T00:00:00Z\"}]}],"
+            + "\"standings\":[{\"teamId\":\"t1\",\"name\":\"Alpha\",\"color\":\"#FF0000\",\"points\":30,"
+            + "  \"tilesComplete\":1,\"rank\":1}],"
             + "\"progress\":{\"t1\":{\"A1\":{\"points\":30,\"complete\":true,\"drops\":[{\"rsn\":\"Alice\","
-            + "  \"item\":\"Zulrah's scales\",\"tileCode\":\"A1\",\"points\":1,\"droppedAt\":null}]}}},"
-            + "\"bounties\":[{\"id\":\"b1\",\"title\":\"Mystery bounty\",\"description\":null,"
-            + "  \"releaseAt\":\"2026-09-10T00:00:00Z\",\"released\":false,\"claimed\":false,\"claimedByTeamId\":null}]"
+            + "  \"item\":\"Zulrah's scales\",\"points\":1,\"proofUrl\":null,\"droppedAt\":null}]}}},"
+            + "\"bounties\":[{\"id\":\"b1\",\"number\":1,\"title\":\"Mystery bounty\",\"description\":null,"
+            + "  \"points\":50,\"releaseAt\":\"2026-09-10T00:00:00Z\",\"claimedTeamId\":null,\"claimedAt\":null}]"
             + "}";
 
         PlatformApiService.BingoCard card = PlatformApiService.parseBingoCard(json(payload));
         assertNotNull(card);
         assertEquals("ev1", card.event.id);
         assertEquals("active", card.event.status);
+        assertEquals("points", card.event.winRule);
         assertEquals(2, card.board.rows);
         assertEquals(2, card.board.tiles.size());
         assertEquals("Zulrah", card.board.tiles.get(0).icon);
         assertEquals(1, card.board.tiles.get(0).items.size());
+
         assertEquals(1, card.teams.size());
         assertEquals(2, card.teams.get(0).members.size());
-        assertEquals(1, card.standings.size());
-        assertEquals(1, card.standings.get(0).rank);
-        assertNull(card.standings.get(0).gapToAbove);
-        assertEquals(10, card.standings.get(0).leadOverBelow.points, 0.0001);
-        assertEquals(1, card.standings.get(0).roster.size());
-        assertEquals(1, card.standings.get(0).recentDrops.size());
+        assertEquals(1, card.teams.get(0).rank);
+        assertEquals(30, card.teams.get(0).points, 0.0001);
+        assertEquals(1, card.teams.get(0).tilesComplete);
+        assertNull(card.teams.get(0).gapToAbove);
+        assertEquals(10, card.teams.get(0).leadOverBelow.points, 0.0001);
+        assertEquals(1, card.teams.get(0).roster.size());
+        assertEquals(1, card.teams.get(0).recentDrops.size());
         // The payload includes a proofUrl field (as a real server response might); the client model
         // has no such field at all, so this only proves it is silently ignored, never stored or thrown on.
-        assertEquals("Alice", card.standings.get(0).recentDrops.get(0).rsn);
+        assertEquals("Alice", card.teams.get(0).recentDrops.get(0).rsn);
+
+        // standings[] is the lean leaderboard: no gap/roster/recentDrops fields exist on this class.
+        assertEquals(1, card.standings.size());
+        assertEquals(1, card.standings.get(0).rank);
+        assertEquals(30, card.standings.get(0).points, 0.0001);
+        assertEquals(1, card.standings.get(0).tilesComplete);
+
         assertTrue(card.progress.get("t1").get("A1").complete);
         assertEquals(1, card.progress.get("t1").get("A1").drops.size());
+
         assertEquals(1, card.bounties.size());
+        assertEquals(1, card.bounties.get(0).number);
+        assertEquals(50, card.bounties.get(0).points, 0.0001);
         assertFalse(card.bounties.get(0).released);
         assertNull(card.bounties.get(0).description);
+        assertFalse(card.bounties.get(0).claimed);
+        assertNull(card.bounties.get(0).claimedTeamId);
+    }
+
+    @Test public void bountyIsReleasedAndClaimedWhenDescriptionAndClaimedTeamIdArePresent()
+    {
+        // description present (non-null) means released; a non-empty claimedTeamId means claimed.
+        // The server never sends "released"/"claimed" booleans directly - both are client-derived.
+        String payload = "{\"bounties\":[{\"id\":\"b1\",\"number\":2,\"title\":\"Claimed bounty\","
+            + "\"description\":\"Kill the boss\",\"points\":25,\"releaseAt\":\"2026-09-01T00:00:00Z\","
+            + "\"claimedTeamId\":\"t1\",\"claimedAt\":\"2026-09-05T00:00:00Z\"}]}";
+        PlatformApiService.BingoCard card = PlatformApiService.parseBingoCard(json(payload));
+        assertNotNull(card);
+        assertEquals(1, card.bounties.size());
+        assertTrue(card.bounties.get(0).released);
+        assertEquals("Kill the boss", card.bounties.get(0).description);
+        assertTrue(card.bounties.get(0).claimed);
+        assertEquals("t1", card.bounties.get(0).claimedTeamId);
+        assertEquals("2026-09-05T00:00:00Z", card.bounties.get(0).claimedAt);
     }
 
     @Test public void missingOptionalFieldsNeverThrow()

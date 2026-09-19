@@ -1589,7 +1589,8 @@ public class PlatformApiService
     // Bingo (team boards, /clans/:slug/bingo/current and /players/:rsn)
     // ══════════════════════════════════════════
 
-    /** Bingo event header. winCondition is "most_points" or "first_to_complete"; null on older servers. */
+    /** Bingo event header. winRule is "points" or "all_tiles" (read from the real API's nested
+     *  event.settings.winRule; null when settings is missing/older). */
     public static class BingoEvent
     {
         public final String id;
@@ -1597,14 +1598,14 @@ public class PlatformApiService
         public final String status;
         public final String startTime;
         public final String endTime;
-        public final String winCondition;
+        public final String winRule;
         public final String winnerTeamId;
         public BingoEvent(String id, String name, String status, String startTime, String endTime,
-                           String winCondition, String winnerTeamId)
+                           String winRule, String winnerTeamId)
         {
             this.id = id; this.name = name; this.status = status;
             this.startTime = startTime; this.endTime = endTime;
-            this.winCondition = winCondition; this.winnerTeamId = winnerTeamId;
+            this.winRule = winRule; this.winnerTeamId = winnerTeamId;
         }
     }
 
@@ -1649,14 +1650,36 @@ public class PlatformApiService
         { this.rows = rows; this.cols = cols; this.tiles = tiles; }
     }
 
+    /** One team entry from the real API's teams[] (the rich per-team payload: roster/recentDrops/
+     *  rank/gap live HERE, not on standings[] - see BingoStanding). */
     public static class BingoTeam
     {
         public final String teamId;
         public final String name;
         public final String color; // #RRGGBB
         public final List<String> members;
+        public final double points;
+        public final int tilesComplete;
+        public final int rank;
+        public final BingoGap gapToAbove;    // null when rank 1 (or unknown)
+        public final BingoGap leadOverBelow; // null when last place (or unknown)
+        public final List<BingoRosterEntry> roster;
+        public final List<BingoDrop> recentDrops;
+        public BingoTeam(String teamId, String name, String color, List<String> members, double points,
+                          int tilesComplete, int rank, BingoGap gapToAbove, BingoGap leadOverBelow,
+                          List<BingoRosterEntry> roster, List<BingoDrop> recentDrops)
+        {
+            this.teamId = teamId; this.name = name; this.color = color; this.members = members;
+            this.points = points; this.tilesComplete = tilesComplete; this.rank = rank;
+            this.gapToAbove = gapToAbove; this.leadOverBelow = leadOverBelow;
+            this.roster = roster; this.recentDrops = recentDrops;
+        }
+        /** Convenience constructor for callers that only have the roster (e.g. team-switcher setup
+         *  before standings are known); the rest default to zero/empty. */
         public BingoTeam(String teamId, String name, String color, List<String> members)
-        { this.teamId = teamId; this.name = name; this.color = color; this.members = members; }
+        {
+            this(teamId, name, color, members, 0, 0, 0, null, null, new ArrayList<>(), new ArrayList<>());
+        }
     }
 
     /** One counted drop, wherever it is shown: a tile's contributing drops, a team's recent drops, or
@@ -1703,46 +1726,47 @@ public class PlatformApiService
         { this.rsn = rsn; this.points = points; this.dropCount = dropCount; }
     }
 
-    /** One team's standing, including the A4-additions team-view fields (rank/gap/roster/recentDrops). */
+    /** One team's plain leaderboard row from the real API's standings[] - teamId/name/color/points/
+     *  tilesComplete/rank only. Gap/roster/recentDrops are NOT on standings[]; they live on the
+     *  matching entry in teams[] (see BingoTeam) - use BingoTeamView.teamForTeamId for those. */
     public static class BingoStanding
     {
         public final String teamId;
         public final String name;
         public final String color;
-        public final int rank;
         public final double points;
         public final int tilesComplete;
-        public final BingoGap gapToAbove;    // null when rank 1 (or unknown)
-        public final BingoGap leadOverBelow; // null when last place (or unknown)
-        public final List<BingoRosterEntry> roster;
-        public final List<BingoDrop> recentDrops;
-        public BingoStanding(String teamId, String name, String color, int rank, double points, int tilesComplete,
-                              BingoGap gapToAbove, BingoGap leadOverBelow, List<BingoRosterEntry> roster,
-                              List<BingoDrop> recentDrops)
+        public final int rank;
+        public BingoStanding(String teamId, String name, String color, double points, int tilesComplete, int rank)
         {
-            this.teamId = teamId; this.name = name; this.color = color; this.rank = rank;
-            this.points = points; this.tilesComplete = tilesComplete;
-            this.gapToAbove = gapToAbove; this.leadOverBelow = leadOverBelow;
-            this.roster = roster; this.recentDrops = recentDrops;
+            this.teamId = teamId; this.name = name; this.color = color;
+            this.points = points; this.tilesComplete = tilesComplete; this.rank = rank;
         }
     }
 
-    /** description is null/empty until release (server hides it, per the contract); released/claimed
-     *  are always safe to show. */
+    /** description is null until release (the server nulls it out pre-release; it never sends a
+     *  "released" boolean, so the client derives one from whether description came through). The
+     *  server likewise never sends a "claimed" boolean, only claimedTeamId (null = unclaimed); the
+     *  client derives "claimed" from that. */
     public static class BingoBounty
     {
         public final String id;
+        public final int number;
         public final String title;
         public final String description;
+        public final double points;
         public final String releaseAt;
         public final boolean released;
         public final boolean claimed;
-        public final String claimedByTeamId;
-        public BingoBounty(String id, String title, String description, String releaseAt, boolean released,
-                            boolean claimed, String claimedByTeamId)
+        public final String claimedTeamId;
+        public final String claimedAt;
+        public BingoBounty(String id, int number, String title, String description, double points, String releaseAt,
+                            boolean released, boolean claimed, String claimedTeamId, String claimedAt)
         {
-            this.id = id; this.title = title; this.description = description; this.releaseAt = releaseAt;
-            this.released = released; this.claimed = claimed; this.claimedByTeamId = claimedByTeamId;
+            this.id = id; this.number = number; this.title = title; this.description = description;
+            this.points = points; this.releaseAt = releaseAt;
+            this.released = released; this.claimed = claimed;
+            this.claimedTeamId = claimedTeamId; this.claimedAt = claimedAt;
         }
     }
 
@@ -1845,8 +1869,15 @@ public class PlatformApiService
             if (root.has("event") && root.get("event").isJsonObject())
             {
                 JsonObject e = root.getAsJsonObject("event");
+                // winRule lives nested at event.settings.winRule ("points" | "all_tiles"), not as a
+                // top-level field - the real API has no top-level winCondition/winRule.
+                String winRule = null;
+                if (e.has("settings") && e.get("settings").isJsonObject())
+                {
+                    winRule = jsonStr(e.getAsJsonObject("settings"), "winRule");
+                }
                 event = new BingoEvent(jsonStr(e, "id"), jsonStr(e, "name"), jsonStr(e, "status"),
-                    jsonStr(e, "startTime"), jsonStr(e, "endTime"), jsonStr(e, "winCondition"),
+                    jsonStr(e, "startTime"), jsonStr(e, "endTime"), winRule,
                     jsonStr(e, "winnerTeamId"));
             }
 
@@ -1872,6 +1903,9 @@ public class PlatformApiService
                 board = new BingoBoard(rows, cols, tiles);
             }
 
+            // teams[] carries the rich per-team payload (members + points/tilesComplete/rank/gap/
+            // roster/recentDrops all on the SAME entry) - this is where the real API puts the
+            // team-view fields, not standings[] (see BingoStanding).
             List<BingoTeam> teams = new ArrayList<>();
             if (root.has("teams") && root.get("teams").isJsonArray())
             {
@@ -1883,17 +1917,6 @@ public class PlatformApiService
                     if (o.has("members") && o.get("members").isJsonArray())
                         for (JsonElement m : o.getAsJsonArray("members"))
                             if (!m.isJsonNull()) members.add(m.getAsString());
-                    teams.add(new BingoTeam(jsonStr(o, "teamId"), jsonStr(o, "name"), jsonStr(o, "color"), members));
-                }
-            }
-
-            List<BingoStanding> standings = new ArrayList<>();
-            if (root.has("standings") && root.get("standings").isJsonArray())
-            {
-                for (JsonElement el : root.getAsJsonArray("standings"))
-                {
-                    if (!el.isJsonObject()) continue;
-                    JsonObject o = el.getAsJsonObject();
                     List<BingoRosterEntry> roster = new ArrayList<>();
                     if (o.has("roster") && o.get("roster").isJsonArray())
                     {
@@ -1905,12 +1928,28 @@ public class PlatformApiService
                                 ro.has("dropCount") && !ro.get("dropCount").isJsonNull() ? ro.get("dropCount").getAsInt() : 0));
                         }
                     }
-                    standings.add(new BingoStanding(jsonStr(o, "teamId"), jsonStr(o, "name"), jsonStr(o, "color"),
-                        o.has("rank") && !o.get("rank").isJsonNull() ? o.get("rank").getAsInt() : 0,
+                    teams.add(new BingoTeam(jsonStr(o, "teamId"), jsonStr(o, "name"), jsonStr(o, "color"), members,
                         jsonNum(o, "points"),
                         o.has("tilesComplete") && !o.get("tilesComplete").isJsonNull() ? o.get("tilesComplete").getAsInt() : 0,
+                        o.has("rank") && !o.get("rank").isJsonNull() ? o.get("rank").getAsInt() : 0,
                         parseBingoGap(o, "gapToAbove"), parseBingoGap(o, "leadOverBelow"),
                         roster, parseBingoDrops(o, "recentDrops")));
+                }
+            }
+
+            // standings[] is the plain leaderboard: teamId/name/color/points/tilesComplete/rank only.
+            // No gapToAbove/leadOverBelow/roster/recentDrops here - those live on teams[] above.
+            List<BingoStanding> standings = new ArrayList<>();
+            if (root.has("standings") && root.get("standings").isJsonArray())
+            {
+                for (JsonElement el : root.getAsJsonArray("standings"))
+                {
+                    if (!el.isJsonObject()) continue;
+                    JsonObject o = el.getAsJsonObject();
+                    standings.add(new BingoStanding(jsonStr(o, "teamId"), jsonStr(o, "name"), jsonStr(o, "color"),
+                        jsonNum(o, "points"),
+                        o.has("tilesComplete") && !o.get("tilesComplete").isJsonNull() ? o.get("tilesComplete").getAsInt() : 0,
+                        o.has("rank") && !o.get("rank").isJsonNull() ? o.get("rank").getAsInt() : 0));
                 }
             }
 
@@ -1940,10 +1979,15 @@ public class PlatformApiService
                 {
                     if (!el.isJsonObject()) continue;
                     JsonObject o = el.getAsJsonObject();
-                    boolean released = o.has("released") && !o.get("released").isJsonNull() && o.get("released").getAsBoolean();
-                    boolean claimed = o.has("claimed") && !o.get("claimed").isJsonNull() && o.get("claimed").getAsBoolean();
-                    bounties.add(new BingoBounty(jsonStr(o, "id"), jsonStr(o, "title"), jsonStr(o, "description"),
-                        jsonStr(o, "releaseAt"), released, claimed, jsonStr(o, "claimedByTeamId")));
+                    // The server never sends "released"/"claimed" booleans: it nulls out
+                    // "description" pre-release, and reports only "claimedTeamId" (null = unclaimed).
+                    boolean released = o.has("description") && !o.get("description").isJsonNull();
+                    String claimedTeamId = jsonStr(o, "claimedTeamId");
+                    boolean claimed = claimedTeamId != null && !claimedTeamId.isEmpty();
+                    bounties.add(new BingoBounty(jsonStr(o, "id"),
+                        o.has("number") && !o.get("number").isJsonNull() ? o.get("number").getAsInt() : 0,
+                        jsonStr(o, "title"), jsonStr(o, "description"), jsonNum(o, "points"),
+                        jsonStr(o, "releaseAt"), released, claimed, claimedTeamId, jsonStr(o, "claimedAt")));
                 }
             }
 

@@ -3399,10 +3399,10 @@ public class ClanPanel extends PluginPanel
     /** The points / tiles / rank / gap line for the selected team (BingoTeamView.formatTeamStatusLine). */
     private JLabel bingoStatusLine(PlatformApiService.BingoCard card, String teamId)
     {
-        PlatformApiService.BingoStanding s = BingoTeamView.standingForTeam(card, teamId);
+        PlatformApiService.BingoTeam s = BingoTeamView.teamForTeamId(card, teamId);
         String text = s != null
             ? BingoTeamView.formatTeamStatusLine(s.points, s.tilesComplete, BingoTeamView.totalTiles(card), s.rank,
-                card.standings != null ? card.standings.size() : 0, s.gapToAbove, s.leadOverBelow)
+                card.teams != null ? card.teams.size() : 0, s.gapToAbove, s.leadOverBelow)
             : "No standings yet";
         JLabel l = new JLabel(text);
         l.setFont(READABLE_FONT_SMALL);
@@ -3505,7 +3505,7 @@ public class ClanPanel extends PluginPanel
         panel.add(clogTitle("Roster", ACCENT_GOLD, 12f));
         panel.add(Box.createVerticalStrut(4));
 
-        PlatformApiService.BingoStanding s = BingoTeamView.standingForTeam(card, teamId);
+        PlatformApiService.BingoTeam s = BingoTeamView.teamForTeamId(card, teamId);
         java.util.List<PlatformApiService.BingoRosterEntry> roster = s != null ? s.roster : null;
         if (roster == null || roster.isEmpty())
         {
@@ -3664,7 +3664,7 @@ public class ClanPanel extends PluginPanel
         panel.add(clogTitle("Recent Drops", ACCENT_GOLD, 12f));
         panel.add(Box.createVerticalStrut(4));
 
-        PlatformApiService.BingoStanding s = BingoTeamView.standingForTeam(card, teamId);
+        PlatformApiService.BingoTeam s = BingoTeamView.teamForTeamId(card, teamId);
         java.util.List<PlatformApiService.BingoDrop> drops = s != null ? s.recentDrops : null;
         if (drops == null || drops.isEmpty())
         {
@@ -3769,14 +3769,14 @@ public class ClanPanel extends PluginPanel
         }
         PlatformApiService.BingoBoard board = new PlatformApiService.BingoBoard(5, 5, tiles);
 
-        java.util.List<PlatformApiService.BingoTeam> teams = new java.util.ArrayList<>();
-        teams.add(new PlatformApiService.BingoTeam("teamA", "Red Chinchompas", "#E53935",
+        java.util.List<PlatformApiService.BingoTeam> teamShells = new java.util.ArrayList<>();
+        teamShells.add(new PlatformApiService.BingoTeam("teamA", "Red Chinchompas", "#E53935",
             java.util.Arrays.asList("Woody Code", "Alice", "Bob", "Carol")));
-        teams.add(new PlatformApiService.BingoTeam("teamB", "Blue Dragons", "#1E88E5",
+        teamShells.add(new PlatformApiService.BingoTeam("teamB", "Blue Dragons", "#1E88E5",
             java.util.Arrays.asList("Dave", "Erin", "Frank", "Grace", "Hank")));
-        teams.add(new PlatformApiService.BingoTeam("teamC", "Green Goblins", "#43A047",
+        teamShells.add(new PlatformApiService.BingoTeam("teamC", "Green Goblins", "#43A047",
             java.util.Arrays.asList("Ivy", "Jack", "Kim")));
-        teams.add(new PlatformApiService.BingoTeam("teamD", "Purple Pengs", "#8E24AA",
+        teamShells.add(new PlatformApiService.BingoTeam("teamD", "Purple Pengs", "#8E24AA",
             java.util.Arrays.asList("Liam", "Mona", "Noah", "Opal", "Priya", "Quinn")));
 
         java.util.Map<String, java.util.Map<String, PlatformApiService.BingoTileProgress>> progress = new java.util.HashMap<>();
@@ -3793,8 +3793,10 @@ public class ClanPanel extends PluginPanel
             new double[]{20, 10, 5, 0, 0, 15, 20, 10, 0, 5, 10, 0, 0, 0, 10, 15, 5, 0, 10, 0, 5, 10, 0, 15, 0},
             "Liam"));
 
-        java.util.List<PlatformApiService.BingoStanding> unranked = new java.util.ArrayList<>();
-        for (PlatformApiService.BingoTeam t : teams)
+        // Per-team totals/roster/recent drops, matching the shape the real API puts on teams[]
+        // (points/tilesComplete/roster/recentDrops alongside members - NOT on standings[]).
+        java.util.List<PlatformApiService.BingoTeam> unranked = new java.util.ArrayList<>();
+        for (PlatformApiService.BingoTeam t : teamShells)
         {
             java.util.Map<String, PlatformApiService.BingoTileProgress> p = progress.get(t.teamId);
             double points = 0;
@@ -3822,24 +3824,29 @@ public class ClanPanel extends PluginPanel
                     n++;
                 }
             }
-            unranked.add(new PlatformApiService.BingoStanding(t.teamId, t.name, t.color, 0, points, complete, null, null, roster, recent));
+            unranked.add(new PlatformApiService.BingoTeam(t.teamId, t.name, t.color, t.members, points, complete,
+                0, null, null, roster, recent));
         }
         unranked.sort((a, b) -> Double.compare(b.points, a.points));
 
+        // teams[] gets rank/gap once sorted; standings[] mirrors the same order but only the plain
+        // leaderboard fields, matching the real API's lean standings[] shape.
+        java.util.List<PlatformApiService.BingoTeam> teams = new java.util.ArrayList<>();
         java.util.List<PlatformApiService.BingoStanding> standings = new java.util.ArrayList<>();
         for (int i = 0; i < unranked.size(); i++)
         {
-            PlatformApiService.BingoStanding s = unranked.get(i);
+            PlatformApiService.BingoTeam t = unranked.get(i);
             PlatformApiService.BingoGap gapAbove = i > 0
-                ? new PlatformApiService.BingoGap(unranked.get(i - 1).points - s.points, 0) : null;
+                ? new PlatformApiService.BingoGap(unranked.get(i - 1).points - t.points, 0) : null;
             PlatformApiService.BingoGap leadBelow = i < unranked.size() - 1
-                ? new PlatformApiService.BingoGap(s.points - unranked.get(i + 1).points, 0) : null;
-            standings.add(new PlatformApiService.BingoStanding(s.teamId, s.name, s.color, i + 1, s.points,
-                s.tilesComplete, gapAbove, leadBelow, s.roster, s.recentDrops));
+                ? new PlatformApiService.BingoGap(t.points - unranked.get(i + 1).points, 0) : null;
+            teams.add(new PlatformApiService.BingoTeam(t.teamId, t.name, t.color, t.members, t.points,
+                t.tilesComplete, i + 1, gapAbove, leadBelow, t.roster, t.recentDrops));
+            standings.add(new PlatformApiService.BingoStanding(t.teamId, t.name, t.color, t.points, t.tilesComplete, i + 1));
         }
 
         PlatformApiService.BingoEvent event = new PlatformApiService.BingoEvent("sample-event", "Autumn Bingo (sample)",
-            "active", "2026-09-01T00:00:00Z", "2026-09-30T00:00:00Z", "most_points", null);
+            "active", "2026-09-01T00:00:00Z", "2026-09-30T00:00:00Z", "points", null);
         return new PlatformApiService.BingoCard(event, board, teams, standings, progress, new java.util.ArrayList<>());
     }
 

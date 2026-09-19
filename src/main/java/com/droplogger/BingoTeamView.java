@@ -58,14 +58,16 @@ public final class BingoTeamView
         return card.board.tiles.size();
     }
 
-    /** The standings entry for one team, or null when standings haven't been computed yet / teamId
-     *  doesn't match anything. */
-    public static PlatformApiService.BingoStanding standingForTeam(PlatformApiService.BingoCard card, String teamId)
+    /** The team-view entry (points/tilesComplete/rank/gap/roster/recentDrops) for one team, or null
+     *  when teams haven't been loaded yet / teamId doesn't match anything. This reads card.teams,
+     *  NOT card.standings: the real API puts the rich per-team fields on teams[], while standings[]
+     *  is only the plain leaderboard (teamId/name/color/points/tilesComplete/rank). */
+    public static PlatformApiService.BingoTeam teamForTeamId(PlatformApiService.BingoCard card, String teamId)
     {
-        if (card == null || card.standings == null || teamId == null) return null;
-        for (PlatformApiService.BingoStanding s : card.standings)
+        if (card == null || card.teams == null || teamId == null) return null;
+        for (PlatformApiService.BingoTeam t : card.teams)
         {
-            if (s != null && teamId.equals(s.teamId)) return s;
+            if (t != null && teamId.equals(t.teamId)) return t;
         }
         return null;
     }
