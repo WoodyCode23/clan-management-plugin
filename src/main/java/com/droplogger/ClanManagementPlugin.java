@@ -1777,11 +1777,12 @@ public class ClanManagementPlugin extends Plugin
 
         List<PbEntry> parsedPbs = new ArrayList<>();
         String currentBoss = null;
-        // For ToB/ToA: pending team size from a "Fastest Room time" line where time is on the next line
+        // For ToB/ToA: pending team size from a typed time line where the time is on the next line
         String pendingTeamSize = null;
-        boolean pendingIsRoom = false;
-        // Track which boss+teamSize combos we've added as "Room time" so we skip "Overall time" dupes
-        Set<String> roomTimeKeys = new HashSet<>();
+        boolean pendingIsPreferred = false;
+        // Track which boss+teamSize combos we already took the PREFERRED time for, so the other
+        // typed line for the same combo is not added as a duplicate
+        Set<String> preferredTimeKeys = new HashSet<>();
 
         for (Widget child : children)
         {
@@ -1801,7 +1802,7 @@ public class ClanManagementPlugin extends Plugin
             Matcher standaloneMatcher = STANDALONE_TIME.matcher(clean);
             if (standaloneMatcher.find() && pendingTeamSize != null && currentBoss != null)
             {
-                if (pendingIsRoom)
+                if (pendingIsPreferred)
                 {
                     String timeStr = standaloneMatcher.group(1);
                     int timeMs = parsePbTime(timeStr);
@@ -1809,11 +1810,11 @@ public class ClanManagementPlugin extends Plugin
                     {
                         int teamSize = parseTeamSize(pendingTeamSize);
                         parsedPbs.add(new PbEntry(currentBoss, teamSize, timeMs));
-                        roomTimeKeys.add(currentBoss + "::" + teamSize);
+                        preferredTimeKeys.add(currentBoss + "::" + teamSize);
                     }
                 }
                 pendingTeamSize = null;
-                pendingIsRoom = false;
+                pendingIsPreferred = false;
                 continue;
             }
 
@@ -1825,6 +1826,14 @@ public class ClanManagementPlugin extends Plugin
 
                 boolean isOverall = clean.contains("Overall time");
                 boolean isRoom = clean.contains("Room time");
+                // ToA boards the TOTAL raid time, every other timed activity boards room time.
+                // This MUST match PbDetector's live-chat rule (TOA_TIME requires "total completion
+                // time", TOB_TIME excludes it): before this, a live ToA submitted the whole raid
+                // while an adventure-log import of the same account submitted the room time, so
+                // the two sources landed on one board measuring different things, and the much
+                // faster imported times won it.
+                boolean wantsOverall = prefersOverallTime(currentBoss);
+                boolean isPreferred = wantsOverall ? isOverall : isRoom;
 
                 String teamSizeStr = pbMatcher.group(1);
                 String timeStr = pbMatcher.group(2); // may be null if time is on next line
@@ -1833,12 +1842,13 @@ public class ClanManagementPlugin extends Plugin
                 {
                     // Time is on the next widget child line — save context and continue
                     pendingTeamSize = teamSizeStr;
-                    pendingIsRoom = isRoom;
+                    pendingIsPreferred = isPreferred;
                     continue;
                 }
 
-                // For ToB/ToA: use "Room time" (challenge time), skip "Overall time"
-                if (isOverall)
+                // A typed time line that is not the one this activity boards. Untyped lines
+                // ("Fastest kill", "Fastest run") are not typed at all and still pass through.
+                if ((isOverall || isRoom) && !isPreferred)
                 {
                     continue;
                 }
@@ -1854,20 +1864,20 @@ public class ClanManagementPlugin extends Plugin
 
                 int teamSize = parseTeamSize(teamSizeStr);
 
-                // Don't duplicate if we already have a Room time for this combo
+                // Don't duplicate if we already have the preferred time for this combo
                 String comboKey = currentBoss + "::" + teamSize;
-                if (isRoom)
+                if (isPreferred)
                 {
-                    roomTimeKeys.add(comboKey);
+                    preferredTimeKeys.add(comboKey);
                 }
-                // Always add room times; skip non-room if we already have room time
-                if (isRoom || !roomTimeKeys.contains(comboKey))
+                // Always add the preferred time; skip anything else once we have it
+                if (isPreferred || !preferredTimeKeys.contains(comboKey))
                 {
                     parsedPbs.add(new PbEntry(currentBoss, teamSize, timeMs));
                 }
 
                 pendingTeamSize = null;
-                pendingIsRoom = false;
+                pendingIsPreferred = false;
             }
             else if (!clean.contains("Kill Count") && !clean.contains("Completions")
                       && !clean.contains("Personal Best") && !clean.contains("Kills")
@@ -1876,7 +1886,7 @@ public class ClanManagementPlugin extends Plugin
                 // This line is a boss/activity name
                 currentBoss = clean;
                 pendingTeamSize = null;
-                pendingIsRoom = false;
+                pendingIsPreferred = false;
             }
         }
 
@@ -1931,6 +1941,22 @@ public class ClanManagementPlugin extends Plugin
                     "[" + getClanName() + "] Synced " + finalSubmitted + " personal bests to platform", "")
             );
         });
+    }
+
+    /**
+     * Which of the adventure log's two timed entries this activity boards.
+     *
+     * Tombs of Amascut boards the OVERALL (whole raid, wall clock) time; everything else that
+     * reports both, Theatre of Blood included, boards the room time. This deliberately mirrors
+     * PbDetector's live-chat patterns: TOA_TIME requires "total completion time" while TOB_TIME
+     * excludes it. If the two ever disagree again, one account's imported PBs and its live
+     * submissions end up on the same board measuring different things.
+     */
+    private static boolean prefersOverallTime(String activityName)
+    {
+        if (activityName == null) return false;
+        String lower = activityName.toLowerCase();
+        return lower.contains("tombs") || lower.contains("amascut");
     }
 
     private static int parseTeamSize(String teamSizeStr)

@@ -254,13 +254,24 @@ public class PbDetector
         //  - vanilla CoX floor times ("Upper/Middle/Lower level complete! Duration: 4:31")
         //  - Olm phase lines ("Olm duration: 5:20") — produced a 36s "CoX solo"
         //  - ToB room times ("Wave 'The Maiden of Sugadinti' complete! Duration: 2:45")
+        //  - ToA room times ("Challenge complete: The Wardens. Duration: 2:30")
         // Only the whole-kill / whole-raid message may count.
         String lowerAll = cleanedMessage.toLowerCase();
         if (lowerAll.contains("phase") || lowerAll.contains("split") || lowerAll.contains("section")
             || lowerAll.contains("level complete") || (lowerAll.contains("olm duration") && !lowerAll.contains("team size")) /* keep the real CoX completion line, which carries 'Team size:' plus 'Olm duration:' */
             || (lowerAll.contains("wave") && !lowerAll.contains("completion time")) /* keep the real ToB completion, which shares a message with the last wave line */
             // Nightmare plugin phase lines: "Phosani's Nightmare P4 boss complete! Duration: 0:08.40"
-            || lowerAll.contains("boss complete"))
+            || lowerAll.contains("boss complete")
+            // ToA prints one of these per ROOM, the Wardens included: "Challenge complete: The
+            // Wardens. Duration: 2:30". None of the raid patterns match it (it never says "Tombs
+            // of Amascut", and "Challenge complete:" is not CoX/Gauntlet's "Challenge duration:"),
+            // so it used to fall through to the bare DURATION_TIME rule and get filed as a ToA
+            // time - either immediately off stale ToA context, or parked and then claimed by the
+            // "Your completed Tombs of Amascut count is:" line that ends the raid. Either way the
+            // board got the Wardens fight instead of the raid. Safe to match without the colon:
+            // ToA's own "challenge completion time" and "total completion time" lines do not
+            // contain "challenge complete" (completion diverges at the 'i').
+            || lowerAll.contains("challenge complete"))
         {
             return null;
         }

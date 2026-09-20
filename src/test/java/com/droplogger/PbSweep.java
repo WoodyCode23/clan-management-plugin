@@ -68,6 +68,20 @@ public class PbSweep
         one("ToA normal total time", "toa", "29:14.40",
             "Tombs of Amascut total completion time: 29:14.40. Personal best: 28:02.00");
         reject("ToA normal challenge time", "Tombs of Amascut challenge completion time: 26:22.00. Personal best: 25:08.00");
+        // REGRESSION: ToA prints one of these per ROOM. None of the raid patterns match it, so it
+        // used to reach the bare "Duration:" rule and be filed as a ToA time - the board showed the
+        // Wardens fight instead of the raid.
+        reject("ToA Wardens room line", "Challenge complete: The Wardens. Duration: 2:30.00");
+        reject("ToA puzzle room line", "Challenge complete: Het. Duration: 1:04.20");
+        // The same line must not survive by being PARKED and then claimed by the count message that
+        // ends the raid: that path bypassed every ToA pattern entirely.
+        rejectSeq("ToA Wardens line cannot be claimed by the raid count",
+            "Challenge complete: The Wardens. Duration: 2:30.00",
+            "Your completed Tombs of Amascut count is: 124.");
+        // Positive control: the real sequence still boards the whole raid.
+        seq("ToA full raid sequence boards the total", "toa", "29:14.40",
+            "Challenge complete: The Wardens. Duration: 2:30.00",
+            "Tombs of Amascut total completion time: 29:14.40. Personal best: 28:02.00");
 
         // ── Wave content (duration before KC) ──
         seq("Inferno parked", "zuk", "68:33.00",
@@ -122,6 +136,35 @@ public class PbSweep
     private static void one(String name, String expectGroup, String expectTime, String message)
     {
         seq(name, expectGroup, expectTime, message);
+    }
+
+    /**
+     * A whole SEQUENCE must produce no completion. Distinct from {@link #reject}: a line can be
+     * rejected on its own and still be parked, then claimed by a later count/KC message. That is
+     * exactly how a ToA room time reached the board without matching any ToA pattern.
+     */
+    private static void rejectSeq(String name, String... messages)
+    {
+        PbDetector d = new PbDetector();
+        PbDetector.CompletionResult found = null;
+        for (String m : messages)
+        {
+            d.processMessage(m);
+            PbDetector.CompletionResult r = d.detectCompletion(m);
+            if (r != null) found = r;
+            PbDetector.CompletionResult drained = d.drainPendingCompletion();
+            if (drained != null) found = drained;
+        }
+        if (found == null)
+        {
+            passed++;
+            System.out.println("PASS  " + name);
+        }
+        else
+        {
+            failed++;
+            System.out.println("FAIL  " + name + " — unexpectedly detected " + found.getGroup() + " " + found.getFormattedTime());
+        }
     }
 
     /** Message must NOT produce a completion (phase/progress/total lines). */
