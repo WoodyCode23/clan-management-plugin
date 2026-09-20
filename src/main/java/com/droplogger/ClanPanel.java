@@ -116,6 +116,10 @@ public class ClanPanel extends PluginPanel
 
     // ── Bingo card (team boards; renders inside the Events tab, see buildBingoSection) ──
     private PlatformApiService.BingoCard currentBingoCard; // live card from the server; null when none is running
+    // The card buildBingoCard is rendering on this pass: the live one, or the dev-preview sample.
+    // Read by bingoTileLabel so a drop row can name its tile in both. Set on the EDT inside the
+    // build and never read outside it.
+    private PlatformApiService.BingoCard renderingBingoCard;
     private String selectedBingoTeamId;
     private String localPlayerNameForBingo; // for "open on your own team" + highlighting your own contributions
     private java.util.function.BiConsumer<String, String> onLoadBingoPlayer; // (eventId, rsn) -> fetch drill-in
@@ -3193,6 +3197,7 @@ public class ClanPanel extends PluginPanel
 
     private JPanel buildBingoCard(PlatformApiService.BingoCard card, boolean sample)
     {
+        renderingBingoCard = card;
         JPanel outer = new JPanel();
         outer.setLayout(new BoxLayout(outer, BoxLayout.Y_AXIS));
         outer.setBackground(ColorScheme.DARK_GRAY_COLOR);
@@ -3462,15 +3467,7 @@ public class ClanPanel extends PluginPanel
         panel.setBorder(new EmptyBorder(6, 8, 6, 8));
         panel.setAlignmentX(Component.LEFT_ALIGNMENT);
 
-        String tileName = tileCode;
-        if (card.board != null && card.board.tiles != null)
-        {
-            for (PlatformApiService.BingoBoardTile t : card.board.tiles)
-            {
-                if (t != null && tileCode.equals(t.code)) { tileName = t.name != null ? t.name : tileCode; break; }
-            }
-        }
-        JLabel title = new JLabel(tileName);
+        JLabel title = new JLabel(bingoTileLabel(tileCode));
         title.setFont(READABLE_FONT.deriveFont(Font.BOLD));
         title.setForeground(ACCENT_GOLD);
         title.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -3693,7 +3690,15 @@ public class ClanPanel extends PluginPanel
 
         StringBuilder left = new StringBuilder(d.rsn != null ? d.rsn : "Unknown");
         left.append(": ").append(d.item != null ? d.item : "?");
-        if (showTile && d.tileCode != null && !d.tileCode.isEmpty()) left.append(" (").append(d.tileCode).append(")");
+        // Drop name (tile NAME), not the grid code: "Vorkath's head (Vorkath)" reads as something a
+        // member recognises, where "(A1)" means nothing without the board in front of you. The drop's
+        // source boss is deliberately absent - people already know where a drop comes from, and the
+        // server never sends it to a client anyway (bingo_drops.source exists only so scoring can
+        // enforce a tile's "only from" rule).
+        if (showTile && d.tileCode != null && !d.tileCode.isEmpty())
+        {
+            left.append(" (").append(bingoTileLabel(d.tileCode)).append(")");
+        }
         JLabel leftLbl = new JLabel(left.toString());
         leftLbl.setFont(READABLE_FONT_SMALL);
         leftLbl.setForeground(mine ? ACCENT_GOLD : Color.WHITE);
@@ -3705,6 +3710,30 @@ public class ClanPanel extends PluginPanel
         row.add(rightLbl, BorderLayout.EAST);
 
         return row;
+    }
+
+    /**
+     * The tile's own name for display, falling back to its grid code when the board has not loaded
+     * or the code is not on it (a drop can outlive the tile it was scored against if a host shrinks
+     * the board mid-event, and the row still has to render). Reads the live card when there is one
+     * so the dev preview and the real card resolve identically.
+     */
+    private String bingoTileLabel(String tileCode)
+    {
+        // The card being rendered right now, NOT currentBingoCard: the dev preview renders a sample
+        // card that is never assigned there, and it has to resolve tile names the same way.
+        PlatformApiService.BingoCard card = renderingBingoCard;
+        if (card != null && card.board != null && card.board.tiles != null)
+        {
+            for (PlatformApiService.BingoBoardTile t : card.board.tiles)
+            {
+                if (t.code != null && t.code.equals(tileCode))
+                {
+                    return t.name != null && !t.name.isEmpty() ? t.name : tileCode;
+                }
+            }
+        }
+        return tileCode;
     }
 
     private String formatBingoNumber(double v)
