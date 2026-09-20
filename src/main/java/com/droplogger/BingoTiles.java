@@ -43,7 +43,24 @@ public final class BingoTiles
      */
     public static int bossSpriteId(String bossName)
     {
-        String target = normalize(bossName);
+        return spriteIdFor(bossName, false);
+    }
+
+    /**
+     * Sprite for a Wise Old Man metric as carried by a kc/xp tile (womMetric), e.g. "vorkath",
+     * "chambers_of_xeric" or "woodcutting". Same normalization as {@link #bossSpriteId}, so WOM's
+     * underscore slugs line up with RuneLite's display names, but skills are matched too: an xp
+     * tile's metric is a skill, not a boss. Returns -1 when nothing matches (an untracked or
+     * aggregate metric such as "ehb"), which renders as a tile with no icon rather than a broken one.
+     */
+    public static int metricSpriteId(String metric)
+    {
+        return spriteIdFor(metric, true);
+    }
+
+    private static int spriteIdFor(String name, boolean includeSkills)
+    {
+        String target = normalize(name);
         if (target.isEmpty())
         {
             return -1;
@@ -51,7 +68,9 @@ public final class BingoTiles
         for (HiscoreSkill skill : HiscoreSkill.values())
         {
             HiscoreSkillType type = skill.getType();
-            if (type != HiscoreSkillType.BOSS && type != HiscoreSkillType.ACTIVITY)
+            boolean eligible = type == HiscoreSkillType.BOSS || type == HiscoreSkillType.ACTIVITY
+                || (includeSkills && type == HiscoreSkillType.SKILL);
+            if (!eligible)
             {
                 continue;
             }

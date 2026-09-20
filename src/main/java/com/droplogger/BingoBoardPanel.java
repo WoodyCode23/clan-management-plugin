@@ -26,9 +26,14 @@ import java.util.List;
  * rows, cols and a List&lt;BingoTile&gt; (plus the two game-icon managers), so the same renderer
  * draws today's sample data and tomorrow's real server data unchanged.
  *
- * Each tile shows its boss/item icon with gold filling up from the bottom in proportion to
+ * Each tile shows its sprite/item icon with gold filling up from the bottom in proportion to
  * points/threshold, like a glass filling; at 100% the tile turns fully gold and gets a bright gold
- * border. Points read out underneath as "12/30".
+ * border. Points read out underneath as "12/30". A tile whose icon could not be resolved (an
+ * item-less tile, or a Wise Old Man metric with no matching sprite) draws its tile code in the
+ * middle instead, so it still reads as a real tile.
+ *
+ * Every kind of tile renders identically here: a kc/xp tile's points arrive the same way a drop
+ * tile's do, so the fill needs no special case.
  */
 public class BingoBoardPanel extends JPanel
 {
@@ -36,6 +41,7 @@ public class BingoBoardPanel extends JPanel
     private static final Color GOLD_FILL = new Color(212, 175, 55, 195); // translucent so the icon stays readable
     private static final Color BRIGHT_GOLD_BORDER = new Color(255, 215, 0);
     private static final Font POINTS_FONT = new Font("Segoe UI", Font.PLAIN, 9);
+    private static final Font CODE_FONT = new Font("Segoe UI", Font.BOLD, 11);
 
     private static final int USABLE_WIDTH = 225; // RuneLite side panel usable width
     private static final int GAP = 3;
@@ -50,9 +56,13 @@ public class BingoBoardPanel extends JPanel
      * behaviour, identical to the original constructor). Invoked on the EDT with the clicked tile;
      * a click on an empty grid cell (no tile mapped to that row/col) is a no-op.
      */
-    public BingoBoardPanel(int rows, int cols, List<BingoTile> tiles, ItemManager itemManager, SpriteManager spriteManager,
+    public BingoBoardPanel(int rowsIn, int colsIn, List<BingoTile> tiles, ItemManager itemManager, SpriteManager spriteManager,
         java.util.function.Consumer<BingoTile> onTileClick)
     {
+        // GridLayout throws when rows and cols are both zero, which a payload with a board but no
+        // grid size would otherwise produce; one empty cell is a harmless board, an exception is not.
+        int rows = Math.max(1, rowsIn);
+        int cols = Math.max(1, colsIn);
         setLayout(new GridLayout(rows, cols, GAP, GAP));
         setBackground(ColorScheme.DARK_GRAY_COLOR);
         setOpaque(true);
@@ -104,7 +114,11 @@ public class BingoBoardPanel extends JPanel
             setOpaque(false);
             if (tile != null)
             {
-                setToolTipText(tile.name + ": " + BingoTiles.formatPoints(tile.points, tile.threshold) + " pts");
+                // A kc/xp tile says so, since "30/50 pts" alone would not explain where its points
+                // come from (Wise Old Man gains, not drops).
+                String kindLabel = tile.kindLabel();
+                String heading = kindLabel != null ? tile.name + " (" + kindLabel + ")" : tile.name;
+                setToolTipText(heading + ": " + BingoTiles.formatPoints(tile.points, tile.threshold) + " pts");
                 loadIcon(itemManager, spriteManager);
                 if (onTileClick != null)
                 {
@@ -127,10 +141,12 @@ public class BingoBoardPanel extends JPanel
                     {
                         return;
                     }
-                    int spriteId = BingoTiles.bossSpriteId(tile.bossName);
+                    // Already resolved when the tile was built (a kc/xp tile's sprite can be a skill,
+                    // which the boss-only lookup would miss).
+                    int spriteId = tile.spriteId;
                     if (spriteId < 0)
                     {
-                        return; // no matching boss sprite: tile just renders without an icon
+                        return; // no matching sprite: tile just renders its code instead of an icon
                     }
                     spriteManager.getSpriteAsync(spriteId, 0, img -> SwingUtilities.invokeLater(() ->
                     {
@@ -167,7 +183,10 @@ public class BingoBoardPanel extends JPanel
             int w = getWidth();
             int h = getHeight();
             double frac = BingoTiles.fillFraction(tile.points, tile.threshold);
-            boolean full = frac >= 1.0;
+            // The server's own verdict wins when it says complete: a tile with a threshold of zero is
+            // complete from the start with no points at all, which points/threshold cannot express.
+            boolean full = tile.complete || frac >= 1.0;
+            if (full) frac = 1.0;
 
             g2.setColor(ColorScheme.DARKER_GRAY_COLOR);
             g2.fillRect(0, 0, w, h);
@@ -185,6 +204,17 @@ public class BingoBoardPanel extends JPanel
                 int iw = img.getWidth();
                 int ih = img.getHeight();
                 g2.drawImage(img, (w - iw) / 2, (h - ih) / 2 - 3, null);
+            }
+            else if (tile.code != null && !tile.code.isEmpty())
+            {
+                // No icon resolved (an item-less tile, or a Wise Old Man metric with no sprite): draw
+                // the tile code so the cell still reads as a real tile rather than an empty square.
+                g2.setFont(CODE_FONT);
+                FontMetrics cfm = g2.getFontMetrics();
+                int cx = (w - cfm.stringWidth(tile.code)) / 2;
+                int cy = (h - cfm.getHeight()) / 2 + cfm.getAscent() - 3;
+                g2.setColor(full ? new Color(70, 55, 10) : new Color(140, 140, 140));
+                g2.drawString(tile.code, cx, cy);
             }
 
             String text = BingoTiles.formatPoints(tile.points, tile.threshold);

@@ -44,24 +44,27 @@ public class PlatformApiServiceBingoTest
     {
         // Real route shape (src/routes/bingo.ts loadFullBingoEvent): event.settings is whitelisted
         // down to { rows, cols, teamSize, hasDraft } for a public/full-detail read - no winRule, so
-        // this payload includes one anyway (as a real server response predating a settings change
-        // never would, but a stale/future field must still be silently ignored) to prove parsing
-        // never reads or stores it; teams[] carries the rich per-team fields (members + points/
-        // tilesComplete/rank/gapToAbove/leadOverBelow/roster/recentDrops) together; standings[] is
-        // the plain leaderboard (teamId/name/color/points/tilesComplete/rank only - no gap/roster/
-        // recentDrops); a progress[team][tile].drops entry has no tileCode key of its own (it's
-        // implied by the outer tile-code key); bounties never send "released"/"claimed" booleans,
-        // only description (null pre-release) and claimedTeamId (null = unclaimed).
+        // this payload includes one anyway (as a real server response never would, but a stale/future
+        // field must still be silently ignored) to prove parsing never reads or stores it; board
+        // tiles carry kind ("drop" | "kc" | "xp"), description, womMetric and pointsPer; teams[]
+        // carries the rich per-team fields (members + points/tilesComplete/rank/gapToAbove/
+        // leadOverBelow/roster/recentDrops) together; standings[] is the plain leaderboard
+        // (teamId/name/color/points/tilesComplete/rank only - no gap/roster/recentDrops); a
+        // progress[team][tile].drops entry has no tileCode key of its own (it's implied by the outer
+        // tile-code key); a bounty sends an explicit "released" boolean, and while unreleased its
+        // title reads "Bounty <number>" with a null description and empty items.
         String payload = "{"
             + "\"event\":{\"id\":\"ev1\",\"name\":\"Autumn Bingo\",\"status\":\"active\","
             + "  \"startTime\":\"2026-09-01T00:00:00Z\",\"endTime\":\"2026-09-15T00:00:00Z\","
             + "  \"winnerTeamId\":null,\"settings\":{\"rows\":2,\"cols\":2,\"winRule\":\"points\"}},"
             + "\"board\":{\"rows\":2,\"cols\":2,\"tiles\":["
-            + "  {\"code\":\"A1\",\"name\":\"Zulrah\",\"row\":0,\"col\":0,\"kind\":\"boss\","
+            + "  {\"code\":\"A1\",\"name\":\"Zulrah\",\"row\":0,\"col\":0,\"kind\":\"drop\","
+            + "   \"description\":null,\"womMetric\":null,\"pointsPer\":null,"
             + "   \"threshold\":30,\"max\":0,\"icon\":\"Zulrah\",\"items\":["
             + "     {\"itemName\":\"Zulrah's scales\",\"itemId\":12934,\"points\":1}]},"
-            + "  {\"code\":\"A2\",\"name\":\"Twisted bow\",\"row\":0,\"col\":1,\"kind\":\"item\","
-            + "   \"threshold\":1,\"max\":0,\"icon\":\"20997\",\"items\":[]}"
+            + "  {\"code\":\"A2\",\"name\":\"Vorkath KC\",\"row\":0,\"col\":1,\"kind\":\"kc\","
+            + "   \"description\":\"One point per kill\",\"womMetric\":\"vorkath\",\"pointsPer\":1,"
+            + "   \"threshold\":30,\"max\":40,\"icon\":null,\"items\":[]}"
             + "]},"
             + "\"teams\":[{\"teamId\":\"t1\",\"name\":\"Alpha\",\"color\":\"#FF0000\",\"members\":[\"Alice\",\"Bob\"],"
             + "  \"points\":30,\"tilesComplete\":1,\"rank\":1,\"gapToAbove\":null,"
@@ -73,7 +76,8 @@ public class PlatformApiServiceBingoTest
             + "  \"tilesComplete\":1,\"rank\":1}],"
             + "\"progress\":{\"t1\":{\"A1\":{\"points\":30,\"complete\":true,\"drops\":[{\"rsn\":\"Alice\","
             + "  \"item\":\"Zulrah's scales\",\"points\":1,\"proofUrl\":null,\"droppedAt\":null}]}}},"
-            + "\"bounties\":[{\"id\":\"b1\",\"number\":1,\"title\":\"Mystery bounty\",\"description\":null,"
+            + "\"bounties\":[{\"id\":\"b1\",\"number\":1,\"title\":\"Bounty 1\",\"description\":null,"
+            + "  \"released\":false,\"items\":[],"
             + "  \"points\":50,\"releaseAt\":\"2026-09-10T00:00:00Z\",\"claimedTeamId\":null,\"claimedAt\":null}]"
             + "}";
 
@@ -85,6 +89,20 @@ public class PlatformApiServiceBingoTest
         assertEquals(2, card.board.tiles.size());
         assertEquals("Zulrah", card.board.tiles.get(0).icon);
         assertEquals(1, card.board.tiles.get(0).items.size());
+        assertEquals("drop", card.board.tiles.get(0).kind);
+        assertFalse(card.board.tiles.get(0).isWomTile());
+        assertNull(card.board.tiles.get(0).womMetric);
+
+        // The kc tile: no items, no icon, but a metric and a points-per rate to render from.
+        PlatformApiService.BingoBoardTile kc = card.board.tiles.get(1);
+        assertEquals("kc", kc.kind);
+        assertTrue(kc.isWomTile());
+        assertEquals("vorkath", kc.womMetric);
+        assertEquals(1, kc.pointsPer, 0.0001);
+        assertEquals("One point per kill", kc.description);
+        assertEquals(40, kc.max, 0.0001);
+        assertTrue(kc.items.isEmpty());
+        assertNull(kc.icon);
 
         assertEquals(1, card.teams.size());
         assertEquals(2, card.teams.get(0).members.size());
@@ -108,21 +126,25 @@ public class PlatformApiServiceBingoTest
         assertTrue(card.progress.get("t1").get("A1").complete);
         assertEquals(1, card.progress.get("t1").get("A1").drops.size());
 
+        // A locked bounty still carries everything a numbered slot needs: number, points and the
+        // released flag are real even though the title is masked and the description withheld.
         assertEquals(1, card.bounties.size());
         assertEquals(1, card.bounties.get(0).number);
         assertEquals(50, card.bounties.get(0).points, 0.0001);
+        assertEquals("Bounty 1", card.bounties.get(0).title);
         assertFalse(card.bounties.get(0).released);
         assertNull(card.bounties.get(0).description);
         assertFalse(card.bounties.get(0).claimed);
         assertNull(card.bounties.get(0).claimedTeamId);
     }
 
-    @Test public void bountyIsReleasedAndClaimedWhenDescriptionAndClaimedTeamIdArePresent()
+    @Test public void bountyReleasedComesFromTheServerFlagAndClaimedFromClaimedTeamId()
     {
-        // description present (non-null) means released; a non-empty claimedTeamId means claimed.
-        // The server never sends "released"/"claimed" booleans directly - both are client-derived.
+        // "released" is the server's own boolean; a non-empty claimedTeamId means claimed (that one
+        // is still client-derived, since no "claimed" boolean is ever sent).
         String payload = "{\"bounties\":[{\"id\":\"b1\",\"number\":2,\"title\":\"Claimed bounty\","
-            + "\"description\":\"Kill the boss\",\"points\":25,\"releaseAt\":\"2026-09-01T00:00:00Z\","
+            + "\"description\":\"Kill the boss\",\"released\":true,\"items\":[\"Twisted bow\"],"
+            + "\"points\":25,\"releaseAt\":\"2026-09-01T00:00:00Z\","
             + "\"claimedTeamId\":\"t1\",\"claimedAt\":\"2026-09-05T00:00:00Z\"}]}";
         PlatformApiService.BingoCard card = PlatformApiService.parseBingoCard(json(payload));
         assertNotNull(card);
@@ -132,6 +154,20 @@ public class PlatformApiServiceBingoTest
         assertTrue(card.bounties.get(0).claimed);
         assertEquals("t1", card.bounties.get(0).claimedTeamId);
         assertEquals("2026-09-05T00:00:00Z", card.bounties.get(0).claimedAt);
+    }
+
+    @Test public void releasedBountyWithNoDescriptionStillReadsAsReleased()
+    {
+        // The old client derived "released" from description being present, so a host who released a
+        // bounty without writing a description had it read as still locked.
+        String payload = "{\"bounties\":[{\"id\":\"b1\",\"number\":3,\"title\":\"First Twisted bow\","
+            + "\"description\":null,\"released\":true,\"points\":40,"
+            + "\"releaseAt\":\"2026-09-01T00:00:00Z\",\"claimedTeamId\":null,\"claimedAt\":null}]}";
+        PlatformApiService.BingoCard card = PlatformApiService.parseBingoCard(json(payload));
+        assertNotNull(card);
+        assertTrue(card.bounties.get(0).released);
+        assertNull(card.bounties.get(0).description);
+        assertFalse(card.bounties.get(0).claimed);
     }
 
     @Test public void missingOptionalFieldsNeverThrow()
@@ -162,9 +198,12 @@ public class PlatformApiServiceBingoTest
     // ── parseBingoPlayer (drill-in) ──
     @Test public void playerDrillInParsesTilesAndDrops()
     {
+        // Real route shape (GET .../bingo/:id/players/:rsn): each drop carries tileCode/item/points/
+        // proofUrl/droppedAt and NO rsn of its own, because the whole response is about one player.
+        // The parser fills the requested rsn in, so the UI never renders these rows as "Unknown".
         String payload = "{\"rsn\":\"Alice\",\"teamId\":\"t1\",\"points\":42,"
             + "\"tiles\":[{\"code\":\"A1\",\"points\":30},{\"code\":\"A2\",\"points\":12}],"
-            + "\"drops\":[{\"rsn\":\"Alice\",\"item\":\"Zulrah's scales\",\"tileCode\":\"A1\",\"points\":1,"
+            + "\"drops\":[{\"item\":\"Zulrah's scales\",\"tileCode\":\"A1\",\"points\":1,"
             + "  \"proofUrl\":\"https://discord.com/channels/1/2/3\",\"droppedAt\":\"2026-09-02T00:00:00Z\"}]}";
         PlatformApiService.BingoPlayer p = PlatformApiService.parseBingoPlayer(json(payload));
         assertNotNull(p);
@@ -174,6 +213,8 @@ public class PlatformApiServiceBingoTest
         assertEquals(2, p.tiles.size());
         assertEquals("A1", p.tiles.get(0).code);
         assertEquals(1, p.drops.size());
+        assertEquals("Alice", p.drops.get(0).rsn);
+        assertEquals("A1", p.drops.get(0).tileCode);
     }
 
     @Test public void playerDrillInNullRootReturnsNull()

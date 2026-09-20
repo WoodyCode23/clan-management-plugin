@@ -1621,8 +1621,18 @@ public class PlatformApiService
         { this.itemName = itemName; this.itemId = itemId; this.points = points; }
     }
 
-    /** One board tile definition (static: no progress). kind is free-form ("boss", "skill", "item", ...);
-     *  the client does not branch on it, only on whether an icon resolves to a boss sprite or an item. */
+    /**
+     * One board tile definition (static: no progress).
+     *
+     * kind is the server's enum, exactly one of "drop", "kc" or "xp" (absent/unknown is treated as
+     * "drop"):
+     *  - "drop" scores from logged item drops and carries items[].
+     *  - "kc"/"xp" score from Wise Old Man gains instead. They carry womMetric (the WOM metric slug,
+     *    e.g. "vorkath" or "woodcutting") and pointsPer, have NO items at all, and never match a
+     *    drop. Their points still arrive the ordinary way, in progress[teamId][code].points, so the
+     *    board's gold fill works on them unchanged; only the icon has to come from somewhere else
+     *    (see BingoTeamView#resolveTile, which resolves womMetric to a boss/skill sprite).
+     */
     public static class BingoBoardTile
     {
         public final String code;
@@ -1634,11 +1644,28 @@ public class PlatformApiService
         public final double max;
         public final String icon; // boss name, item name, item id (as text), or empty -> first item
         public final List<BingoItem> items;
+        public final String description; // may be null
+        public final String womMetric;   // kc/xp tiles only; null on a drop tile
+        public final double pointsPer;   // kc/xp tiles only; 0 when absent
         public BingoBoardTile(String code, String name, String kind, int row, int col, double threshold,
-                              double max, String icon, List<BingoItem> items)
+                              double max, String icon, List<BingoItem> items,
+                              String description, String womMetric, double pointsPer)
         {
             this.code = code; this.name = name; this.kind = kind; this.row = row; this.col = col;
             this.threshold = threshold; this.max = max; this.icon = icon; this.items = items;
+            this.description = description; this.womMetric = womMetric; this.pointsPer = pointsPer;
+        }
+        /** Drop-tile convenience: no description, no WOM metric. */
+        public BingoBoardTile(String code, String name, String kind, int row, int col, double threshold,
+                              double max, String icon, List<BingoItem> items)
+        {
+            this(code, name, kind, row, col, threshold, max, icon, items, null, null, 0);
+        }
+
+        /** True for a Wise Old Man scored tile (kind "kc" or "xp"), which has no items and no item icon. */
+        public boolean isWomTile()
+        {
+            return "kc".equalsIgnoreCase(kind) || "xp".equalsIgnoreCase(kind);
         }
     }
 
@@ -1684,10 +1711,14 @@ public class PlatformApiService
     }
 
     /** One counted drop, wherever it is shown: a tile's contributing drops, a team's recent drops, or
-     *  a player's drill-in. tileCode is null for a player-drill-in drop that has no tile context.
-     *  Deliberately carries NO proof/URL field: the server may include one, but the plugin never
-     *  parses or shows any server-supplied URL (Plugin Hub SSRF/link-opening concern). The website
-     *  keeps proof links; this is plugin-only. */
+     *  a player's drill-in. Which keys the server actually sends varies by surface (a tile's drops
+     *  carry no tileCode, since the enclosing key already is one; the player drill-in carries no rsn,
+     *  since the whole response is about one player), so the parsers fill the implied value in rather
+     *  than leaving a field null for the UI to render as "Unknown".
+     *  Deliberately carries NO proof/URL field: the server DOES include one for a caller with clan
+     *  identity (which the plugin's shared key is), but the plugin never parses, stores, shows or
+     *  opens any server-supplied URL (Plugin Hub SSRF/link-opening concern). The website keeps proof
+     *  links; this is plugin-only. */
     public static class BingoDrop
     {
         public final String rsn;
@@ -1745,10 +1776,20 @@ public class PlatformApiService
         }
     }
 
-    /** description is null until release (the server nulls it out pre-release; it never sends a
-     *  "released" boolean, so the client derives one from whether description came through). The
-     *  server likewise never sends a "claimed" boolean, only claimedTeamId (null = unclaimed); the
-     *  client derives "claimed" from that. */
+    /**
+     * One bounty slot. The server hides an unreleased bounty from anyone who is not the host: the
+     * TITLE is replaced with "Bounty &lt;number&gt;", description comes back null and items comes back
+     * empty, while number, points, releaseAt and the released flag are always real. A locked bounty
+     * therefore still has everything needed to render "Bounty 3, worth 50 points, not released yet".
+     *
+     * released is an explicit boolean on the payload (it is NOT derived from description: a host
+     * legitimately releases a bounty with no description at all, which the old derivation read as
+     * still locked). The server still sends no "claimed" boolean, only claimedTeamId (null =
+     * unclaimed), so that one stays client-derived.
+     *
+     * Parsed but not currently rendered anywhere: the plugin's bingo card shows standings, the board,
+     * the roster and recent drops. Bounty points are already included in a team's points total.
+     */
     public static class BingoBounty
     {
         public final String id;
@@ -1834,6 +1875,22 @@ public class PlatformApiService
 
     private static List<BingoDrop> parseBingoDrops(JsonObject o, String key)
     {
+        return parseBingoDrops(o, key, null);
+    }
+
+    /**
+     * Drop rows from any bingo surface. fallbackRsn supplies the player name on a surface where the
+     * server omits it because the whole response is already about one player (the .../players/:rsn
+     * drill-in sends only tileCode/item/points/droppedAt), so those rows render with the real name
+     * instead of "Unknown".
+     *
+     * "proofUrl" is deliberately never read: the plugin does not consume server-supplied URLs.
+     * The server now also refuses to send it to the plugin at all (the shared clan key and the
+     * personal key are excluded from that field, so only a website session ever receives one), so
+     * the rule holds even if this parser is changed carelessly later. Keep both halves.
+     */
+    private static List<BingoDrop> parseBingoDrops(JsonObject o, String key, String fallbackRsn)
+    {
         List<BingoDrop> drops = new ArrayList<>();
         if (o.has(key) && o.get(key).isJsonArray())
         {
@@ -1841,7 +1898,9 @@ public class PlatformApiService
             {
                 if (!el.isJsonObject()) continue;
                 JsonObject d = el.getAsJsonObject();
-                drops.add(new BingoDrop(jsonStr(d, "rsn"), jsonStr(d, "item"), jsonStr(d, "tileCode"),
+                String rsn = jsonStr(d, "rsn");
+                if (rsn == null || rsn.isEmpty()) rsn = fallbackRsn;
+                drops.add(new BingoDrop(rsn, jsonStr(d, "item"), jsonStr(d, "tileCode"),
                     jsonNum(d, "points"), jsonStr(d, "droppedAt")));
             }
         }
@@ -1891,10 +1950,13 @@ public class PlatformApiService
                     {
                         if (!el.isJsonObject()) continue;
                         JsonObject t = el.getAsJsonObject();
+                        // kind/womMetric/pointsPer matter for a kc/xp tile, which has no items and no
+                        // item icon: BingoTeamView resolves its icon from womMetric instead.
                         tiles.add(new BingoBoardTile(jsonStr(t, "code"), jsonStr(t, "name"), jsonStr(t, "kind"),
                             t.has("row") && !t.get("row").isJsonNull() ? t.get("row").getAsInt() : 0,
                             t.has("col") && !t.get("col").isJsonNull() ? t.get("col").getAsInt() : 0,
-                            jsonNum(t, "threshold"), jsonNum(t, "max"), jsonStr(t, "icon"), parseBingoItems(t)));
+                            jsonNum(t, "threshold"), jsonNum(t, "max"), jsonStr(t, "icon"), parseBingoItems(t),
+                            jsonStr(t, "description"), jsonStr(t, "womMetric"), jsonNum(t, "pointsPer")));
                     }
                 }
                 board = new BingoBoard(rows, cols, tiles);
@@ -1976,9 +2038,13 @@ public class PlatformApiService
                 {
                     if (!el.isJsonObject()) continue;
                     JsonObject o = el.getAsJsonObject();
-                    // The server never sends "released"/"claimed" booleans: it nulls out
-                    // "description" pre-release, and reports only "claimedTeamId" (null = unclaimed).
-                    boolean released = o.has("description") && !o.get("description").isJsonNull();
+                    // "released" is an explicit server boolean. Only fall back to the old
+                    // description-presence guess when the key is missing entirely (an older server),
+                    // since a released bounty may legitimately have no description.
+                    boolean released = o.has("released") && !o.get("released").isJsonNull()
+                        ? o.get("released").getAsBoolean()
+                        : o.has("description") && !o.get("description").isJsonNull();
+                    // "claimed" is still client-derived: only claimedTeamId is sent (null = unclaimed).
                     String claimedTeamId = jsonStr(o, "claimedTeamId");
                     boolean claimed = claimedTeamId != null && !claimedTeamId.isEmpty();
                     bounties.add(new BingoBounty(jsonStr(o, "id"),
@@ -2024,8 +2090,11 @@ public class PlatformApiService
                     tiles.add(new BingoPlayerTile(jsonStr(o, "code"), jsonNum(o, "points")));
                 }
             }
-            return new BingoPlayer(jsonStr(root, "rsn"), jsonStr(root, "teamId"), jsonNum(root, "points"),
-                tiles, parseBingoDrops(root, "drops"));
+            // This response's drops carry no "rsn" of their own (the whole payload is about one
+            // player), so the requested rsn is filled in as each row's player.
+            String rsn = jsonStr(root, "rsn");
+            return new BingoPlayer(rsn, jsonStr(root, "teamId"), jsonNum(root, "points"),
+                tiles, parseBingoDrops(root, "drops", rsn));
         }
         catch (Exception ex)
         {

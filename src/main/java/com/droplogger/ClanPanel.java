@@ -3722,32 +3722,37 @@ public class ClanPanel extends PluginPanel
      */
     private PlatformApiService.BingoCard sampleBingoCard()
     {
+        // Columns: code, name, icon, row, col, threshold, kind, womMetric. kind is the server's real
+        // enum ("drop" | "kc" | "xp"), so the preview exercises the same branches a live board does:
+        // D2 is a KC tile whose metric resolves to a boss sprite, A4 an XP tile whose metric resolves
+        // to a skill sprite, and E4 a KC tile on an aggregate metric that resolves to no sprite at
+        // all, which is the case that has to read as a real tile rather than a broken one.
         Object[][] defs = {
-            {"A1", "Vorkath", "Vorkath", 0, 0, 30.0},
-            {"B1", "Zulrah", "Zulrah", 0, 1, 30.0},
-            {"C1", "Kree'arra", "Kree'arra", 0, 2, 30.0},
-            {"D1", "Nex", "Nex", 0, 3, 30.0},
-            {"E1", "Cerberus", "Cerberus", 0, 4, 30.0},
-            {"A2", "The Leviathan", "The Leviathan", 1, 0, 30.0},
-            {"B2", "Vardorvis", "Vardorvis", 1, 1, 30.0},
-            {"C2", "Corporeal Beast", "Corporeal Beast", 1, 2, 30.0},
-            {"D2", "Chambers of Xeric", "Chambers of Xeric", 1, 3, 30.0},
-            {"E2", "Theatre of Blood", "Theatre of Blood", 1, 4, 30.0},
-            {"A3", "Tombs of Amascut", "Tombs of Amascut", 2, 0, 30.0},
-            {"B3", "Phosani's Nightmare", "Phosani's Nightmare", 2, 1, 30.0},
-            {"C3", "Twisted bow", "", 2, 2, 1.0},
-            {"D3", "Dragon warhammer", "", 2, 3, 1.0},
-            {"E3", "Zalcano", "Zalcano", 2, 4, 30.0},
-            {"A4", "Giant Mole", "Giant Mole", 3, 0, 30.0},
-            {"B4", "Kraken", "Kraken", 3, 1, 30.0},
-            {"C4", "Sarachnis", "Sarachnis", 3, 2, 30.0},
-            {"D4", "Skotizo", "Skotizo", 3, 3, 30.0},
-            {"E4", "Vetion", "Vetion", 3, 4, 30.0},
-            {"A5", "King Black Dragon", "King Black Dragon", 4, 0, 30.0},
-            {"B5", "Callisto", "Callisto", 4, 1, 30.0},
-            {"C5", "Venenatis", "Venenatis", 4, 2, 30.0},
-            {"D5", "Artio", "Artio", 4, 3, 30.0},
-            {"E5", "Scorpia", "Scorpia", 4, 4, 30.0},
+            {"A1", "Vorkath", "Vorkath", 0, 0, 30.0, "drop", null},
+            {"B1", "Zulrah", "Zulrah", 0, 1, 30.0, "drop", null},
+            {"C1", "Kree'arra", "Kree'arra", 0, 2, 30.0, "drop", null},
+            {"D1", "Nex", "Nex", 0, 3, 30.0, "drop", null},
+            {"E1", "Cerberus", "Cerberus", 0, 4, 30.0, "drop", null},
+            {"A2", "The Leviathan", "The Leviathan", 1, 0, 30.0, "drop", null},
+            {"B2", "Vardorvis", "Vardorvis", 1, 1, 30.0, "drop", null},
+            {"C2", "Corporeal Beast", "Corporeal Beast", 1, 2, 30.0, "drop", null},
+            {"D2", "Chambers of Xeric KC", "", 1, 3, 30.0, "kc", "chambers_of_xeric"},
+            {"E2", "Theatre of Blood", "Theatre of Blood", 1, 4, 30.0, "drop", null},
+            {"A3", "Tombs of Amascut", "Tombs of Amascut", 2, 0, 30.0, "drop", null},
+            {"B3", "Phosani's Nightmare", "Phosani's Nightmare", 2, 1, 30.0, "drop", null},
+            {"C3", "Twisted bow", "", 2, 2, 1.0, "drop", null},
+            {"D3", "Dragon warhammer", "", 2, 3, 1.0, "drop", null},
+            {"E3", "Zalcano", "Zalcano", 2, 4, 30.0, "drop", null},
+            {"A4", "Woodcutting XP", "", 3, 0, 30.0, "xp", "woodcutting"},
+            {"B4", "Kraken", "Kraken", 3, 1, 30.0, "drop", null},
+            {"C4", "Sarachnis", "Sarachnis", 3, 2, 30.0, "drop", null},
+            {"D4", "Skotizo", "Skotizo", 3, 3, 30.0, "drop", null},
+            {"E4", "Clue scrolls", "", 3, 4, 30.0, "kc", "clue_scrolls_all"},
+            {"A5", "King Black Dragon", "King Black Dragon", 4, 0, 30.0, "drop", null},
+            {"B5", "Callisto", "Callisto", 4, 1, 30.0, "drop", null},
+            {"C5", "Venenatis", "Venenatis", 4, 2, 30.0, "drop", null},
+            {"D5", "Artio", "Artio", 4, 3, 30.0, "drop", null},
+            {"E5", "Scorpia", "Scorpia", 4, 4, 30.0, "drop", null},
         };
         java.util.List<PlatformApiService.BingoBoardTile> tiles = new java.util.ArrayList<>();
         for (Object[] d : defs)
@@ -3758,14 +3763,17 @@ public class ClanPanel extends PluginPanel
             int row = (Integer) d[3];
             int col = (Integer) d[4];
             double threshold = (Double) d[5];
+            String kind = (String) d[6];
+            String womMetric = (String) d[7];
             java.util.List<PlatformApiService.BingoItem> items = new java.util.ArrayList<>();
-            if (icon.isEmpty())
+            // A kc/xp tile has no items at all, exactly like the server's own payload.
+            if (icon.isEmpty() && womMetric == null)
             {
                 int itemId = "C3".equals(code) ? 20997 : 13576;
                 items.add(new PlatformApiService.BingoItem(name, itemId, 1));
             }
-            tiles.add(new PlatformApiService.BingoBoardTile(code, name, icon.isEmpty() ? "item" : "boss",
-                row, col, threshold, 0, icon, items));
+            tiles.add(new PlatformApiService.BingoBoardTile(code, name, kind, row, col, threshold, 0, icon, items,
+                null, womMetric, womMetric != null ? 1 : 0));
         }
         PlatformApiService.BingoBoard board = new PlatformApiService.BingoBoard(5, 5, tiles);
 

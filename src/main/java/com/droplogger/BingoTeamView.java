@@ -127,27 +127,46 @@ public final class BingoTeamView
 
     /**
      * Resolve one static board tile plus that team's progress into the renderer's {@link BingoTile}.
-     * Icon resolution order (matches the design doc's "Tiles tab Icon column"): the tile's icon
-     * string first as a boss name (via {@link BingoTiles#bossSpriteId}), else as a bare item id, else
-     * as an item name matched against the tile's own items, else the tile's first item, else a blank
-     * icon (itemId 0, which BingoBoardPanel already renders as an iconless cell rather than throwing).
+     *
+     * Progress is the same for every kind of tile: points come from progress[teamId][code], so the
+     * board's gold fill works on a kc/xp tile exactly as it does on a drop tile. A kc/xp tile whose
+     * points have never been computed (no successful Wise Old Man sync yet, or a WOM outage freezing
+     * them) simply reads as zero points, which renders as an empty tile, not an error.
+     *
+     * Only the icon differs by kind:
+     *  - drop tile: the icon string first as a boss/activity name (via {@link BingoTiles#bossSpriteId}),
+     *    else as a bare item id, else as an item name matched against the tile's own items, else the
+     *    tile's first item, else no icon.
+     *  - kc/xp tile: the icon string first (a host may still set one explicitly), then womMetric
+     *    resolved through {@link BingoTiles#metricSpriteId}, which also matches skills, since an xp
+     *    tile's metric is a skill. It NEVER falls back to an item: a kc/xp tile has no items, and
+     *    reaching for one would be the "broken drop tile" rendering this branch exists to avoid.
+     *
+     * An unresolved icon means itemId 0, which BingoBoardPanel renders as a cell labelled with the
+     * tile code rather than a blank square, so the tile still reads as a real tile.
      */
     public static BingoTile resolveTile(PlatformApiService.BingoBoardTile t, PlatformApiService.BingoTileProgress progress)
     {
         double points = progress != null ? progress.points : 0;
+        boolean complete = progress != null && progress.complete;
         double threshold = t.threshold > 0 ? t.threshold : t.max;
+        String kind = t.kind == null || t.kind.isEmpty() ? BingoTile.KIND_DROP : t.kind;
+        boolean wom = t.isWomTile();
 
         String icon = t.icon == null ? "" : t.icon.trim();
         if (!icon.isEmpty())
         {
-            if (BingoTiles.bossSpriteId(icon) >= 0)
+            // A kc/xp tile's explicit icon may name a skill ("Woodcutting"), so it uses the wider
+            // metric lookup; a drop tile keeps the boss/activity-only lookup it has always used.
+            int spriteId = wom ? BingoTiles.metricSpriteId(icon) : BingoTiles.bossSpriteId(icon);
+            if (spriteId >= 0)
             {
-                return BingoTile.boss(t.code, t.name, t.row, t.col, points, threshold, icon);
+                return BingoTile.sprite(t.code, t.name, t.row, t.col, points, threshold, icon, spriteId, kind, complete);
             }
             try
             {
                 int id = Integer.parseInt(icon);
-                return BingoTile.item(t.code, t.name, t.row, t.col, points, threshold, id);
+                return BingoTile.item(t.code, t.name, t.row, t.col, points, threshold, id, kind, complete);
             }
             catch (NumberFormatException notAnId)
             {
@@ -157,17 +176,26 @@ public final class BingoTeamView
                     {
                         if (item.itemName != null && item.itemName.equalsIgnoreCase(icon))
                         {
-                            return BingoTile.item(t.code, t.name, t.row, t.col, points, threshold, item.itemId);
+                            return BingoTile.item(t.code, t.name, t.row, t.col, points, threshold, item.itemId, kind, complete);
                         }
                     }
                 }
             }
         }
+        if (wom)
+        {
+            int spriteId = BingoTiles.metricSpriteId(t.womMetric);
+            if (spriteId >= 0)
+            {
+                return BingoTile.sprite(t.code, t.name, t.row, t.col, points, threshold, t.womMetric, spriteId, kind, complete);
+            }
+            return BingoTile.item(t.code, t.name, t.row, t.col, points, threshold, 0, kind, complete);
+        }
         if (t.items != null && !t.items.isEmpty())
         {
-            return BingoTile.item(t.code, t.name, t.row, t.col, points, threshold, t.items.get(0).itemId);
+            return BingoTile.item(t.code, t.name, t.row, t.col, points, threshold, t.items.get(0).itemId, kind, complete);
         }
-        return BingoTile.item(t.code, t.name, t.row, t.col, points, threshold, 0);
+        return BingoTile.item(t.code, t.name, t.row, t.col, points, threshold, 0, kind, complete);
     }
 
     /** The selected team's whole board as the renderer's List&lt;BingoTile&gt;. Missing progress for
