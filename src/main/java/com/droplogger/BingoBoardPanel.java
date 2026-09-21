@@ -37,6 +37,30 @@ import java.util.List;
  */
 public class BingoBoardPanel extends JPanel
 {
+    /**
+     * Places tiles into a rows x cols grid. row/col from the server are ONE-based: a board is
+     * authored in a spreadsheet whose top-left tile is row 1, col 1, and the server's own
+     * tileWithinGrid rejects anything below 1. Treating them as zero-based left the top-left cell
+     * blank and silently dropped the whole last row and column off the board (the dev preview hid
+     * it by using zero-based sample data). Anything outside the grid is ignored rather than
+     * throwing: a host who shrinks a board mid-event leaves tiles behind.
+     *
+     * Package-private and pure so the indexing can be tested without building a panel.
+     */
+    static BingoTile[][] layOutForTest(java.util.List<BingoTile> tiles, int rows, int cols)
+    {
+        BingoTile[][] grid = new BingoTile[rows][cols];
+        if (tiles == null) return grid;
+        for (BingoTile t : tiles)
+        {
+            if (t != null && t.row >= 1 && t.row <= rows && t.col >= 1 && t.col <= cols)
+            {
+                grid[t.row - 1][t.col - 1] = t;
+            }
+        }
+        return grid;
+    }
+
     private static final Color GOLD = new Color(212, 175, 55);
     private static final Color GOLD_FILL = new Color(212, 175, 55, 195); // translucent so the icon stays readable
     private static final Color BRIGHT_GOLD_BORDER = new Color(255, 215, 0);
@@ -75,14 +99,7 @@ public class BingoBoardPanel extends JPanel
         setMaximumSize(size);
         setAlignmentX(Component.LEFT_ALIGNMENT);
 
-        BingoTile[][] grid = new BingoTile[rows][cols];
-        for (BingoTile t : tiles)
-        {
-            if (t != null && t.row >= 0 && t.row < rows && t.col >= 0 && t.col < cols)
-            {
-                grid[t.row][t.col] = t;
-            }
-        }
+        BingoTile[][] grid = layOutForTest(tiles, rows, cols);
 
         // GridLayout adds row-major, matching this loop order.
         for (int r = 0; r < rows; r++)

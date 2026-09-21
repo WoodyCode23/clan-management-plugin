@@ -3548,13 +3548,10 @@ public class ClanPanel extends PluginPanel
         row.setBorder(new EmptyBorder(4, 7, 4, 7));
         row.setAlignmentX(Component.LEFT_ALIGNMENT);
 
-        // Their best drop so far, as an icon: read from the card's own progress, no extra request.
-        JPanel leftSide = new JPanel(new BorderLayout(4, 0));
-        leftSide.setBackground(row.getBackground());
-        leftSide.add(bingoItemIcon(bingoBestDropItemId(card, teamId, r.rsn)), BorderLayout.WEST);
-        leftSide.add(bingoWrapLabel(r.rsn != null ? r.rsn : "Unknown", BINGO_ROW_TEXT_WIDTH,
-            READABLE_FONT, mine ? ACCENT_GOLD : Color.WHITE), BorderLayout.CENTER);
-        row.add(leftSide, BorderLayout.WEST);
+        // No icon here on purpose: icons lead a DROP row only. A player is not an item, and an icon
+        // in front of every name read as clutter in a column this narrow.
+        row.add(bingoWrapLabel(r.rsn != null ? r.rsn : "Unknown", BINGO_ROW_TEXT_WIDTH + BINGO_ICON_WIDTH,
+            READABLE_FONT, mine ? ACCENT_GOLD : Color.WHITE), BorderLayout.WEST);
 
         // Points over drops rather than one long line: "1234 pts   12 drops" side by side was the
         // widest thing in the card and what squeezed the name column hardest. Stacked, the stat
@@ -3718,9 +3715,16 @@ public class ClanPanel extends PluginPanel
         // source boss is deliberately absent - people already know where a drop comes from, and the
         // server never sends it to a client anyway (bingo_drops.source exists only so scoring can
         // enforce a tile's "only from" rule).
+        // ...but not when it would just repeat the item. Tiles are very often named after the very
+        // thing that fills them ("Twisted bow", or a boss tile in the dev preview), and
+        // "Twisted bow (Twisted bow)" is noise.
         if (showTile && d.tileCode != null && !d.tileCode.isEmpty())
         {
-            left.append(" (").append(bingoTileLabel(d.tileCode)).append(")");
+            String tile = bingoTileLabel(d.tileCode);
+            if (tile != null && !tile.isEmpty() && !tile.equalsIgnoreCase(d.item))
+            {
+                left.append(" (").append(tile).append(")");
+            }
         }
         // Icon then text, both in WEST, so the points column on the right keeps its own lane.
         JPanel leftSide = new JPanel(new BorderLayout(4, 0));
@@ -3883,31 +3887,31 @@ public class ClanPanel extends PluginPanel
         // to a skill sprite, and E4 a KC tile on an aggregate metric that resolves to no sprite at
         // all, which is the case that has to read as a real tile rather than a broken one.
         Object[][] defs = {
-            {"A1", "Vorkath", "Vorkath", 0, 0, 30.0, "drop", null},
-            {"B1", "Zulrah", "Zulrah", 0, 1, 30.0, "drop", null},
-            {"C1", "Kree'arra", "Kree'arra", 0, 2, 30.0, "drop", null},
-            {"D1", "Nex", "Nex", 0, 3, 30.0, "drop", null},
-            {"E1", "Cerberus", "Cerberus", 0, 4, 30.0, "drop", null},
-            {"A2", "The Leviathan", "The Leviathan", 1, 0, 30.0, "drop", null},
-            {"B2", "Vardorvis", "Vardorvis", 1, 1, 30.0, "drop", null},
-            {"C2", "Corporeal Beast", "Corporeal Beast", 1, 2, 30.0, "drop", null},
-            {"D2", "Chambers of Xeric KC", "", 1, 3, 30.0, "kc", "chambers_of_xeric"},
-            {"E2", "Theatre of Blood", "Theatre of Blood", 1, 4, 30.0, "drop", null},
-            {"A3", "Tombs of Amascut", "Tombs of Amascut", 2, 0, 30.0, "drop", null},
-            {"B3", "Phosani's Nightmare", "Phosani's Nightmare", 2, 1, 30.0, "drop", null},
-            {"C3", "Twisted bow", "", 2, 2, 1.0, "drop", null},
-            {"D3", "Dragon warhammer", "", 2, 3, 1.0, "drop", null},
-            {"E3", "Zalcano", "Zalcano", 2, 4, 30.0, "drop", null},
-            {"A4", "Woodcutting XP", "", 3, 0, 30.0, "xp", "woodcutting"},
-            {"B4", "Kraken", "Kraken", 3, 1, 30.0, "drop", null},
-            {"C4", "Sarachnis", "Sarachnis", 3, 2, 30.0, "drop", null},
-            {"D4", "Skotizo", "Skotizo", 3, 3, 30.0, "drop", null},
-            {"E4", "Clue scrolls", "", 3, 4, 30.0, "kc", "clue_scrolls_all"},
-            {"A5", "King Black Dragon", "King Black Dragon", 4, 0, 30.0, "drop", null},
-            {"B5", "Callisto", "Callisto", 4, 1, 30.0, "drop", null},
-            {"C5", "Venenatis", "Venenatis", 4, 2, 30.0, "drop", null},
-            {"D5", "Artio", "Artio", 4, 3, 30.0, "drop", null},
-            {"E5", "Scorpia", "Scorpia", 4, 4, 30.0, "drop", null},
+            {"A1", "Vorkath", "Vorkath", 1, 1, 30.0, "drop", null},
+            {"B1", "Zulrah", "Zulrah", 1, 2, 30.0, "drop", null},
+            {"C1", "Kree'arra", "Kree'arra", 1, 3, 30.0, "drop", null},
+            {"D1", "Nex", "Nex", 1, 4, 30.0, "drop", null},
+            {"E1", "Cerberus", "Cerberus", 1, 5, 30.0, "drop", null},
+            {"A2", "The Leviathan", "The Leviathan", 2, 1, 30.0, "drop", null},
+            {"B2", "Vardorvis", "Vardorvis", 2, 2, 30.0, "drop", null},
+            {"C2", "Corporeal Beast", "Corporeal Beast", 2, 3, 30.0, "drop", null},
+            {"D2", "Chambers of Xeric KC", "", 2, 4, 30.0, "kc", "chambers_of_xeric"},
+            {"E2", "Theatre of Blood", "Theatre of Blood", 2, 5, 30.0, "drop", null},
+            {"A3", "Tombs of Amascut", "Tombs of Amascut", 3, 1, 30.0, "drop", null},
+            {"B3", "Phosani's Nightmare", "Phosani's Nightmare", 3, 2, 30.0, "drop", null},
+            {"C3", "Twisted bow", "", 3, 3, 1.0, "drop", null},
+            {"D3", "Dragon warhammer", "", 3, 4, 1.0, "drop", null},
+            {"E3", "Zalcano", "Zalcano", 3, 5, 30.0, "drop", null},
+            {"A4", "Woodcutting XP", "", 4, 1, 30.0, "xp", "woodcutting"},
+            {"B4", "Kraken", "Kraken", 4, 2, 30.0, "drop", null},
+            {"C4", "Sarachnis", "Sarachnis", 4, 3, 30.0, "drop", null},
+            {"D4", "Skotizo", "Skotizo", 4, 4, 30.0, "drop", null},
+            {"E4", "Clue scrolls", "", 4, 5, 30.0, "kc", "clue_scrolls_all"},
+            {"A5", "King Black Dragon", "King Black Dragon", 5, 1, 30.0, "drop", null},
+            {"B5", "Callisto", "Callisto", 5, 2, 30.0, "drop", null},
+            {"C5", "Venenatis", "Venenatis", 5, 3, 30.0, "drop", null},
+            {"D5", "Artio", "Artio", 5, 4, 30.0, "drop", null},
+            {"E5", "Scorpia", "Scorpia", 5, 5, 30.0, "drop", null},
         };
         java.util.List<PlatformApiService.BingoBoardTile> tiles = new java.util.ArrayList<>();
         for (Object[] d : defs)

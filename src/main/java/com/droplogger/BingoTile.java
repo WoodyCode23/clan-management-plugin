@@ -25,8 +25,11 @@ public final class BingoTile
 
     public final String code; // e.g. "A1"
     public final String name;
-    public final int row; // 0-based
-    public final int col; // 0-based
+    // ONE-based, straight from the server: a board is authored in a spreadsheet whose top-left tile
+    // is row 1, col 1, and the server's own tileWithinGrid rejects anything below 1. BingoBoardPanel
+    // subtracts one when it places a tile into its grid array.
+    public final int row;
+    public final int col;
     public final double points;
     public final double threshold;
     public final String bossName; // sprite label (boss/activity/skill name or WOM metric); null when this tile uses an item icon
