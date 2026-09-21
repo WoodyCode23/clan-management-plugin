@@ -324,7 +324,18 @@ public class ClanPanel extends PluginPanel
      */
     private static final int PINNED_WIDTH = PluginPanel.PANEL_WIDTH + PluginPanel.SCROLLBAR_WIDTH;
     // Wrap width for event standings rows: panel width minus the card border, insets and gold rule.
-    private static final int STANDINGS_TEXT_WIDTH = PluginPanel.PANEL_WIDTH - 40;
+    static final int STANDINGS_TEXT_WIDTH = PluginPanel.PANEL_WIDTH - 40;
+
+    // Bingo card rows (roster, drops). A BorderLayout row hands EAST its full preferred width and
+    // leaves WEST the remainder, and a plain JLabel neither wraps nor ellipsises, so a long RSN or
+    // item name was simply cut off in a panel this narrow. Reserve the stat column, wrap the
+    // left-hand text into what is left, and let a row take a second line when it needs one rather
+    // than clipping. Short rows still render on one line.
+    static final int BINGO_STAT_COL_WIDTH = 74;
+    // The item-icon column on a drop or roster row. Counted out of the text width so adding icons
+    // did not silently re-create the cramming the wrap width was introduced to fix.
+    static final int BINGO_ICON_WIDTH = 22;
+    static final int BINGO_ROW_TEXT_WIDTH = STANDINGS_TEXT_WIDTH - BINGO_STAT_COL_WIDTH - BINGO_ICON_WIDTH;
 
     // The plugin must NEVER resize the client — in either axis.
     //
@@ -1196,7 +1207,7 @@ public class ClanPanel extends PluginPanel
 
             // Combined totals. Wrapped html: three whole-number stats on one line run past the
             // side panel, so let them flow onto a second line rather than clipping the last one.
-            membersContent.add(clogNote("<html><div style='width:" + STANDINGS_TEXT_WIDTH + "px'>"
+            membersContent.add(clogNote("<html><div style='width:" + cssPxFor(STANDINGS_TEXT_WIDTH) + "px'>"
                 + tp.clogUnion + " combined clog  ·  "
                 + formatXp(tp.totalExp) + " total XP  ·  " + String.format("%,.0f", tp.totalEhb)
                 + " EHB</div></html>"));
@@ -1691,7 +1702,7 @@ public class ClanPanel extends PluginPanel
 
         if (about.bio != null && !about.bio.isEmpty())
         {
-            JLabel bio = new JLabel("<html><div style='width:" + STANDINGS_TEXT_WIDTH + "px'><i>“"
+            JLabel bio = new JLabel("<html><div style='width:" + cssPxFor(STANDINGS_TEXT_WIDTH) + "px'><i>“"
                 + escapeHtml(about.bio) + "”</i></div></html>");
             bio.setForeground(Color.WHITE);
             bio.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -3289,20 +3300,23 @@ public class ClanPanel extends PluginPanel
         row.setBackground(ColorScheme.DARKER_GRAY_COLOR);
         row.setBorder(new EmptyBorder(4, 7, 4, 7));
         row.setAlignmentX(Component.LEFT_ALIGNMENT);
-        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
 
         JPanel left = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 5, 0));
         left.setBackground(row.getBackground());
         left.add(bingoColorDot(s.color));
-        JLabel nameLbl = new JLabel(s.rank + ". " + (s.name != null && !s.name.isEmpty() ? s.name : "Team"));
-        nameLbl.setFont(READABLE_FONT);
-        nameLbl.setForeground(Color.WHITE);
-        left.add(nameLbl);
+        // Minus the colour dot and its gap, so a long team name wraps instead of being cut off.
+        left.add(bingoWrapLabel(s.rank + ". " + (s.name != null && !s.name.isEmpty() ? s.name : "Team"),
+            BINGO_ROW_TEXT_WIDTH - 18, READABLE_FONT, Color.WHITE));
         row.add(left, BorderLayout.WEST);
 
-        JLabel ptsLbl = new JLabel(formatBingoNumber(s.points) + " pts   " + s.tilesComplete + " tiles");
+        // Stacked for the same reason as the roster row: side by side, this was the widest element
+        // in the card and it squeezed the team name out.
+        JLabel ptsLbl = new JLabel("<html><div style='text-align:right'>"
+            + formatBingoNumber(s.points) + " pts<br>" + s.tilesComplete + " tiles</div></html>");
         ptsLbl.setFont(READABLE_FONT_SMALL);
         ptsLbl.setForeground(new Color(180, 180, 180));
+        ptsLbl.setHorizontalAlignment(SwingConstants.RIGHT);
+        ptsLbl.setVerticalAlignment(SwingConstants.TOP);
         row.add(ptsLbl, BorderLayout.EAST);
 
         boolean selected = s.teamId != null && s.teamId.equals(selectedBingoTeamId);
@@ -3315,6 +3329,7 @@ public class ClanPanel extends PluginPanel
         }
         final String teamId = s.teamId;
         makeCardClickable(row, () -> { if (teamId != null) { selectedBingoTeamId = teamId; updateRaidRace(currentRaidRace); } });
+        lockRowHeightToContent(row);
         return row;
     }
 
@@ -3532,17 +3547,25 @@ public class ClanPanel extends PluginPanel
         row.setBackground(mine ? new Color(50, 45, 30) : ColorScheme.DARKER_GRAY_COLOR);
         row.setBorder(new EmptyBorder(4, 7, 4, 7));
         row.setAlignmentX(Component.LEFT_ALIGNMENT);
-        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
 
-        JLabel nameLbl = new JLabel(r.rsn != null ? r.rsn : "Unknown");
-        nameLbl.setFont(READABLE_FONT);
-        nameLbl.setForeground(mine ? ACCENT_GOLD : Color.WHITE);
-        row.add(nameLbl, BorderLayout.WEST);
+        // Their best drop so far, as an icon: read from the card's own progress, no extra request.
+        JPanel leftSide = new JPanel(new BorderLayout(4, 0));
+        leftSide.setBackground(row.getBackground());
+        leftSide.add(bingoItemIcon(bingoBestDropItemId(card, teamId, r.rsn)), BorderLayout.WEST);
+        leftSide.add(bingoWrapLabel(r.rsn != null ? r.rsn : "Unknown", BINGO_ROW_TEXT_WIDTH,
+            READABLE_FONT, mine ? ACCENT_GOLD : Color.WHITE), BorderLayout.CENTER);
+        row.add(leftSide, BorderLayout.WEST);
 
-        JLabel statLbl = new JLabel(formatBingoNumber(r.points) + " pts   "
-            + r.dropCount + (r.dropCount == 1 ? " drop" : " drops"));
+        // Points over drops rather than one long line: "1234 pts   12 drops" side by side was the
+        // widest thing in the card and what squeezed the name column hardest. Stacked, the stat
+        // block stays inside BINGO_STAT_COL_WIDTH at any realistic score.
+        JLabel statLbl = new JLabel("<html><div style='text-align:right'>"
+            + formatBingoNumber(r.points) + " pts<br>"
+            + r.dropCount + (r.dropCount == 1 ? " drop" : " drops") + "</div></html>");
         statLbl.setFont(READABLE_FONT_SMALL);
         statLbl.setForeground(new Color(170, 170, 170));
+        statLbl.setHorizontalAlignment(SwingConstants.RIGHT);
+        statLbl.setVerticalAlignment(SwingConstants.TOP);
         row.add(statLbl, BorderLayout.EAST);
 
         final String rsn = r.rsn;
@@ -3570,6 +3593,7 @@ public class ClanPanel extends PluginPanel
             }
             updateRaidRace(currentRaidRace);
         });
+        lockRowHeightToContent(row);
         return row;
     }
 
@@ -3686,7 +3710,6 @@ public class ClanPanel extends PluginPanel
         row.setBackground(mine ? new Color(50, 45, 30) : ColorScheme.DARKER_GRAY_COLOR);
         row.setBorder(new EmptyBorder(3, 6, 3, 6));
         row.setAlignmentX(Component.LEFT_ALIGNMENT);
-        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 22));
 
         StringBuilder left = new StringBuilder(d.rsn != null ? d.rsn : "Unknown");
         left.append(": ").append(d.item != null ? d.item : "?");
@@ -3699,16 +3722,21 @@ public class ClanPanel extends PluginPanel
         {
             left.append(" (").append(bingoTileLabel(d.tileCode)).append(")");
         }
-        JLabel leftLbl = new JLabel(left.toString());
-        leftLbl.setFont(READABLE_FONT_SMALL);
-        leftLbl.setForeground(mine ? ACCENT_GOLD : Color.WHITE);
-        row.add(leftLbl, BorderLayout.WEST);
+        // Icon then text, both in WEST, so the points column on the right keeps its own lane.
+        JPanel leftSide = new JPanel(new BorderLayout(4, 0));
+        leftSide.setBackground(row.getBackground());
+        leftSide.add(bingoItemIcon(d.itemId), BorderLayout.WEST);
+        leftSide.add(bingoWrapLabel(left.toString(), BINGO_ROW_TEXT_WIDTH, READABLE_FONT_SMALL,
+            mine ? ACCENT_GOLD : Color.WHITE), BorderLayout.CENTER);
+        row.add(leftSide, BorderLayout.WEST);
 
         JLabel rightLbl = new JLabel(formatBingoNumber(d.points) + " pts");
         rightLbl.setFont(READABLE_FONT_SMALL);
         rightLbl.setForeground(new Color(160, 160, 160));
+        rightLbl.setVerticalAlignment(SwingConstants.TOP);
         row.add(rightLbl, BorderLayout.EAST);
 
+        lockRowHeightToContent(row);
         return row;
     }
 
@@ -3718,6 +3746,104 @@ public class ClanPanel extends PluginPanel
      * the board mid-event, and the row still has to render). Reads the live card when there is one
      * so the dev preview and the real card resolve identically.
      */
+    // Swing scales a CSS pixel in an HTML label by the display's scale factor, so on a 125%/150%
+    // display "width:185px" lays out ~1.3x wider than 185 actual pixels and the label overflows the
+    // panel it was measured against. Calibrated once by measuring a probe rather than read from a
+    // GraphicsConfiguration, so it is right under any look and feel and still works headless (where
+    // the tests run). Cached: DPI does not change mid-session in practice, and building a probe per
+    // row would be wasteful in a list.
+    private static double htmlPxScale = 0;
+
+    private static int cssPxFor(int deviceWidth)
+    {
+        if (htmlPxScale <= 0)
+        {
+            JLabel probe = new JLabel("<html><div style='width:100px'>x</div></html>");
+            int measured = probe.getPreferredSize().width;
+            htmlPxScale = measured > 0 ? measured / 100.0 : 1.0;
+        }
+        return Math.max(1, (int) Math.round(deviceWidth / htmlPxScale));
+    }
+
+    /**
+     * A left-hand row label that wraps at `width` ACTUAL pixels instead of being clipped. HTML is
+     * how Swing wraps a JLabel at all, and the text is escaped because an RSN or item name is
+     * server data that must never be read as markup.
+     */
+    static JLabel bingoWrapLabel(String text, int width, Font font, Color fg)
+    {
+        JLabel label = new JLabel("<html><div style='width:" + cssPxFor(width) + "px'>"
+            + escapeHtml(text != null ? text : "") + "</div></html>");
+        label.setFont(font);
+        label.setForeground(fg);
+        label.setVerticalAlignment(SwingConstants.TOP);
+        return label;
+    }
+
+    /**
+     * Pin a row's height to what it actually needs once its children are in, so a row that wrapped
+     * onto a second line is not cut off by a fixed maximum. Must be called AFTER everything is
+     * added; a BoxLayout would otherwise stretch the row to fill the column.
+     */
+    static void lockRowHeightToContent(JPanel row)
+    {
+        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, row.getPreferredSize().height));
+    }
+
+    /**
+     * A drop's item icon, sized to the row. Returns a blank spacer of the same size when there is no
+     * id (a sheet-typed row the catalog could not resolve) so rows stay aligned in a list rather
+     * than the text jumping left on whichever ones lack an icon.
+     */
+    private JLabel bingoItemIcon(int itemId)
+    {
+        JLabel label = new JLabel();
+        label.setPreferredSize(new Dimension(BINGO_ICON_WIDTH, 18));
+        label.setVerticalAlignment(SwingConstants.TOP);
+        if (itemId > 0 && itemManager != null)
+        {
+            AsyncBufferedImage img = itemManager.getImage(itemId);
+            label.setIcon(new ImageIcon(img));
+            // The image arrives asynchronously; repaint this label when it does.
+            img.onLoaded(() -> { label.setIcon(new ImageIcon(img)); label.revalidate(); label.repaint(); });
+        }
+        return label;
+    }
+
+    /**
+     * The item icon for a roster row: that player's highest-scoring drop so far, taken from the
+     * card's own progress map, so it needs no extra request. 0 when they have not scored yet.
+     */
+    private int bingoBestDropItemId(PlatformApiService.BingoCard card, String teamId, String rsn)
+    {
+        if (card == null || card.progress == null || rsn == null) return 0;
+        java.util.Map<String, PlatformApiService.BingoTileProgress> byTile = card.progress.get(teamId);
+        if (byTile == null) return 0;
+        int bestId = 0;
+        double bestPoints = -1;
+        for (PlatformApiService.BingoTileProgress tp : byTile.values())
+        {
+            if (tp == null || tp.drops == null) continue;
+            for (PlatformApiService.BingoDrop d : tp.drops)
+            {
+                if (d.itemId > 0 && d.points > bestPoints && BingoTeamView.isSamePlayer(d.rsn, rsn))
+                {
+                    bestPoints = d.points;
+                    bestId = d.itemId;
+                }
+            }
+        }
+        return bestId;
+    }
+
+    /** Dev preview only: an item id for a sample drop, so the preview exercises the icon path
+     *  rather than rendering every row with the blank spacer. */
+    private static int sampleTileItemId(PlatformApiService.BingoBoardTile t)
+    {
+        if (t == null || t.items == null || t.items.isEmpty()) return 0;
+        return t.items.get(0).itemId;
+    }
+
     private String bingoTileLabel(String tileCode)
     {
         // The card being rendered right now, NOT currentBingoCard: the dev preview renders a sample
@@ -3856,7 +3982,7 @@ public class ClanPanel extends PluginPanel
                 PlatformApiService.BingoTileProgress tp = p.get(tile.code);
                 if (tp != null && tp.points > 0 && n < 4)
                 {
-                    recent.add(new PlatformApiService.BingoDrop(t.members.get(n % t.members.size()), tile.name, tile.code,
+                    recent.add(new PlatformApiService.BingoDrop(t.members.get(n % t.members.size()), tile.name, sampleTileItemId(tile), tile.code,
                         tp.points, "2026-09-1" + (n + 1) + "T12:00:00Z"));
                     n++;
                 }
@@ -3897,7 +4023,7 @@ public class ClanPanel extends PluginPanel
             double pts = points[i];
             boolean complete = t.threshold > 0 && pts >= t.threshold;
             java.util.List<PlatformApiService.BingoDrop> drops = new java.util.ArrayList<>();
-            if (pts > 0) drops.add(new PlatformApiService.BingoDrop(contributor, t.name, t.code, pts, "2026-09-05T18:00:00Z"));
+            if (pts > 0) drops.add(new PlatformApiService.BingoDrop(contributor, t.name, sampleTileItemId(t), t.code, pts, "2026-09-05T18:00:00Z"));
             map.put(t.code, new PlatformApiService.BingoTileProgress(pts, complete, drops));
         }
         return map;
@@ -4879,7 +5005,7 @@ public class ClanPanel extends PluginPanel
             {
                 // HTML with a fixed width so a long RSN wraps to a second line instead of forcing
                 // the panel (and the client) wider. STANDINGS_TEXT_WIDTH \u2248 panel minus borders/pad.
-                JLabel line = new JLabel("<html><div style='width:" + STANDINGS_TEXT_WIDTH + "px'>"
+                JLabel line = new JLabel("<html><div style='width:" + cssPxFor(STANDINGS_TEXT_WIDTH) + "px'>"
                     + (i + 1) + ". " + rsn + " \u2014 " + raceScore(type, score) + "</div></html>");
                 line.setFont(isMe ? READABLE_FONT.deriveFont(Font.BOLD, 12f) : READABLE_FONT_SMALL);
                 line.setForeground(isMe ? Color.WHITE : ColorScheme.LIGHT_GRAY_COLOR);
@@ -4895,7 +5021,7 @@ public class ClanPanel extends PluginPanel
         }
         if (myRank > 10)
         {
-            JLabel mine = new JLabel("<html><div style='width:" + STANDINGS_TEXT_WIDTH + "px'>\u2026 "
+            JLabel mine = new JLabel("<html><div style='width:" + cssPxFor(STANDINGS_TEXT_WIDTH) + "px'>\u2026 "
                 + myRank + ". " + localPlayerName + " \u2014 " + myScore + "</div></html>");
             mine.setFont(READABLE_FONT.deriveFont(Font.BOLD, 12f));
             mine.setForeground(Color.WHITE);
@@ -7559,7 +7685,7 @@ public class ClanPanel extends PluginPanel
                 // Wrapped html: a whole-number gp total makes this line too wide for the side panel.
                 JLabel summary = new JLabel(String.format(
                     "<html><div style='width:%dpx'>%,.1f pts | %,d gp | %d drops</div></html>",
-                    STANDINGS_TEXT_WIDTH, totalPts, totalGp, drops.size()));
+                    cssPxFor(STANDINGS_TEXT_WIDTH), totalPts, totalGp, drops.size()));
                 summary.setFont(READABLE_FONT_SMALL);
                 summary.setForeground(new Color(180, 180, 180));
                 summary.setBorder(new EmptyBorder(4, 6, 4, 6));

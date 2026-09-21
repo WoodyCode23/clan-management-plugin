@@ -1723,12 +1723,15 @@ public class PlatformApiService
     {
         public final String rsn;
         public final String item;
+        /** Item id for the drop's icon, or 0 when the server could not resolve one (a sheet-typed
+         *  row often names an item the catalog does not know). Callers fall back to no icon. */
+        public final int itemId;
         public final String tileCode;
         public final double points;
         public final String droppedAt;
-        public BingoDrop(String rsn, String item, String tileCode, double points, String droppedAt)
+        public BingoDrop(String rsn, String item, int itemId, String tileCode, double points, String droppedAt)
         {
-            this.rsn = rsn; this.item = item; this.tileCode = tileCode;
+            this.rsn = rsn; this.item = item; this.itemId = itemId; this.tileCode = tileCode;
             this.points = points; this.droppedAt = droppedAt;
         }
     }
@@ -1900,8 +1903,8 @@ public class PlatformApiService
                 JsonObject d = el.getAsJsonObject();
                 String rsn = jsonStr(d, "rsn");
                 if (rsn == null || rsn.isEmpty()) rsn = fallbackRsn;
-                drops.add(new BingoDrop(rsn, jsonStr(d, "item"), jsonStr(d, "tileCode"),
-                    jsonNum(d, "points"), jsonStr(d, "droppedAt")));
+                drops.add(new BingoDrop(rsn, jsonStr(d, "item"), (int) jsonNum(d, "itemId"),
+                    jsonStr(d, "tileCode"), jsonNum(d, "points"), jsonStr(d, "droppedAt")));
             }
         }
         return drops;
