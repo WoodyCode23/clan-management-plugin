@@ -18,6 +18,8 @@ enter is the API key your clan admin gives you.
 - **XP / KC**: clan XP and boss-KC leaderboards (read from the official OSRS hiscores).
 - **Events**: browse the clan's event schedule (Skill/Boss of the Week, collection-log races,
   bingo), sign up for events, and follow a live clog-race board and draft for your team.
+- **Bingo**: a live board for a running bingo event, showing each team's tile progress, the
+  standings, team rosters you can click for a player's contributions, and recent drops.
 - **Ranks**: check your rank-up requirements (evaluated locally on your client) and request a rank.
 - **Discord sharing** *(opt-in)*: post your own drops, personal bests, and deaths, with a
   screenshot, to your clan's Discord.
@@ -27,8 +29,10 @@ enter is the API key your clan admin gives you.
 This is the important part, so it is spelled out in full.
 
 - **Nothing is shared until you connect.** The plugin does nothing at all without the API key your
-  clan admin gives you, and every data-sharing toggle is **off by default.** The one exception is
-  combat achievements, which sync once you are connected (see the table below).
+  clan admin gives you, and every data-sharing toggle is **off by default.**
+- **Some things do sync as soon as you are connected, with no separate toggle.** Those are listed in
+  the second table below, so that connecting is an informed choice rather than a surprise. If you do
+  not want them sent, remove the API key.
 - **Data only goes to the Solus clan's own server** (`https://api.solusosrs.com`), a fixed,
   hardcoded URL. There are no third parties, and the plugin never fetches a URL to call from
   anywhere; the endpoint is compiled into the plugin.
@@ -37,11 +41,23 @@ This is the important part, so it is spelled out in full.
 |---|---|---|
 | **Track Drops** | each valuable drop (item, GP value, source monster, kill count) plus your RSN and account hash | the clan drop feed and value/points leaderboards |
 | **Track Speed Times** | your personal-best boss times (boss, time, team members) plus your RSN and account hash | the clan speed-time boards; your raid party is read **locally** at the start only, to credit the right team |
-| **Sync Collection Log** | your collection log items and obtained/total counts (only when you open the log) plus your RSN and account hash | clan collection-log tracking and the clog leaderboard |
-| **Combat Achievements** *(no separate toggle)* | the names of your completed CA tasks plus your RSN and account hash | clan combat-achievement tracking and leaderboard. Completions are picked up in real time from the in-game "task completed" message once you are connected; the bulk read of the CA interface also needs **Sync Collection Log** on |
+| **Sync Collection Log** | your collection log items and obtained/total counts (only when you open the log) plus your RSN and account hash. This toggle **also** covers the names of your purchased Slayer Reward unlocks, read when you open the Slayer Rewards shop | clan collection-log tracking and the clog leaderboard; Slayer unlocks are used for rank requirements that need them |
 | **Track Stats** | your RSN only; the server then reads your **public** XP/KC from the official OSRS hiscores | clan XP and boss-KC leaderboards. No private game data is sent for this |
 | **Send screenshots to Discord** *(opt-in)* | a **screenshot** of your drop, personal best, or death, plus an optional caption, plus your RSN | posts to your clan's Discord via the server. Off by default; nothing is captured or sent unless you enable it. You can also black out chat, or just private messages, before a screenshot is sent |
 | **Rank Requests** | the rank you request and which requirements you meet, plus your RSN | lets an admin review your rank-up. Requirements (skills, diaries, CAs, KC, item possession) are checked **locally on your client**; only the yes/no result is sent, never your bank or item list |
+
+### Sent once you are connected, with no separate toggle
+
+These need no setting turned on. They start when you add your API key and stop when you remove it.
+
+| What | When | What it sends | What it's used for |
+|---|---|---|---|
+| **Combat achievements** | in real time from the in-game "task completed" message. The bulk read of the CA interface additionally needs **Sync Collection Log** on | the names of your completed CA tasks, plus your RSN and account hash | clan combat-achievement tracking and leaderboard |
+| **Quests and Achievement Diaries** | once per login | your quest points, how many quests you have completed out of the total, **the names of the quests you have not finished**, your diary tier completion per region, and your account type, plus your RSN and account hash | rank requirements that depend on diaries or quests, so an admin can see you qualify without asking you for screenshots |
+| **Group Ironman group** | once per login, and only on a GIM account | the text visible in the in-game GIM Group side panel, which is how your group's member names are read, plus your RSN, account type and account hash | grouping GIM accounts together on the clan's team pages |
+
+If you would rather not send the quest, diary or GIM group data, the plugin has no toggle for it
+today: remove the API key, or ask your clan admin to raise it.
 
 Notes:
 
@@ -77,8 +93,8 @@ belongs to holds an admin role in the clan.
 | **Activity** | Recent clan achievements, PBs, and notable drops |
 | **Members** | Clan roster with each member's collection log, combat achievements, and stats; members who recently joined the clan are marked with a leaf |
 | **Ranks** | Your rank-up progress and the request button |
-| **Events** | Event schedule, sign-ups, the live clog-race board for your team, and the draft |
-| **Admin** | Roster sync, key rotation, and speed-times moderation. Only shown if your account has an admin role in the clan |
+| **Events** | Event schedule, sign-ups, the live clog-race board for your team, the draft, and a live bingo board when a bingo event is running: tile progress, standings, a team switcher, rosters you can click for a player's contributions, and recent drops |
+| **Admin** | Roster sync, key rotation, speed-times moderation, announcements, and weekly-event scheduling. Only shown if your account has an admin role in the clan |
 
 ## License
 
