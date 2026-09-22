@@ -2197,9 +2197,15 @@ public class PlatformApiService
         public final boolean open;
         public final String eventName;
         public final List<String> rsns;
-        public Signups(boolean open, String eventName, List<String> rsns)
+        /** This viewer's own signup state for the event: "none" | "pending" | "signed_up". The
+         *  server also sends a `questionnaireUrl` alongside a pending state, for the website's own
+         *  page to use; this class deliberately has no field for it and parseSignups() never reads
+         *  it (Hub rule: the plugin must never hold a server-supplied URL). */
+        public final String youState;
+        public Signups(boolean open, String eventName, List<String> rsns, String youState)
         {
             this.open = open; this.eventName = eventName; this.rsns = rsns;
+            this.youState = youState != null ? youState : "none";
         }
     }
 
@@ -2209,21 +2215,30 @@ public class PlatformApiService
         return parseSignups(getSync(baseUrl + "/clans/" + clanSlug + "/signups", apiKey));
     }
 
-    /** Fetch signups for a SPECIFIC event (the Events tab nests each event's list under it). A
+    /** Fetch signups for a SPECIFIC event (the Events tab nests each event's list under it), tagged
+     *  with the given RSN's own state so the button can render "none"/"pending"/"signed_up". A
      *  non-draft or closed event returns a closed (open=false) Signups. */
-    public Signups fetchSignups(String baseUrl, String apiKey, String clanSlug, String eventId)
+    public Signups fetchSignups(String baseUrl, String apiKey, String clanSlug, String eventId, String rsn)
     {
-        String url = baseUrl + "/clans/" + clanSlug + "/signups?eventId=" + encodePath(eventId);
-        return parseSignups(getSync(url, apiKey));
+        HttpUrl base = HttpUrl.parse(baseUrl + "/clans/" + clanSlug + "/signups");
+        if (base == null) return new Signups(false, null, new ArrayList<>(), "none");
+        HttpUrl.Builder ub = base.newBuilder();
+        if (eventId != null) ub.addQueryParameter("eventId", eventId);
+        if (rsn != null) ub.addQueryParameter("rsn", rsn);
+        return parseSignups(getSync(ub.build().toString(), apiKey));
     }
 
-    private Signups parseSignups(JsonObject root)
+    /** Pure parsing, no network - takes the raw /signups response and builds the client model.
+     *  Package-visible (not private) so tests can exercise it directly with hand-built payloads,
+     *  the same way parseBingoCard/parseBingoPlayer are tested. */
+    public static Signups parseSignups(JsonObject root)
     {
-        if (root == null) return new Signups(false, null, new ArrayList<>());
+        if (root == null) return new Signups(false, null, new ArrayList<>(), "none");
         try
         {
             boolean open = root.has("open") && !root.get("open").isJsonNull() && root.get("open").getAsBoolean();
-            if (!open) return new Signups(false, null, new ArrayList<>());
+            String youState = parseYouState(root);
+            if (!open) return new Signups(false, null, new ArrayList<>(), youState);
             String eventName = jsonStr(root, "eventName");
             List<String> rsns = new ArrayList<>();
             if (root.has("signups") && root.get("signups").isJsonArray())
@@ -2234,13 +2249,36 @@ public class PlatformApiService
                     if (rsn != null) rsns.add(rsn);
                 }
             }
-            return new Signups(true, eventName, rsns);
+            return new Signups(true, eventName, rsns, youState);
         }
         catch (Exception ex)
         {
             log.debug("parse signups failed: {}", ex.getMessage());
-            return new Signups(false, null, new ArrayList<>());
+            return new Signups(false, null, new ArrayList<>(), "none");
         }
+    }
+
+    /**
+     * Parse only the viewer's own state out of the optional `you` object the signups response is
+     * gaining: {@code you: { state, rsn, questionnaireUrl }}. This reads `state` and nothing else -
+     * never `questionnaireUrl` (the Hub-compliance rule this feature turns on: the plugin must never
+     * display, link, tooltip or open a server-supplied URL; the server sends that field for the
+     * website's benefit only) and not even `rsn` (the plugin already knows its own logged-in name).
+     * A missing `you` (an older server that predates this field) or an unrecognised state string
+     * both fall back to "none" so the plugin keeps working either way.
+     */
+    private static String parseYouState(JsonObject root)
+    {
+        try
+        {
+            if (root.has("you") && root.get("you").isJsonObject())
+            {
+                String state = jsonStr(root.getAsJsonObject("you"), "state");
+                if ("pending".equals(state) || "signed_up".equals(state)) return state;
+            }
+        }
+        catch (Exception ignored) { }
+        return "none";
     }
 
     /** Sign up the given RSN for the current open draft (fire-and-forget; the poll refreshes the list). */
@@ -2251,13 +2289,49 @@ public class PlatformApiService
         postAsync(baseUrl + "/clans/" + clanSlug + "/signups", apiKey, payload, "Draft signup");
     }
 
-    /** Sign up the local player for a SPECIFIC event (per-event signup from the Events tab). */
-    public void signup(String baseUrl, String apiKey, String clanSlug, String rsn, String eventId)
+    /** Result of a per-event signup POST: the server's status string only, e.g. "added" (joined the
+     *  pool), "already" (was already signed up), "pending" (a questionnaire-gated event created a
+     *  pending request instead of joining the pool) or "error". A questionnaire-gated event's
+     *  response also carries `questionnaireUrl`; this class has no field for it and signup() below
+     *  never reads it (same Hub rule as Signups.youState above). */
+    public static class SignupResult
+    {
+        public final String status;
+        public SignupResult(String status) { this.status = status; }
+    }
+
+    /** Sign up the local player for a SPECIFIC event (per-event signup from the Events tab).
+     *  Synchronous: the caller already runs this off the client thread and the EDT (the plugin's
+     *  background executor), so a blocking call here is safe and lets it act on the result - e.g.
+     *  switch straight to the "pending" state - instead of only ever firing-and-forgetting like the
+     *  old postAsync did. */
+    public SignupResult signup(String baseUrl, String apiKey, String clanSlug, String rsn, String eventId)
     {
         JsonObject payload = new JsonObject();
         payload.addProperty("rsn", rsn);
         payload.addProperty("eventId", eventId);
-        postAsync(baseUrl + "/clans/" + clanSlug + "/signups", apiKey, payload, "Draft signup");
+        Request request = new Request.Builder()
+            .url(baseUrl + "/clans/" + clanSlug + "/signups")
+            .header("Authorization", "Bearer " + apiKey)
+            .post(RequestBody.create(JSON, gson.toJson(payload)))
+            .build();
+        try (Response response = httpClient.newCall(request).execute())
+        {
+            checkAuth(response.code());
+            if (!response.isSuccessful() || response.body() == null)
+            {
+                log.error("Draft signup failed with status: {}", response.code());
+                return new SignupResult("error");
+            }
+            JsonObject root = gson.fromJson(response.body().string(), JsonObject.class);
+            String status = root != null ? jsonStr(root, "status") : null;
+            return new SignupResult(status != null ? status : "error");
+        }
+        catch (Exception e)
+        {
+            log.error("Failed to submit Draft signup", e);
+            return new SignupResult("error");
+        }
     }
 
     private static String encodePath(String s)

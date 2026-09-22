@@ -813,23 +813,28 @@ public class ClanManagementPlugin extends Plugin
         panel.setOnFetchEventSignups(eventId ->
         {
             if (!isPlatformConfigured() || eventId == null) return;
+            String rsn = getLocalPlayerName();
             executor.submit(() ->
             {
                 PlatformApiService.Signups s = platformApiService.fetchSignups(
-                    getPlatformUrl(), getPlatformKey(), getPlatformSlug(), eventId);
+                    getPlatformUrl(), getPlatformKey(), getPlatformSlug(), eventId, rsn);
                 panel.setEventSignups(eventId, s);
             });
         });
-        // Sign the local player up for one specific event, then refresh that event's list.
+        // Sign the local player up for one specific event, then refresh that event's list. The
+        // signup call itself now returns a status (added/already/pending/error), so the panel can
+        // switch straight to the right button state before the follow-up fetch below lands.
         panel.setOnSignupForEvent(eventId ->
         {
             String rsn = getLocalPlayerName();
             if (!isPlatformConfigured() || eventId == null || rsn == null || rsn.isEmpty()) return;
             executor.submit(() ->
             {
-                platformApiService.signup(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), rsn, eventId);
+                PlatformApiService.SignupResult result = platformApiService.signup(
+                    getPlatformUrl(), getPlatformKey(), getPlatformSlug(), rsn, eventId);
+                panel.setEventSignupResult(eventId, result);
                 PlatformApiService.Signups s = platformApiService.fetchSignups(
-                    getPlatformUrl(), getPlatformKey(), getPlatformSlug(), eventId);
+                    getPlatformUrl(), getPlatformKey(), getPlatformSlug(), eventId, rsn);
                 panel.setEventSignups(eventId, s);
             });
         });

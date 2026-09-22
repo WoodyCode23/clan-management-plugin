@@ -2168,6 +2168,27 @@ public class ClanPanel extends PluginPanel
             updateRaidRace(currentRaidRace);
         });
     }
+    /** Reflect a just-submitted signup click's outcome (added/already -> signed_up, pending ->
+     *  pending) immediately, before the caller's own follow-up fetch lands, so the click visibly
+     *  does something instead of the button just sitting there. An error result leaves whatever was
+     *  cached alone - the button stays clickable and the member can just try again. */
+    public void setEventSignupResult(String eventId, PlatformApiService.SignupResult result)
+    {
+        if (eventId == null || result == null) return;
+        final String youState;
+        if ("added".equals(result.status) || "already".equals(result.status)) youState = "signed_up";
+        else if ("pending".equals(result.status)) youState = "pending";
+        else { return; }
+        SwingUtilities.invokeLater(() ->
+        {
+            PlatformApiService.Signups prev = eventSignups.get(eventId);
+            PlatformApiService.Signups next = prev != null
+                ? new PlatformApiService.Signups(prev.open, prev.eventName, prev.rsns, youState)
+                : new PlatformApiService.Signups(true, null, new ArrayList<>(), youState);
+            eventSignups.put(eventId, next);
+            updateRaidRace(currentRaidRace);
+        });
+    }
     public void setOnRequestRank(java.util.function.Consumer<Object[]> cb) { this.onRequestRank = cb; }
     public boolean isRanksActive() { return ranksActive; }
 
@@ -4198,12 +4219,40 @@ public class ClanPanel extends PluginPanel
         body.add(count);
         body.add(Box.createVerticalStrut(3));
 
-        JButton signupBtn = new JButton("Sign up");
-        signupBtn.setAlignmentX(Component.LEFT_ALIGNMENT);
-        signupBtn.setFocusPainted(false);
-        signupBtn.addActionListener(ev -> { if (onSignupForEvent != null && eventId != null) onSignupForEvent.accept(eventId); });
-        body.add(signupBtn);
-        body.add(Box.createVerticalStrut(4));
+        // Three states for the viewer's own signup, from s.youState ("none"/"pending"/"signed_up").
+        // A pending or signed-up event has no button at all - re-clicking would just re-hit the
+        // same "already signed up" / re-pend the questionnaire on the server for no benefit - and
+        // neither state's text ever names or links the questionnaire itself (Hub rule: the plugin
+        // must never display, link, tooltip or open a server-supplied URL). A pending member is
+        // told to check Discord DMs, with the website as the documented fallback if none arrives.
+        if ("pending".equals(s.youState))
+        {
+            JLabel pendingLbl = new JLabel("Check your Discord DMs to finish signing up");
+            pendingLbl.setFont(READABLE_FONT);
+            pendingLbl.setForeground(ACCENT_GOLD);
+            pendingLbl.setAlignmentX(Component.LEFT_ALIGNMENT);
+            body.add(pendingLbl);
+            body.add(eventBodyNote("No DM? Link your Discord on the website and sign up there."));
+            body.add(Box.createVerticalStrut(4));
+        }
+        else if ("signed_up".equals(s.youState))
+        {
+            JLabel signedLbl = new JLabel("You're signed up");
+            signedLbl.setFont(READABLE_FONT.deriveFont(Font.BOLD));
+            signedLbl.setForeground(ACCENT_GOLD);
+            signedLbl.setAlignmentX(Component.LEFT_ALIGNMENT);
+            body.add(signedLbl);
+            body.add(Box.createVerticalStrut(4));
+        }
+        else
+        {
+            JButton signupBtn = new JButton("Sign up");
+            signupBtn.setAlignmentX(Component.LEFT_ALIGNMENT);
+            signupBtn.setFocusPainted(false);
+            signupBtn.addActionListener(ev -> { if (onSignupForEvent != null && eventId != null) onSignupForEvent.accept(eventId); });
+            body.add(signupBtn);
+            body.add(Box.createVerticalStrut(4));
+        }
 
         if (s.rsns.isEmpty())
         {
