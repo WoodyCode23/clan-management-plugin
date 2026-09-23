@@ -1221,9 +1221,14 @@ public class ClanManagementPlugin extends Plugin
     }
 
     /**
-     * Opt-in death screenshots. Only when the player enabled "Send screenshots to Discord" do we
-     * capture their death frame and forward it (with their caption) to the clan's deaths webhook.
-     * Nothing is captured or sent when the toggle is off. Fires only for the local player's death.
+     * Opt-in death screenshots. Two toggles have to agree: the master "Send screenshots to
+     * Discord", and "Send death pictures", which exists so someone can keep posting drops and
+     * personal bests while their deaths stay private (Ryan, 2026-09-23). Only then do we capture
+     * their death frame and forward it (with their caption) to the clan deaths webhook.
+     *
+     * The check is here, BEFORE withScreenshot, so an opted-out death is never even captured -
+     * the picture is not taken and discarded, it is not taken at all. Fires only for the local
+     * player death.
      */
     @Subscribe
     public void onActorDeath(ActorDeath event)
@@ -1231,7 +1236,7 @@ public class ClanManagementPlugin extends Plugin
         // Whatever we were fighting is no longer a candidate killer once it is the one dying.
         if (event.getActor() == lastTarget.get()) lastTarget = new WeakReference<>(null);
 
-        if (!config.sendScreenshotsToDiscord()) return;
+        if (!config.sendScreenshotsToDiscord() || !config.sendDeathScreenshots()) return;
         if (client.getLocalPlayer() == null || event.getActor() != client.getLocalPlayer()) return;
         if (!isPlatformConfigured() || !localPlayerInClan()) return;
 

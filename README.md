@@ -44,6 +44,7 @@ This is the important part, so it is spelled out in full.
 | **Sync Collection Log** | your collection log items and obtained/total counts (only when you open the log) plus your RSN and account hash. This toggle **also** covers the names of your purchased Slayer Reward unlocks, read when you open the Slayer Rewards shop | clan collection-log tracking and the clog leaderboard; Slayer unlocks are used for rank requirements that need them |
 | **Track Stats** | your RSN only; the server then reads your **public** XP/KC from the official OSRS hiscores | clan XP and boss-KC leaderboards. No private game data is sent for this |
 | **Send screenshots to Discord** *(opt-in)* | a **screenshot** of your drop, personal best, or death, plus an optional caption, plus your RSN | posts to your clan's Discord via the server. Off by default; nothing is captured or sent unless you enable it. You can also black out chat, or just private messages, before a screenshot is sent |
+| **Send death pictures** | nothing extra: it only NARROWS the setting above | on by default, and only has any effect while screenshots are on. Turn it off to keep posting your drops and personal bests while your deaths stay private. With it off, no death screenshot is captured at all |
 | **Rank Requests** | the rank you request and which requirements you meet, plus your RSN | lets an admin review your rank-up. Requirements (skills, diaries, CAs, KC, item possession) are checked **locally on your client**; only the yes/no result is sent, never your bank or item list |
 
 ### Sent once you are connected, with no separate toggle
@@ -80,6 +81,8 @@ Notes:
    - **Data Sharing**: turn on what you want to share (all off by default).
    - **Screenshots > Send screenshots to Discord** *(optional)*: enable it to post your own
      drops/PBs/deaths with a screenshot, and choose whether chat is blacked out first.
+     Deaths have their own toggle under it (**Send death pictures**, on by default) if you want
+     your drops and PBs posted but not your deaths.
 
 Admin tools need no extra key: the Admin tab appears on its own if the Discord account your key
 belongs to holds an admin role in the clan.

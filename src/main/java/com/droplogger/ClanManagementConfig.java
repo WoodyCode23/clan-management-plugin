@@ -142,12 +142,29 @@ public interface ClanManagementConfig extends Config
     )
     default String pbPhrase() { return ""; }
 
+    /**
+     * Deaths specifically, on top of the master toggle above.
+     *
+     * Defaults to ON so that turning this feature on changes nothing for anyone already sending
+     * screenshots: the master toggle stays the opt-in, and this only ever narrows it. Someone who
+     * wants their drops and personal bests in Discord but would rather not broadcast every death
+     * turns this off and keeps the rest.
+     */
+    @ConfigItem(
+        keyName = "sendDeathScreenshots",
+        name = "Send death pictures",
+        description = "On by default, and only matters when 'Send screenshots to Discord' is on. Turn it off to keep posting your drops and personal bests while your deaths stay private. Nothing is captured when it is off.",
+        section = screenshotSection,
+        position = 3
+    )
+    default boolean sendDeathScreenshots() { return true; }
+
     @ConfigItem(
         keyName = "deathPhrase",
         name = "Death message",
         description = "Posted with your death screenshots. Leave blank for none.",
         section = screenshotSection,
-        position = 3
+        position = 4
     )
     default String deathPhrase() { return ""; }
 
@@ -156,7 +173,7 @@ public interface ClanManagementConfig extends Config
         name = "Hide chat in screenshots",
         description = "What to black out of a screenshot before it is sent. All chat hides the whole chatbox. Just PMs keeps public and clan chat but hides private-message lines. Nothing sends the full screenshot, chat included (default).",
         section = screenshotSection,
-        position = 4
+        position = 5
     )
     default ChatHideMode hideChatInScreenshots() { return ChatHideMode.NOTHING; }
 
