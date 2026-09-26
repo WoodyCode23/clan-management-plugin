@@ -48,6 +48,11 @@ public class PlatformApiService
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
+            // Every URL this plugin calls is the one hardcoded address. A redirect is a URL chosen
+            // by the response rather than by us, so following one would take it somewhere that is
+            // neither hardcoded nor entered by the user. Declined, here and on every other client.
+            .followRedirects(false)
+            .followSslRedirects(false)
             .build();
         // Shares the parent's connection pool and dispatcher; only the timeouts differ.
         this.uploadClient = httpClient.newBuilder()
@@ -55,6 +60,8 @@ public class PlatformApiService
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
             .writeTimeout(300, TimeUnit.SECONDS)
+            .followRedirects(false)
+            .followSslRedirects(false)
             .build();
         this.gson = gson;
     }
