@@ -939,6 +939,8 @@ public class ClanManagementPlugin extends Plugin
     @Override
     protected void shutDown()
     {
+        // Anything still waiting on the collection-log popup goes out now, without a picture.
+        flushPopupScreenshots();
         if (refreshTask != null) refreshTask.cancel(true);
         if (raidRaceTask != null) raidRaceTask.cancel(true);
 
@@ -977,6 +979,8 @@ public class ClanManagementPlugin extends Plugin
     @Subscribe
     public void onGameTick(GameTick event)
     {
+        tickPopupScreenshots();
+
         // Stat tracking: detect clan member logoffs
         if (isPlatformConfigured())
         {
@@ -1085,6 +1089,13 @@ public class ClanManagementPlugin extends Plugin
     @Subscribe
     public void onGameStateChanged(GameStateChanged event)
     {
+        // A queued capture waits on game ticks, which stop when the player logs out or hops. Send
+        // those without a screenshot rather than holding the drop until the next login (or forever).
+        if (event.getGameState() == GameState.LOGIN_SCREEN || event.getGameState() == GameState.HOPPING)
+        {
+            flushPopupScreenshots();
+        }
+
         // Capture the immutable account hash so player data is keyed on the account, not the RSN.
         if (event.getGameState() == GameState.LOGGED_IN)
         {
@@ -1223,7 +1234,7 @@ public class ClanManagementPlugin extends Plugin
             ? client.getLocalPlayer().getWorldLocation() : new WorldPoint(0, 0, 0);
         DropEntry drop = new DropEntry(petName, 0, boss, pbDetector.getLastKillCount(),
             wp.getX(), wp.getY(), wp.getPlane(), playerName, -1);
-        withScreenshot(true, screenshot ->
+        withScreenshotAfterPopup(screenshot ->
             platformApiService.submitDrop(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), drop, screenshot,
                 config.sendScreenshotsToDiscord(), config.dropPhrase()));
         log.debug("Duplicate pet logged: {} from {}", petName, boss);
@@ -2092,6 +2103,78 @@ public class ClanManagementPlugin extends Plugin
     private static final double SCREENSHOT_FALLBACK_STEP = 0.75;
     private static final int SCREENSHOT_MAX_FALLBACK_STEPS = 6;
     /**
+     * How long a drop or collection-log screenshot waits for the game's "Collection log" popup.
+     *
+     * Members asked for that popup to be in the shot (2026-09-28). It is drawn a tick or so AFTER the
+     * chat message and loot event we react to, so capturing immediately always missed it. The popup
+     * does not appear for every drop (only a new log slot, and only for players with the popup turned
+     * on), so the wait is capped: at most this many ticks (~1.8s) when no popup ever shows.
+     */
+    private static final int POPUP_WAIT_MAX_TICKS = 3;
+
+    /** One capture waiting on the popup. Client thread only, like everything that touches it. */
+    private static final class PendingPopupShot
+    {
+        final java.util.function.Consumer<String> callback;
+        int ticksLeft = POPUP_WAIT_MAX_TICKS;
+        boolean popupSeen;
+
+        PendingPopupShot(java.util.function.Consumer<String> callback) { this.callback = callback; }
+    }
+
+    private final List<PendingPopupShot> pendingPopupShots = new ArrayList<>();
+
+    /**
+     * Like withScreenshot(true, ...), but gives the collection-log popup the chance to appear first.
+     * Captures one tick after the popup becomes visible, so its slide-in animation has finished, or
+     * after POPUP_WAIT_MAX_TICKS if it never does. Client thread only.
+     */
+    private void withScreenshotAfterPopup(java.util.function.Consumer<String> callback)
+    {
+        if (drawManager == null)
+        {
+            withScreenshot(true, callback);
+            return;
+        }
+        pendingPopupShots.add(new PendingPopupShot(callback));
+    }
+
+    private boolean isNotificationPopupVisible()
+    {
+        Widget popup = client.getWidget(InterfaceID.NotificationDisplay.CONTAINER);
+        return popup != null && !popup.isHidden();
+    }
+
+    private void tickPopupScreenshots()
+    {
+        if (pendingPopupShots.isEmpty()) return;
+        final boolean visible = isNotificationPopupVisible();
+        java.util.Iterator<PendingPopupShot> it = pendingPopupShots.iterator();
+        while (it.hasNext())
+        {
+            PendingPopupShot shot = it.next();
+            shot.ticksLeft--;
+            // Fire on the tick AFTER the popup first shows (fully slid in), or when the wait runs out.
+            boolean ready = (shot.popupSeen && visible) || shot.ticksLeft <= 0;
+            if (visible) shot.popupSeen = true;
+            if (!ready) continue;
+            it.remove();
+            withScreenshot(true, shot.callback);
+        }
+    }
+
+    /** Send everything still waiting, without a screenshot. The record matters more than the picture. */
+    private void flushPopupScreenshots()
+    {
+        List<PendingPopupShot> waiting = new ArrayList<>(pendingPopupShots);
+        pendingPopupShots.clear();
+        for (PendingPopupShot shot : waiting)
+        {
+            withScreenshot(false, shot.callback);
+        }
+    }
+
+    /**
      * Capture the current game frame (when capture=true) and run the callback with a PNG as
      * base64, or null when disabled or capture fails. Event-driven (no sleep): the frame listener
      * fires on the next render, then encoding and the callback run off the client thread.
@@ -2517,7 +2600,7 @@ public class ClanManagementPlugin extends Plugin
                 final int rawClogObtained = client.getVarpValue(VARP_CLOG_OBTAINED);
                 final int liveClogObtained = rawClogObtained > 0 ? rawClogObtained + 1 : 0;
                 final int liveClogTotal = client.getVarpValue(VARP_CLOG_TOTAL);
-                withScreenshot(true, screenshot ->
+                withScreenshotAfterPopup(screenshot ->
                     platformApiService.submitDrop(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), unlockDrop, screenshot,
                         config.sendScreenshotsToDiscord(), config.dropPhrase(), true /* fromClog: post every clog unlock */,
                         liveClogObtained, liveClogTotal));
@@ -2903,7 +2986,7 @@ public class ClanManagementPlugin extends Plugin
             DropEntry drop = new DropEntry(itemName, value, source, killCount,
                 wp.getX(), wp.getY(), wp.getPlane(), playerName, itemId);
 
-            withScreenshot(true, screenshot ->
+            withScreenshotAfterPopup(screenshot ->
                 platformApiService.submitDrop(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), drop, screenshot,
                     config.sendScreenshotsToDiscord(), config.dropPhrase()));
             log.debug("Rare drop logged: {} x{} from {}", itemName, stack.getQuantity(), source);
