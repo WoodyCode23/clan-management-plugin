@@ -85,7 +85,16 @@ import java.util.regex.Pattern;
 @PluginDescriptor(
     name = "Solus",
     description = "Solus clan plugin — drops, speed times, and more",
-    tags = {"solus", "clan", "drop", "logger", "discord", "speed", "times"}
+    tags = {"solus", "clan", "drop", "logger", "discord", "speed", "times"},
+    // Matches the manifest filename in the plugin-hub repo (plugins/clan-management), which is what
+    // "the internal-name of a Plugin Hub plugin as used in the PluginHub repository" means.
+    //
+    // NOT adding legacyDataDirectory alongside it, deliberately. That one is an instruction rather
+    // than a label: RuneLite MOVES .runelite/clan-management into the plugin's managed directory,
+    // while pluginDataDir() still builds that old path by hand in five places. Declaring it without
+    // migrating the I/O to getPluginDirectory() would leave us reading a directory the client had
+    // just emptied. That migration is worth doing and worth doing on its own.
+    internalName = "clan-management"
 )
 public class ClanManagementPlugin extends Plugin
 {
@@ -2468,7 +2477,12 @@ public class ClanManagementPlugin extends Plugin
             }
             if (unlockSource == null) unlockSource = "Skilling";
 
-            int unlockValue = unlockItemId > 0 ? itemManager.getItemPrice(unlockItemId) : 0;
+            // getItemPrice returns a long as of RuneLite 1.13.0 (it used to be an int), and the Hub
+            // builds every plugin against its own current client, so this stopped compiling there
+            // the day 1.13.0 landed. Clamped rather than widened because DropEntry.value is an int
+            // and always has been; Math.min keeps an absurd price from wrapping into a negative.
+            long rawUnlockValue = unlockItemId > 0 ? itemManager.getItemPrice(unlockItemId) : 0L;
+            int unlockValue = (int) Math.min(rawUnlockValue, Integer.MAX_VALUE);
 
             // Post EVERY collection-log unlock to the shared drops/clog feed with a screenshot (no
             // value filter). The "New item added to your collection log" message only fires once per
