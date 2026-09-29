@@ -141,6 +141,13 @@ public class ClanPanel extends PluginPanel
     private final java.util.Map<String, PlatformApiService.Signups> eventSignups = new java.util.HashMap<>();
     private final java.util.Map<String, Integer> eventSignupPage = new java.util.HashMap<>();
     private final java.util.Set<String> expandedEvents = new java.util.HashSet<>();
+    // Masses (spec 2026-09-29): cards fetched on expand, the last Sign up result per mass, and a
+    // 60-second refresh that only runs while a live mass card is open.
+    private java.util.function.Consumer<String> onFetchMassCard;
+    private java.util.function.Consumer<String> onSignUpForMass;
+    private final java.util.Map<String, PlatformApiService.MassCard> massCards = new java.util.HashMap<>();
+    private final java.util.Map<String, String> massSignupResults = new java.util.HashMap<>();
+    private javax.swing.Timer massRefreshTimer;
     private static final int SIGNUP_PAGE_SIZE = 10;
     private Runnable onLoadRaidRace;
     private boolean raidRaceActive = false;
@@ -2158,6 +2165,48 @@ public class ClanPanel extends PluginPanel
     public void setSchedule(PlatformApiService.Schedule schedule) { this.currentSchedule = schedule; }
     public void setOnFetchEventSignups(java.util.function.Consumer<String> cb) { this.onFetchEventSignups = cb; }
     public void setOnSignupForEvent(java.util.function.Consumer<String> cb) { this.onSignupForEvent = cb; }
+    public void setOnFetchMassCard(java.util.function.Consumer<String> cb) { this.onFetchMassCard = cb; }
+    public void setOnSignUpForMass(java.util.function.Consumer<String> cb) { this.onSignUpForMass = cb; }
+    /** Cache one mass card (from the plugin's async fetch) and re-render. A failed fetch (null) keeps
+     *  whatever was showing rather than blanking the card. */
+    public void setMassCard(String massId, PlatformApiService.MassCard card)
+    {
+        if (massId == null || card == null) return;
+        SwingUtilities.invokeLater(() ->
+        {
+            massCards.put(massId, card);
+            updateRaidRace(currentRaidRace);
+        });
+    }
+    public void setMassSignupResult(String massId, String result)
+    {
+        if (massId == null) return;
+        SwingUtilities.invokeLater(() ->
+        {
+            massSignupResults.put(massId, result);
+            updateRaidRace(currentRaidRace);
+        });
+    }
+    /** Refresh every open live mass card once a minute; stops itself when none is open. */
+    private void ensureMassRefresh()
+    {
+        if (massRefreshTimer != null && massRefreshTimer.isRunning()) return;
+        massRefreshTimer = new javax.swing.Timer(60_000, ev ->
+        {
+            boolean anyLive = false;
+            for (String id : new java.util.ArrayList<>(expandedEvents))
+            {
+                PlatformApiService.MassCard c = massCards.get(id);
+                if (c != null && "live".equals(c.phase))
+                {
+                    anyLive = true;
+                    if (onFetchMassCard != null) onFetchMassCard.accept(id);
+                }
+            }
+            if (!anyLive) massRefreshTimer.stop();
+        });
+        massRefreshTimer.start();
+    }
     /** Cache one event's signups (from the plugin's async fetch) and re-render the Events tab. The
      *  expand + page state live in fields, so the rebuild preserves what the user had open. */
     public void setEventSignups(String eventId, PlatformApiService.Signups signups)
@@ -4117,6 +4166,15 @@ public class ClanPanel extends PluginPanel
     private JPanel buildEventCard(PlatformApiService.ScheduleEntry e)
     {
         final String eventId = e.id;
+        final boolean isMass = "mass".equals(e.type);
+        // A mass that has ended has no card: its recap lives in Discord (spec: "After it ends").
+        if (isMass && "ended".equals(e.status))
+        {
+            JPanel none = new JPanel();
+            none.setPreferredSize(new Dimension(0, 0));
+            none.setMaximumSize(new Dimension(0, 0));
+            return none;
+        }
         final boolean expanded = eventId != null && expandedEvents.contains(eventId);
 
         JPanel card = new JPanel()
@@ -4167,7 +4225,27 @@ public class ClanPanel extends PluginPanel
             body.setBackground(ColorScheme.DARK_GRAY_COLOR);
             body.setBorder(new EmptyBorder(2, 12, 4, 6));
             body.setAlignmentX(Component.LEFT_ALIGNMENT);
-            buildEventSignupBody(body, eventId);
+            if (isMass)
+            {
+                PlatformApiService.MassCard mc = massCards.get(eventId);
+                if (mc == null)
+                {
+                    JLabel loading = new JLabel("Loading...");
+                    loading.setFont(READABLE_FONT_SMALL);
+                    loading.setForeground(new Color(150, 150, 150));
+                    body.add(loading);
+                }
+                else
+                {
+                    body.add(MassCardPanel.build(mc, itemManager, massSignupResults.get(eventId),
+                        () -> { if (onSignUpForMass != null) onSignUpForMass.accept(eventId); }));
+                    if ("live".equals(mc.phase)) ensureMassRefresh();
+                }
+            }
+            else
+            {
+                buildEventSignupBody(body, eventId);
+            }
             card.add(body);
         }
 
@@ -4184,7 +4262,12 @@ public class ClanPanel extends PluginPanel
                 {
                     expandedEvents.add(eventId);
                     // Lazily fetch this event's signups the first time it's opened.
-                    if (!eventSignups.containsKey(eventId) && onFetchEventSignups != null) onFetchEventSignups.accept(eventId);
+                    if (isMass)
+                    {
+                        // Always refetch on open: going counts and drops change.
+                        if (onFetchMassCard != null) onFetchMassCard.accept(eventId);
+                    }
+                    else if (!eventSignups.containsKey(eventId) && onFetchEventSignups != null) onFetchEventSignups.accept(eventId);
                 }
                 updateRaidRace(currentRaidRace);
             }
