@@ -3273,7 +3273,20 @@ public class ClanPanel extends PluginPanel
             card = sampleBingoCard();
             sample = true;
         }
+        // A real bingo whose draft is not done yet has no board here: it is just its card with Sign
+        // up in the Events list below (Ryan, 2026-09-30). This also keeps the dev sample away.
+        else if (!showBingoBoard(card))
+        {
+            return null;
+        }
         return buildBingoCard(card, sample);
+    }
+
+    /** Whether the Events tab shows this bingo's board: only once the server says it is ready
+     *  (draft complete or the bingo started). */
+    static boolean showBingoBoard(PlatformApiService.BingoCard card)
+    {
+        return card != null && card.event != null && card.event.boardReady;
     }
 
     private JPanel buildBingoCard(PlatformApiService.BingoCard card, boolean sample)
