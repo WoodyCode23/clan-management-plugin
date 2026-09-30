@@ -365,10 +365,6 @@ public class ClanManagementPlugin extends Plugin
     private FightTracker fightTracker;
     private boolean wasInInstance = false;
 
-    // Fixed platform endpoint. The plugin is Solus-only and always talks to ONE hardcoded URL
-    // — required by the RuneLite Plugin Hub (no network call to a URL derived from user input
-    // or fetched data). The only connection config a user enters is their clan API key.
-    private static final String PLATFORM_URL = "https://api.solusosrs.com";
     private static final String PLATFORM_SLUG = "solus";
 
 
@@ -548,11 +544,10 @@ public class ClanManagementPlugin extends Plugin
         return config.apiKey() != null && !config.apiKey().trim().isEmpty();
     }
 
-    /** The only server this plugin talks to. Protected so the test-only DevClanManagementPlugin can
-     *  point a local dev build at the private dev API; nothing in the shipped plugin changes it. */
-    protected String getPlatformUrl()
+    /** The only server this plugin talks to (hardcoded in PlatformEndpoint). */
+    private String getPlatformUrl()
     {
-        return PLATFORM_URL;
+        return PlatformEndpoint.url();
     }
 
     private String getPlatformKey()
