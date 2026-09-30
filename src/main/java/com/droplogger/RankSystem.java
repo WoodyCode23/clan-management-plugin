@@ -161,6 +161,49 @@ public final class RankSystem
         public boolean satisfied() { return met >= group.need; }
     }
 
+    // ── Raid KC weighting ──
+    //
+    // Hard-mode raid clears (CoX Challenge Mode, ToB Hard Mode, ToA Expert) are worth 1.5 normal
+    // clears toward any raid KC requirement, combined with the normal KC. This is the ONE place
+    // that rule lives: every BOSS_KC check goes through effectiveKc().
+    //   cox_total / chambers_of_xeric  = CoX + 1.5 x CoX CM
+    //   tob_total / theatre_of_blood   = ToB + 1.5 x ToB HM
+    //   toa_total / tombs_of_amascut   = ToA + 1.5 x ToA Expert
+    //   raids_combined                 = the sum of the three weighted totals
+    // A check keyed on a hard mode itself (e.g. "chambers_of_xeric:_challenge_mode") is NOT
+    // weighted: 50 CM required means 50 CM clears. The weighted sum is compared UNROUNDED against
+    // the requirement, so 50 + 1.5 x 33 = 99.5 does not meet 100.
+    // Keys are our stat-snapshot keys (OSRS hiscores names, lowercased, spaces to underscores) as
+    // served by the API's /player-kc endpoint.
+
+    public static final double HARD_MODE_RAID_WEIGHT = 1.5;
+    public static final String RAIDS_COMBINED = "raids_combined";
+    // {synthetic total key, normal-mode key, hard-mode key}
+    private static final String[][] RAIDS = {
+        {"cox_total", "chambers_of_xeric", "chambers_of_xeric:_challenge_mode"},
+        {"tob_total", "theatre_of_blood", "theatre_of_blood:_hard_mode"},
+        {"toa_total", "tombs_of_amascut", "tombs_of_amascut:_expert_mode"},
+    };
+
+    /** The KC a BOSS_KC check with this key compares against, with hard-mode raid weighting applied. */
+    public static double effectiveKc(String key, Map<String, Integer> kc)
+    {
+        String k = key == null ? "" : key.toLowerCase();
+        if (k.equals(RAIDS_COMBINED))
+        {
+            double total = 0;
+            for (String[] r : RAIDS) total += weightedRaidKc(r, kc);
+            return total;
+        }
+        for (String[] r : RAIDS) if (k.equals(r[0]) || k.equals(r[1])) return weightedRaidKc(r, kc);
+        return kc.getOrDefault(k, 0); // non-raid bosses and the hard-mode keys themselves: raw KC
+    }
+
+    private static double weightedRaidKc(String[] raid, Map<String, Integer> kc)
+    {
+        return kc.getOrDefault(raid[1], 0) + HARD_MODE_RAID_WEIGHT * kc.getOrDefault(raid[2], 0);
+    }
+
     // ── Evaluation ──
 
     public static boolean evalCheck(Check c, PlayerSnapshot s)
@@ -202,7 +245,7 @@ public final class RankSystem
             case DIARY:
                 return s.diaryComplete.getOrDefault(c.key.toLowerCase(), 0) >= c.value;
             case BOSS_KC:
-                return s.kc.getOrDefault(c.key.toLowerCase(), 0) >= c.value;
+                return effectiveKc(c.key, s.kc) >= c.value;
             case RANK:
                 return s.ranksHeld.contains(c.key.toLowerCase());
             case TOTAL_XP:

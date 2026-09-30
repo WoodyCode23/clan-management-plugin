@@ -3486,14 +3486,9 @@ public class ClanManagementPlugin extends Plugin
 
         // Boss KCs (WiseOldMan via our server) + synthetic aggregates the rank checks reference.
         java.util.Map<String, Integer> kc = rankKc;
+        // Raid totals (cox_total / tob_total / toa_total / raids_combined) are NOT stored here:
+        // RankSystem.effectiveKc derives them from the raw KCs with the hard-mode 1.5x weighting.
         s.kc.putAll(kc);
-        int cox = kcSum(kc, "chambers_of_xeric", "chambers_of_xeric:_challenge_mode");
-        int tob = kcSum(kc, "theatre_of_blood", "theatre_of_blood:_hard_mode");
-        int toa = kcSum(kc, "tombs_of_amascut", "tombs_of_amascut:_expert_mode");
-        s.kc.put("cox_total", cox);
-        s.kc.put("tob_total", tob);
-        s.kc.put("toa_total", toa);
-        s.kc.put("raids_combined", cox + tob + toa);
         s.kc.put("god_wars_dungeon", kcSum(kc, "general_graardor", "commander_zilyana", "kreearra", "kril_tsutsaroth"));
         return s;
     }
