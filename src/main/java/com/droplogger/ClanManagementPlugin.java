@@ -548,13 +548,11 @@ public class ClanManagementPlugin extends Plugin
         return config.apiKey() != null && !config.apiKey().trim().isEmpty();
     }
 
-    /** Set ONLY by the dev launcher in src/test (never by shipped code): points a runClient build at
-     *  the private dev API over an SSH tunnel. Shipped builds always use PLATFORM_URL. */
-    static volatile String devPlatformUrlOverride = null;
-
-    private String getPlatformUrl()
+    /** The only server this plugin talks to. Protected so the test-only DevClanManagementPlugin can
+     *  point a local dev build at the private dev API; nothing in the shipped plugin changes it. */
+    protected String getPlatformUrl()
     {
-        return devPlatformUrlOverride != null ? devPlatformUrlOverride : PLATFORM_URL;
+        return PLATFORM_URL;
     }
 
     private String getPlatformKey()
