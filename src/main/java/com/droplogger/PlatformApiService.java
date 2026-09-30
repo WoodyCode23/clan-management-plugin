@@ -2208,6 +2208,83 @@ public class PlatformApiService
         }
     }
 
+    public static class MassItem { public final int itemId; public final String itemName; public final int count;
+        MassItem(int itemId, String itemName, int count) { this.itemId = itemId; this.itemName = itemName; this.count = count; } }
+    public static class MassDrop { public final Integer itemId; public final String itemName; public final String rsn; public final String at;
+        MassDrop(Integer itemId, String itemName, String rsn, String at) { this.itemId = itemId; this.itemName = itemName; this.rsn = rsn; this.at = at; } }
+
+    /** One mass's card (API: GET /clans/:slug/masses/:id). */
+    public static class MassCard
+    {
+        public final String id, title, bossName, phase, start, end, killsUpdatedAt;
+        public final int goingCount; public final boolean youreGoing; public final Integer totalKills;
+        public final List<MassItem> items; public final List<MassDrop> drops;
+        /** Top 10 by kills, highest first (empty until WOM has reported, or from an older server). */
+        public final List<MassKiller> killers;
+        MassCard(String id, String title, String bossName, String phase, String start, String end, int goingCount, boolean youreGoing,
+                 Integer totalKills, String killsUpdatedAt, List<MassItem> items, List<MassDrop> drops, List<MassKiller> killers)
+        {
+            this.id = id; this.title = title; this.bossName = bossName; this.phase = phase; this.start = start; this.end = end;
+            this.goingCount = goingCount; this.youreGoing = youreGoing; this.totalKills = totalKills; this.killsUpdatedAt = killsUpdatedAt;
+            this.items = items; this.drops = drops; this.killers = killers;
+        }
+    }
+    public static class MassKiller { public final String rsn; public final int kills;
+        MassKiller(String rsn, int kills) { this.rsn = rsn; this.kills = kills; } }
+
+    static MassCard parseMassCard(JsonObject o)
+    {
+        List<MassItem> items = new ArrayList<>();
+        if (o.has("items") && o.get("items").isJsonArray())
+            for (JsonElement el : o.getAsJsonArray("items")) { JsonObject i = el.getAsJsonObject();
+                items.add(new MassItem(i.get("itemId").getAsInt(), jsonStr(i, "itemName"), i.get("count").getAsInt())); }
+        List<MassDrop> drops = new ArrayList<>();
+        if (o.has("drops") && o.get("drops").isJsonArray())
+            for (JsonElement el : o.getAsJsonArray("drops")) { JsonObject d = el.getAsJsonObject();
+                Integer itemId = d.has("itemId") && !d.get("itemId").isJsonNull() ? d.get("itemId").getAsInt() : null;
+                drops.add(new MassDrop(itemId, jsonStr(d, "itemName"), jsonStr(d, "rsn"), jsonStr(d, "at"))); }
+        Integer totalKills = o.has("totalKills") && !o.get("totalKills").isJsonNull() ? o.get("totalKills").getAsInt() : null;
+        List<MassKiller> killers = new ArrayList<>();
+        if (o.has("killers") && o.get("killers").isJsonArray())
+            for (JsonElement el : o.getAsJsonArray("killers")) { JsonObject k = el.getAsJsonObject();
+                killers.add(new MassKiller(jsonStr(k, "rsn"), k.has("kills") ? k.get("kills").getAsInt() : 0)); }
+        return new MassCard(jsonStr(o, "id"), jsonStr(o, "title"), jsonStr(o, "bossName"), jsonStr(o, "phase"),
+            jsonStr(o, "start"), jsonStr(o, "end"), o.has("goingCount") ? o.get("goingCount").getAsInt() : 0,
+            o.has("youreGoing") && o.get("youreGoing").getAsBoolean(), totalKills, jsonStr(o, "killsUpdatedAt"), items, drops, killers);
+    }
+
+    /** Fetch one mass card. Off the client thread; null on failure. */
+    public MassCard fetchMassCard(String baseUrl, String apiKey, String clanSlug, String massId)
+    {
+        JsonObject root = getSync(baseUrl + "/clans/" + clanSlug + "/masses/" + encodePath(massId), apiKey);
+        if (root == null) return null;
+        try { return parseMassCard(root); } catch (Exception ex) { log.debug("parse mass card failed: {}", ex.getMessage()); return null; }
+    }
+
+    /** Ask the server to DM this member the Discord event link. Synchronous; call off the client
+     *  thread. Returns "sent", "dm_closed" or "failed". */
+    public String signUpForMass(String baseUrl, String apiKey, String clanSlug, String massId)
+    {
+        Request request = new Request.Builder()
+            .url(baseUrl + "/clans/" + clanSlug + "/masses/" + encodePath(massId) + "/signup")
+            .header("Authorization", "Bearer " + apiKey)
+            .post(RequestBody.create(JSON, "{}"))
+            .build();
+        try (Response response = httpClient.newCall(request).execute())
+        {
+            checkAuth(response.code());
+            if (!response.isSuccessful() || response.body() == null) return "failed";
+            JsonObject o = gson.fromJson(response.body().string(), JsonObject.class);
+            String result = jsonStr(o, "result");
+            return result != null ? result : "failed";
+        }
+        catch (Exception e)
+        {
+            log.debug("Mass sign-up failed", e);
+            return "failed";
+        }
+    }
+
     /** The current open draft's signup list, for the Events tab signup section. */
     public static class Signups
     {

@@ -548,9 +548,13 @@ public class ClanManagementPlugin extends Plugin
         return config.apiKey() != null && !config.apiKey().trim().isEmpty();
     }
 
+    /** Set ONLY by the dev launcher in src/test (never by shipped code): points a runClient build at
+     *  the private dev API over an SSH tunnel. Shipped builds always use PLATFORM_URL. */
+    static volatile String devPlatformUrlOverride = null;
+
     private String getPlatformUrl()
     {
-        return PLATFORM_URL;
+        return devPlatformUrlOverride != null ? devPlatformUrlOverride : PLATFORM_URL;
     }
 
     private String getPlatformKey()
@@ -845,6 +849,24 @@ public class ClanManagementPlugin extends Plugin
                 PlatformApiService.Signups s = platformApiService.fetchSignups(
                     getPlatformUrl(), getPlatformKey(), getPlatformSlug(), eventId, rsn);
                 panel.setEventSignups(eventId, s);
+            });
+        });
+        // Masses: fetch a card when it is opened, and Sign up (the server DMs the Discord event link).
+        panel.setOnFetchMassCard(massId ->
+        {
+            if (!isPlatformConfigured() || massId == null) return;
+            executor.submit(() -> panel.setMassCard(massId,
+                platformApiService.fetchMassCard(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), massId)));
+        });
+        panel.setOnSignUpForMass(massId ->
+        {
+            if (!isPlatformConfigured() || massId == null) return;
+            executor.submit(() ->
+            {
+                String result = platformApiService.signUpForMass(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), massId);
+                panel.setMassSignupResult(massId, result);
+                panel.setMassCard(massId,
+                    platformApiService.fetchMassCard(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), massId));
             });
         });
         panel.setOnRequestRank(args ->
