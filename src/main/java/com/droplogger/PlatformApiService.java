@@ -1608,12 +1608,21 @@ public class PlatformApiService
         public final String startTime;
         public final String endTime;
         public final String winnerTeamId;
+        /** Whether to show the board yet: false until the draft is complete or the bingo has started
+         *  (server event.boardReady). True when an older server does not send it, so nothing changes there. */
+        public final boolean boardReady;
         public BingoEvent(String id, String name, String status, String startTime, String endTime,
                            String winnerTeamId)
+        {
+            this(id, name, status, startTime, endTime, winnerTeamId, true);
+        }
+        public BingoEvent(String id, String name, String status, String startTime, String endTime,
+                           String winnerTeamId, boolean boardReady)
         {
             this.id = id; this.name = name; this.status = status;
             this.startTime = startTime; this.endTime = endTime;
             this.winnerTeamId = winnerTeamId;
+            this.boardReady = boardReady;
         }
     }
 
@@ -1942,9 +1951,10 @@ public class PlatformApiService
                 // No winRule here: the public settings whitelist (event.settings on this same
                 // payload) is exactly { rows, cols, teamSize, hasDraft } - winRule never leaves the
                 // server. See BingoEvent's doc comment.
+                boolean boardReady = !e.has("boardReady") || e.get("boardReady").isJsonNull() || e.get("boardReady").getAsBoolean();
                 event = new BingoEvent(jsonStr(e, "id"), jsonStr(e, "name"), jsonStr(e, "status"),
                     jsonStr(e, "startTime"), jsonStr(e, "endTime"),
-                    jsonStr(e, "winnerTeamId"));
+                    jsonStr(e, "winnerTeamId"), boardReady);
             }
 
             BingoBoard board = new BingoBoard(0, 0, new ArrayList<>());
