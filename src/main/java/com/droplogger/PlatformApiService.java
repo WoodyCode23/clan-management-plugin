@@ -2219,14 +2219,18 @@ public class PlatformApiService
         public final String id, title, bossName, phase, start, end, killsUpdatedAt;
         public final int goingCount; public final boolean youreGoing; public final Integer totalKills;
         public final List<MassItem> items; public final List<MassDrop> drops;
+        /** Top 10 by kills, highest first (empty until WOM has reported, or from an older server). */
+        public final List<MassKiller> killers;
         MassCard(String id, String title, String bossName, String phase, String start, String end, int goingCount, boolean youreGoing,
-                 Integer totalKills, String killsUpdatedAt, List<MassItem> items, List<MassDrop> drops)
+                 Integer totalKills, String killsUpdatedAt, List<MassItem> items, List<MassDrop> drops, List<MassKiller> killers)
         {
             this.id = id; this.title = title; this.bossName = bossName; this.phase = phase; this.start = start; this.end = end;
             this.goingCount = goingCount; this.youreGoing = youreGoing; this.totalKills = totalKills; this.killsUpdatedAt = killsUpdatedAt;
-            this.items = items; this.drops = drops;
+            this.items = items; this.drops = drops; this.killers = killers;
         }
     }
+    public static class MassKiller { public final String rsn; public final int kills;
+        MassKiller(String rsn, int kills) { this.rsn = rsn; this.kills = kills; } }
 
     static MassCard parseMassCard(JsonObject o)
     {
@@ -2240,9 +2244,13 @@ public class PlatformApiService
                 Integer itemId = d.has("itemId") && !d.get("itemId").isJsonNull() ? d.get("itemId").getAsInt() : null;
                 drops.add(new MassDrop(itemId, jsonStr(d, "itemName"), jsonStr(d, "rsn"), jsonStr(d, "at"))); }
         Integer totalKills = o.has("totalKills") && !o.get("totalKills").isJsonNull() ? o.get("totalKills").getAsInt() : null;
+        List<MassKiller> killers = new ArrayList<>();
+        if (o.has("killers") && o.get("killers").isJsonArray())
+            for (JsonElement el : o.getAsJsonArray("killers")) { JsonObject k = el.getAsJsonObject();
+                killers.add(new MassKiller(jsonStr(k, "rsn"), k.has("kills") ? k.get("kills").getAsInt() : 0)); }
         return new MassCard(jsonStr(o, "id"), jsonStr(o, "title"), jsonStr(o, "bossName"), jsonStr(o, "phase"),
             jsonStr(o, "start"), jsonStr(o, "end"), o.has("goingCount") ? o.get("goingCount").getAsInt() : 0,
-            o.has("youreGoing") && o.get("youreGoing").getAsBoolean(), totalKills, jsonStr(o, "killsUpdatedAt"), items, drops);
+            o.has("youreGoing") && o.get("youreGoing").getAsBoolean(), totalKills, jsonStr(o, "killsUpdatedAt"), items, drops, killers);
     }
 
     /** Fetch one mass card. Off the client thread; null on failure. */

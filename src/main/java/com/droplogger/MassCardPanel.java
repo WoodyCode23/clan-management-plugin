@@ -31,7 +31,7 @@ import net.runelite.client.util.AsyncBufferedImage;
  * Before the mass: when it starts, how many are going, and Sign up (the server DMs a link to the
  * Discord event; clicking Interested there is the signup). While it runs: the boss's collection-log
  * grid with how many of each item were obtained, then who got what, newest first. After it ends the
- * card is not shown at all (ClanPanel skips it), so there is no third screen.
+ * same results stay as its Past card, headed "Ended" with how long it ran (Ryan, 2026-09-30).
  */
 final class MassCardPanel
 {
@@ -56,9 +56,10 @@ final class MassCardPanel
         {
             body.add(label("Boss not recognised, edit the event title", FONT_SMALL, MUTED));
         }
-        if ("live".equals(card.phase))
+        if ("live".equals(card.phase) || "ended".equals(card.phase))
         {
-            buildLive(body, card, itemManager);
+            // Live and ended show the same results; an ended card is the Past entry, frozen at the end.
+            buildResults(body, card, itemManager, "ended".equals(card.phase));
         }
         else
         {
@@ -104,14 +105,27 @@ final class MassCardPanel
         body.add(signUp);
     }
 
-    private static void buildLive(JPanel body, PlatformApiService.MassCard card, ItemManager itemManager)
+    private static void buildResults(JPanel body, PlatformApiService.MassCard card, ItemManager itemManager, boolean ended)
     {
-        JLabel head = label("LIVE · ends " + local(card.end, TIME), FONT_SMALL, LIVE);
-        body.add(head);
-        String kills = card.totalKills == null
-            ? "Kills: waiting for WOM"
-            : "Kills: " + card.totalKills + (card.killsUpdatedAt != null ? " · updated " + minutesAgo(card.killsUpdatedAt) : "");
+        if (ended)
+        {
+            String ran = duration(card.start, card.end);
+            body.add(label("Ended" + (ran.isEmpty() ? "" : " · ran " + ran), FONT_SMALL, MUTED));
+        }
+        else
+        {
+            body.add(label("LIVE · ends " + local(card.end, TIME), FONT_SMALL, LIVE));
+        }
+        String kills;
+        if (card.totalKills == null) kills = ended ? "Kills: not recorded" : "Kills: waiting for WOM";
+        else kills = "Kills: " + card.totalKills
+            + (!ended && card.killsUpdatedAt != null ? " · updated " + minutesAgo(card.killsUpdatedAt) : "");
         body.add(label(kills, FONT_SMALL, Color.WHITE));
+        for (int i = 0; i < card.killers.size(); i++)
+        {
+            PlatformApiService.MassKiller k = card.killers.get(i);
+            body.add(label((i + 1) + ". " + k.rsn + ": " + k.kills, FONT_SMALL, MUTED));
+        }
 
         if (!card.items.isEmpty())
         {
@@ -128,7 +142,7 @@ final class MassCardPanel
 
         if (card.drops.isEmpty())
         {
-            body.add(label("No drops yet", FONT_SMALL, MUTED));
+            body.add(label(ended ? "No drops recorded" : "No drops yet", FONT_SMALL, MUTED));
             return;
         }
         for (PlatformApiService.MassDrop d : card.drops)
@@ -200,6 +214,21 @@ final class MassCardPanel
         try
         {
             return Instant.parse(iso).atZone(ZoneId.systemDefault()).format(fmt).replace("AM", "am").replace("PM", "pm");
+        }
+        catch (Exception e)
+        {
+            return "";
+        }
+    }
+
+    /** "2h 15m" between two ISO timestamps, or "" when either is missing or unreadable. */
+    static String duration(String startIso, String endIso)
+    {
+        try
+        {
+            long mins = Math.max(0, (Instant.parse(endIso).toEpochMilli() - Instant.parse(startIso).toEpochMilli()) / 60000);
+            long h = mins / 60, m = mins % 60;
+            return h > 0 ? h + "h " + m + "m" : m + "m";
         }
         catch (Exception e)
         {

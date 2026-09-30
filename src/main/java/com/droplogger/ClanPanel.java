@@ -4179,15 +4179,8 @@ public class ClanPanel extends PluginPanel
     private JPanel buildEventCard(PlatformApiService.ScheduleEntry e)
     {
         final String eventId = e.id;
+        // Ended masses keep a card in Past with their final numbers (Ryan, 2026-09-30).
         final boolean isMass = "mass".equals(e.type);
-        // A mass that has ended has no card: its recap lives in Discord (spec: "After it ends").
-        if (isMass && "ended".equals(e.status))
-        {
-            JPanel none = new JPanel();
-            none.setPreferredSize(new Dimension(0, 0));
-            none.setMaximumSize(new Dimension(0, 0));
-            return none;
-        }
         final boolean expanded = eventId != null && expandedEvents.contains(eventId);
 
         JPanel card = new JPanel()
