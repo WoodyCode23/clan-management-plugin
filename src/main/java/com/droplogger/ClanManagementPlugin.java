@@ -84,7 +84,7 @@ import java.util.regex.Pattern;
 @Slf4j
 @PluginDescriptor(
     name = "Solus",
-    description = "Solus clan plugin — drops, speed times, and more",
+    description = "Solus clan plugin: drops, speed times, and more",
     tags = {"solus", "clan", "drop", "logger", "discord", "speed", "times"},
     // Matches the manifest filename in the plugin-hub repo (plugins/clan-management), which is what
     // "the internal-name of a Plugin Hub plugin as used in the PluginHub repository" means.

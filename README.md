@@ -18,11 +18,20 @@ enter is the API key your clan admin gives you.
 - **XP / KC**: clan XP and boss-KC leaderboards (read from the official OSRS hiscores).
 - **Events**: browse the clan's event schedule (Skill/Boss of the Week, collection-log races,
   bingo), sign up for events, and follow a live clog-race board and draft for your team.
-- **Bingo**: a live board for a running bingo event, showing each team's tile progress, the
+- **Bingo**: once a bingo's team draft is complete (or the bingo has started), a live board showing each team's tile progress, the
   standings, team rosters you can click for a player's contributions, and recent drops.
+- **Masses**: each clan mass gets a card in the Events tab. Before it starts, press Sign up and
+  the clan's Discord bot sends you a direct message with a link to the Discord event; clicking
+  Interested there is your signup. While the mass runs, the card shows the boss's collection log
+  with how many of each item have been obtained and who got what. After it ends, it stays under
+  Past with the final numbers: kills, the top 10 killers, and drops.
 - **Ranks**: check your rank-up requirements (evaluated locally on your client) and request a rank.
+  For raid KC requirements, each Chambers of Xeric Challenge Mode, Theatre of Blood Hard Mode and
+  Tombs of Amascut Expert clear counts as 1.5 normal clears. A requirement for the hard mode itself
+  still counts only hard-mode clears.
 - **Discord sharing** *(opt-in)*: post your own drops, personal bests, and deaths, with a
-  screenshot, to your clan's Discord.
+  screenshot, to your clan's Discord. Drop, pet and collection log screenshots wait a moment for
+  the game's collection log popup, so it shows in the picture.
 
 ## Data & Privacy
 
@@ -55,6 +64,7 @@ These need no setting turned on. They start when you add your API key and stop w
 |---|---|---|---|
 | **Combat achievements** | in real time from the in-game "task completed" message. The bulk read of the CA interface additionally needs **Sync Collection Log** on | the names of your completed CA tasks, plus your RSN and account hash | clan combat-achievement tracking and leaderboard |
 | **Quests and Achievement Diaries** | once per login | your quest points, how many quests you have completed out of the total, **the names of the quests you have not finished**, your diary tier completion per region, and your account type, plus your RSN and account hash | rank requirements that depend on diaries or quests, so an admin can see you qualify without asking you for screenshots |
+| **Mass sign up** | only when you press Sign up on a mass card | nothing but the request (your API key identifies you) | the clan server sends you a Discord direct message with the event link; clicking Interested there is your signup |
 | **Group Ironman group** | once per login, and only on a GIM account | the text visible in the in-game GIM Group side panel, which is how your group's member names are read, plus your RSN, account type and account hash | grouping GIM accounts together on the clan's team pages |
 
 If you would rather not send the quest, diary or GIM group data, the plugin has no toggle for it
@@ -96,7 +106,7 @@ belongs to holds an admin role in the clan.
 | **Activity** | Recent clan achievements, PBs, and notable drops |
 | **Members** | Clan roster with each member's collection log, combat achievements, and stats; members who recently joined the clan are marked with a leaf |
 | **Ranks** | Your rank-up progress and the request button |
-| **Events** | Event schedule, sign-ups, the live clog-race board for your team, the draft, and a live bingo board when a bingo event is running: tile progress, standings, a team switcher, rosters you can click for a player's contributions, and recent drops |
+| **Events** | Event schedule, sign-ups, the live clog-race board for your team, the draft, mass cards (sign up, the live collection log, and final results), and a live bingo board once that bingo's draft is complete or it has started: tile progress, standings, a team switcher, rosters you can click for a player's contributions, and recent drops |
 | **Admin** | Roster sync, key rotation, speed-times moderation, announcements, and weekly-event scheduling. Only shown if your account has an admin role in the clan |
 
 ## License

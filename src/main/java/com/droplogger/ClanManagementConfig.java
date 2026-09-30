@@ -31,7 +31,7 @@ public interface ClanManagementConfig extends Config
 
     @ConfigSection(
         name = "Data Sharing",
-        description = "Opt-in — everything here is off by default and is sent only to your Solus clan's server.",
+        description = "Opt-in: everything here is off by default and is sent only to your Solus clan's server.",
         position = 1
     )
     String dataSection = "data";
