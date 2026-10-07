@@ -618,6 +618,7 @@ public class ClanManagementPlugin extends Plugin
         }
 
         botwInfo = PlatformApiService.parseBotwInfo(response);
+        reportNeededClogPages();
 
         // Active event
         if (response.has("activeEvent") && !response.get("activeEvent").isJsonNull())
@@ -1155,6 +1156,58 @@ public class ClanManagementPlugin extends Plugin
             achievementsSyncedThisSession = false;
             gimGroupReported = false;
         }
+    }
+
+    // Collection log pages already sent this session (lowercased), so each is read and sent once.
+    private final java.util.Set<String> reportedClogPages = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    /**
+     * A BOTW whose collection log page the server doesn't have yet (the new raid on release day):
+     * read the page from the game and send it once. If the game doesn't have it yet, the next
+     * bootstrap tries again.
+     */
+    private void reportNeededClogPages()
+    {
+        if (!isPlatformConfigured()) return;
+        for (PlatformApiService.BotwInfo b : botwInfo)
+        {
+            final String page = b.clogCategoryNeeded;
+            if (page == null || !reportedClogPages.add(page.toLowerCase())) continue;
+            clientThread.invokeLater(() ->
+            {
+                try
+                {
+                    ensureClogCategoryMap(); // also builds the duplicate-id remap the reader uses
+                    ClogCategoryReader.Category category = ClogCategoryReader.find(clogGameData(), page);
+                    if (category == null)
+                    {
+                        reportedClogPages.remove(page.toLowerCase());
+                        return;
+                    }
+                    executor.submit(() -> platformApiService.reportClogCategory(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), category));
+                }
+                catch (Exception e)
+                {
+                    reportedClogPages.remove(page.toLowerCase());
+                    log.debug("Reading collection log page {} failed", page, e);
+                }
+            });
+        }
+    }
+
+    /** The game lookups ClogCategoryReader walks. Client thread only. */
+    private ClogCategoryReader.GameData clogGameData()
+    {
+        return new ClogCategoryReader.GameData()
+        {
+            @Override public int[] tabStructIds() { return client.getEnum(CLOG_TABS_ENUM).getIntVals(); }
+            @Override public String tabName(int tab) { return client.getStructComposition(tab).getStringValue(PARAM_TAB_NAME); }
+            @Override public int[] categoryStructIds(int tab) { return client.getEnum(client.getStructComposition(tab).getIntValue(PARAM_TAB_CATEGORIES_ENUM)).getIntVals(); }
+            @Override public String categoryName(int cat) { return client.getStructComposition(cat).getStringValue(PARAM_CATEGORY_NAME); }
+            @Override public int[] itemIds(int cat) { return client.getEnum(client.getStructComposition(cat).getIntValue(PARAM_CATEGORY_ITEMS_ENUM)).getIntVals(); }
+            @Override public int remap(int raw) { return remapClogId(raw); }
+            @Override public String itemName(int id) { return itemManager.getItemComposition(id).getName(); }
+        };
     }
 
     /** BOTW KC backup: the game's completion count for a BOTW boss, sent to the server. */
