@@ -396,6 +396,9 @@ public class ClanManagementPlugin extends Plugin
     private String activeEventDisplayName = "";
     private String activeEventEndTime = "";
     private String activeEventId = "";
+    // BOTW collection log view (spec 2026-10-07): events to report the game's completion count for,
+    // and a collection log page the server still needs, from the bootstrap.
+    private volatile java.util.List<PlatformApiService.BotwInfo> botwInfo = new java.util.ArrayList<>();
 
     // Collection log sync state (automatic — like WikiSync/RuneProfile)
     private final Map<Integer, ClogItem> clogSyncItems = Collections.synchronizedMap(new LinkedHashMap<>());
@@ -613,6 +616,8 @@ public class ClanManagementPlugin extends Plugin
                 fetchedMinDropValue = settings.get("minDropValue").getAsInt();
             }
         }
+
+        botwInfo = PlatformApiService.parseBotwInfo(response);
 
         // Active event
         if (response.has("activeEvent") && !response.get("activeEvent").isJsonNull())
@@ -1152,6 +1157,21 @@ public class ClanManagementPlugin extends Plugin
         }
     }
 
+    /** BOTW KC backup: the game's completion count for a BOTW boss, sent to the server. */
+    private void reportBotwKc(String message)
+    {
+        if (!isPlatformConfigured() || botwInfo.isEmpty() || client.getLocalPlayer() == null) return;
+        String rsn = client.getLocalPlayer().getName();
+        if (rsn == null) return;
+        for (PlatformApiService.BotwInfo b : botwInfo)
+        {
+            Integer count = BotwKcDetector.match(message, b.gameName);
+            if (count == null) continue;
+            final String eventId = b.eventId;
+            executor.submit(() -> platformApiService.reportBotwKc(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), eventId, rsn, count));
+        }
+    }
+
     @Subscribe
     public void onChatMessage(ChatMessage event)
     {
@@ -1177,6 +1197,9 @@ public class ClanManagementPlugin extends Plugin
         {
             return;
         }
+
+        // BOTW KC backup (standard worlds only).
+        reportBotwKc(cleanedMessage);
 
         // ── Hiscore submission (always update context, even if submission is disabled) ──
         pbDetector.processMessage(cleanedMessage);
