@@ -154,7 +154,13 @@ final class MassCardPanel
     /** One grid square: the item icon with its count, faded when nobody has had it yet. */
     private static JPanel itemCell(PlatformApiService.MassItem item, ItemManager itemManager)
     {
-        final boolean none = item.count == 0;
+        return itemCell(item.itemId, item.itemName, item.count, itemManager);
+    }
+
+    /** The same square from plain values (also used by the BOTW card). */
+    static JPanel itemCell(int itemId, String itemName, int itemCount, ItemManager itemManager)
+    {
+        final boolean none = itemCount == 0;
         JPanel cell = new JPanel(new BorderLayout())
         {
             @Override
@@ -168,26 +174,26 @@ final class MassCardPanel
         };
         cell.setBackground(ColorScheme.DARKER_GRAY_COLOR);
         cell.setPreferredSize(new Dimension(36, 40));
-        cell.setToolTipText(item.itemName + (none ? "" : " x" + item.count));
+        cell.setToolTipText(itemName + (none ? "" : " x" + itemCount));
 
         JLabel icon = new JLabel();
         icon.setHorizontalAlignment(SwingConstants.CENTER);
-        if (itemManager != null && item.itemId > 0)
+        if (itemManager != null && itemId > 0)
         {
-            AsyncBufferedImage img = itemManager.getImage(item.itemId);
+            AsyncBufferedImage img = itemManager.getImage(itemId);
             icon.setIcon(new ImageIcon(img));
             img.onLoaded(() -> { icon.setIcon(new ImageIcon(img)); icon.revalidate(); icon.repaint(); });
         }
         cell.add(icon, BorderLayout.CENTER);
 
-        JLabel count = new JLabel(none ? "" : String.valueOf(item.count), SwingConstants.RIGHT);
+        JLabel count = new JLabel(none ? "" : String.valueOf(itemCount), SwingConstants.RIGHT);
         count.setFont(FONT_SMALL.deriveFont(Font.BOLD));
         count.setForeground(Color.YELLOW);
         cell.add(count, BorderLayout.SOUTH);
         return cell;
     }
 
-    private static JPanel column()
+    static JPanel column()
     {
         JPanel p = new JPanel();
         p.setLayout(new BoxLayout(p, BoxLayout.Y_AXIS));
@@ -197,7 +203,7 @@ final class MassCardPanel
         return p;
     }
 
-    private static JLabel label(String text, Font font, Color color)
+    static JLabel label(String text, Font font, Color color)
     {
         JLabel l = new JLabel(text);
         l.setFont(font);

@@ -857,6 +857,18 @@ public class ClanManagementPlugin extends Plugin
             executor.submit(() -> panel.setMassCard(massId,
                 platformApiService.fetchMassCard(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), massId)));
         });
+        panel.setOnFetchBotw((eventId, page) ->
+        {
+            if (!isPlatformConfigured() || eventId == null) return;
+            executor.submit(() -> panel.setBotwView(eventId,
+                platformApiService.fetchBotwView(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), eventId, page)));
+        });
+        panel.setOnFetchBotwPlayer((eventId, rsn) ->
+        {
+            if (!isPlatformConfigured() || eventId == null || rsn == null) return;
+            executor.submit(() -> panel.setBotwPlayer(eventId,
+                platformApiService.fetchBotwPlayer(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), eventId, rsn)));
+        });
         panel.setOnSignUpForMass(massId ->
         {
             if (!isPlatformConfigured() || massId == null) return;

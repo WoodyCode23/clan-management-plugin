@@ -25,6 +25,9 @@ enter is the API key your clan admin gives you.
   Interested there is your signup. While the mass runs, the card shows the boss's collection log
   with how many of each item have been obtained and who got what. After it ends, it stays under
   Past with the final numbers: kills, the top 10 killers, and drops.
+- **Boss of the Week**: a boss event's card shows the KC ranking, the boss's collection log with
+  how many of each item the clan got that week, and who got what and when, a page at a time. Click
+  a name to see everything that player got that week.
 - **Ranks**: check your rank-up requirements (evaluated locally on your client) and request a rank.
   For raid KC requirements, each Chambers of Xeric Challenge Mode, Theatre of Blood Hard Mode and
   Tombs of Amascut Expert clear counts as 1.5 normal clears. A requirement for the hard mode itself
@@ -65,6 +68,8 @@ These need no setting turned on. They start when you add your API key and stop w
 | **Combat achievements** | in real time from the in-game "task completed" message. The bulk read of the CA interface additionally needs **Sync Collection Log** on | the names of your completed CA tasks, plus your RSN and account hash | clan combat-achievement tracking and leaderboard |
 | **Quests and Achievement Diaries** | once per login | your quest points, how many quests you have completed out of the total, **the names of the quests you have not finished**, your diary tier completion per region, and your account type, plus your RSN and account hash | rank requirements that depend on diaries or quests, so an admin can see you qualify without asking you for screenshots |
 | **Mass sign up** | only when you press Sign up on a mass card | nothing but the request (your API key identifies you) | the clan server sends you a Discord direct message with the event link; clicking Interested there is your signup |
+| **Boss of the Week KC** | only during a Boss of the Week, when the game prints that boss's completion or kill count | the count from that chat message, plus your RSN | the week's KC ranking, for a boss the clan's usual KC source doesn't track yet |
+| **Collection log page** | only when the clan server asks for a Boss of the Week page it doesn't have yet (for example a brand new raid), once per session | that page's name and its item IDs and names, read from the game's own data | showing that page's items on the Boss of the Week card |
 | **Group Ironman group** | once per login, and only on a GIM account | the text visible in the in-game GIM Group side panel, which is how your group's member names are read, plus your RSN, account type and account hash | grouping GIM accounts together on the clan's team pages |
 
 If you would rather not send the quest, diary or GIM group data, the plugin has no toggle for it

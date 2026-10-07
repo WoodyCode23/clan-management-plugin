@@ -144,6 +144,14 @@ public class ClanPanel extends PluginPanel
     // Masses (spec 2026-09-29): cards fetched on expand, the last Sign up result per mass, and a
     // 60-second refresh that only runs while a live mass card is open.
     private java.util.function.Consumer<String> onFetchMassCard;
+    // BOTW cards (spec 2026-10-07): the view per event, its page, the expanded player, their items.
+    private java.util.function.BiConsumer<String, Integer> onFetchBotw;
+    private java.util.function.BiConsumer<String, String> onFetchBotwPlayer;
+    private final java.util.Map<String, PlatformApiService.BotwView> botwViews = new java.util.HashMap<>();
+    private final java.util.Map<String, Integer> botwPages = new java.util.HashMap<>();
+    private final java.util.Map<String, String> botwExpanded = new java.util.HashMap<>();
+    private final java.util.Map<String, PlatformApiService.BotwPlayer> botwPlayers = new java.util.HashMap<>();
+    private javax.swing.Timer botwRefreshTimer;
     private java.util.function.Consumer<String> onSignUpForMass;
     private final java.util.Map<String, PlatformApiService.MassCard> massCards = new java.util.HashMap<>();
     private final java.util.Map<String, String> massSignupResults = new java.util.HashMap<>();
@@ -2166,6 +2174,70 @@ public class ClanPanel extends PluginPanel
     public void setOnFetchEventSignups(java.util.function.Consumer<String> cb) { this.onFetchEventSignups = cb; }
     public void setOnSignupForEvent(java.util.function.Consumer<String> cb) { this.onSignupForEvent = cb; }
     public void setOnFetchMassCard(java.util.function.Consumer<String> cb) { this.onFetchMassCard = cb; }
+    public void setOnFetchBotw(java.util.function.BiConsumer<String, Integer> cb) { this.onFetchBotw = cb; }
+    public void setOnFetchBotwPlayer(java.util.function.BiConsumer<String, String> cb) { this.onFetchBotwPlayer = cb; }
+
+    public void setBotwView(String eventId, PlatformApiService.BotwView view)
+    {
+        if (eventId == null || view == null) return;
+        SwingUtilities.invokeLater(() ->
+        {
+            botwViews.put(eventId, view);
+            botwPages.put(eventId, view.page);
+            updateRaidRace(currentRaidRace);
+        });
+    }
+
+    public void setBotwPlayer(String eventId, PlatformApiService.BotwPlayer player)
+    {
+        if (eventId == null || player == null || player.rsn == null) return;
+        SwingUtilities.invokeLater(() ->
+        {
+            botwPlayers.put(eventId + "|" + player.rsn.toLowerCase(), player);
+            updateRaidRace(currentRaidRace);
+        });
+    }
+
+    private void fetchBotw(String eventId, int page)
+    {
+        if (onFetchBotw != null) onFetchBotw.accept(eventId, Math.max(1, page));
+    }
+
+    private void toggleBotwPlayer(String eventId, String rsn)
+    {
+        if (rsn == null) return;
+        if (rsn.equalsIgnoreCase(botwExpanded.get(eventId)))
+        {
+            botwExpanded.remove(eventId);
+        }
+        else
+        {
+            botwExpanded.put(eventId, rsn);
+            if (onFetchBotwPlayer != null) onFetchBotwPlayer.accept(eventId, rsn);
+        }
+        updateRaidRace(currentRaidRace);
+    }
+
+    /** Refresh every open live BOTW card once a minute; stops itself when none is open. */
+    private void ensureBotwRefresh()
+    {
+        if (botwRefreshTimer != null && botwRefreshTimer.isRunning()) return;
+        botwRefreshTimer = new javax.swing.Timer(60_000, ev ->
+        {
+            boolean anyLive = false;
+            for (String id : new java.util.ArrayList<>(expandedEvents))
+            {
+                PlatformApiService.BotwView v = botwViews.get(id);
+                if (v != null && "live".equals(v.phase))
+                {
+                    anyLive = true;
+                    fetchBotw(id, botwPages.getOrDefault(id, 1));
+                }
+            }
+            if (!anyLive) botwRefreshTimer.stop();
+        });
+        botwRefreshTimer.start();
+    }
     public void setOnSignUpForMass(java.util.function.Consumer<String> cb) { this.onSignUpForMass = cb; }
     /** Cache one mass card (from the plugin's async fetch) and re-render. A failed fetch (null) keeps
      *  whatever was showing rather than blanking the card. */
@@ -4181,6 +4253,8 @@ public class ClanPanel extends PluginPanel
         final String eventId = e.id;
         // Ended masses keep a card in Past with their final numbers (Ryan, 2026-09-30).
         final boolean isMass = "mass".equals(e.type);
+        // A Boss of the Week shows its KC ranking and collection log view (spec 2026-10-07).
+        final boolean isBotw = "boss".equals(e.type);
         final boolean expanded = eventId != null && expandedEvents.contains(eventId);
 
         JPanel card = new JPanel()
@@ -4248,6 +4322,28 @@ public class ClanPanel extends PluginPanel
                     if ("live".equals(mc.phase)) ensureMassRefresh();
                 }
             }
+            else if (isBotw)
+            {
+                PlatformApiService.BotwView bv = botwViews.get(eventId);
+                if (bv == null)
+                {
+                    JLabel loading = new JLabel("Loading...");
+                    loading.setFont(READABLE_FONT_SMALL);
+                    loading.setForeground(new Color(150, 150, 150));
+                    body.add(loading);
+                }
+                else
+                {
+                    String expandedRsn = botwExpanded.get(eventId);
+                    PlatformApiService.BotwPlayer player = expandedRsn == null ? null : botwPlayers.get(eventId + "|" + expandedRsn.toLowerCase());
+                    body.add(BotwCardPanel.build(bv, itemManager,
+                        () -> fetchBotw(eventId, bv.page - 1),
+                        () -> fetchBotw(eventId, bv.page + 1),
+                        rsn -> toggleBotwPlayer(eventId, rsn),
+                        expandedRsn, player));
+                    if ("live".equals(bv.phase)) ensureBotwRefresh();
+                }
+            }
             else
             {
                 buildEventSignupBody(body, eventId);
@@ -4272,6 +4368,10 @@ public class ClanPanel extends PluginPanel
                     {
                         // Always refetch on open: going counts and drops change.
                         if (onFetchMassCard != null) onFetchMassCard.accept(eventId);
+                    }
+                    else if (isBotw)
+                    {
+                        fetchBotw(eventId, botwPages.getOrDefault(eventId, 1));
                     }
                     else if (!eventSignups.containsKey(eventId) && onFetchEventSignups != null) onFetchEventSignups.accept(eventId);
                 }
