@@ -2285,6 +2285,125 @@ public class PlatformApiService
         }
     }
 
+    // ── BOTW collection log view (server: GET /events/:id/clog) ─────────────────────────────────
+    public static class BotwItem { public final int itemId; public final String itemName; public final int count;
+        BotwItem(int itemId, String itemName, int count) { this.itemId = itemId; this.itemName = itemName; this.count = count; } }
+    public static class BotwRank { public final String rsn; public final int kc; public final String source;
+        BotwRank(String rsn, int kc, String source) { this.rsn = rsn; this.kc = kc; this.source = source; } }
+    public static class BotwDrop { public final String rsn; public final String itemName; public final Integer itemId; public final String at;
+        BotwDrop(String rsn, String itemName, Integer itemId, String at) { this.rsn = rsn; this.itemName = itemName; this.itemId = itemId; this.at = at; } }
+    public static class BotwView
+    {
+        public final String category; public final String phase;
+        public final List<BotwItem> grid; public final List<BotwRank> ranking; public final List<BotwDrop> drops;
+        public final int page; public final int pages; public final int total;
+        BotwView(String category, String phase, List<BotwItem> grid, List<BotwRank> ranking, List<BotwDrop> drops, int page, int pages, int total)
+        { this.category = category; this.phase = phase; this.grid = grid; this.ranking = ranking; this.drops = drops; this.page = page; this.pages = pages; this.total = total; }
+    }
+    public static class BotwPlayerItem { public final Integer itemId; public final String itemName; public final int count; public final String firstAt;
+        BotwPlayerItem(Integer itemId, String itemName, int count, String firstAt) { this.itemId = itemId; this.itemName = itemName; this.count = count; this.firstAt = firstAt; } }
+    public static class BotwPlayer { public final String rsn; public final List<BotwPlayerItem> items;
+        BotwPlayer(String rsn, List<BotwPlayerItem> items) { this.rsn = rsn; this.items = items; } }
+    /** From the bootstrap: a BOTW to report KC for (by the name in the game's completion message), and
+     *  a collection log page the server still needs, read from the game. Either may be null. */
+    public static class BotwInfo { public final String eventId; public final String gameName; public final String clogCategoryNeeded;
+        BotwInfo(String eventId, String gameName, String clogCategoryNeeded) { this.eventId = eventId; this.gameName = gameName; this.clogCategoryNeeded = clogCategoryNeeded; } }
+
+    private static int intOr(JsonObject o, String key, int fallback)
+    {
+        return o != null && o.has(key) && !o.get(key).isJsonNull() ? o.get(key).getAsInt() : fallback;
+    }
+
+    private static Integer intOrNull(JsonObject o, String key)
+    {
+        return o.has(key) && !o.get(key).isJsonNull() ? o.get(key).getAsInt() : null;
+    }
+
+    static BotwView parseBotwView(JsonObject o)
+    {
+        List<BotwItem> grid = new ArrayList<>();
+        if (o.has("grid") && o.get("grid").isJsonArray())
+            for (JsonElement el : o.getAsJsonArray("grid")) { JsonObject i = el.getAsJsonObject();
+                grid.add(new BotwItem(intOr(i, "itemId", 0), jsonStr(i, "itemName"), intOr(i, "count", 0))); }
+        List<BotwRank> ranking = new ArrayList<>();
+        if (o.has("ranking") && o.get("ranking").isJsonArray())
+            for (JsonElement el : o.getAsJsonArray("ranking")) { JsonObject r = el.getAsJsonObject();
+                ranking.add(new BotwRank(jsonStr(r, "rsn"), intOr(r, "kc", 0), jsonStr(r, "source"))); }
+        List<BotwDrop> drops = new ArrayList<>();
+        JsonObject d = o.has("drops") && o.get("drops").isJsonObject() ? o.getAsJsonObject("drops") : null;
+        if (d != null && d.has("items") && d.get("items").isJsonArray())
+            for (JsonElement el : d.getAsJsonArray("items")) { JsonObject x = el.getAsJsonObject();
+                drops.add(new BotwDrop(jsonStr(x, "rsn"), jsonStr(x, "itemName"), intOrNull(x, "itemId"), jsonStr(x, "at"))); }
+        return new BotwView(jsonStr(o, "category"), jsonStr(o, "phase"), grid, ranking, drops,
+            intOr(d, "page", 1), intOr(d, "pages", 1), intOr(d, "total", 0));
+    }
+
+    static BotwPlayer parseBotwPlayer(JsonObject o)
+    {
+        List<BotwPlayerItem> items = new ArrayList<>();
+        if (o.has("items") && o.get("items").isJsonArray())
+            for (JsonElement el : o.getAsJsonArray("items")) { JsonObject i = el.getAsJsonObject();
+                items.add(new BotwPlayerItem(intOrNull(i, "itemId"), jsonStr(i, "itemName"), intOr(i, "count", 0), jsonStr(i, "firstAt"))); }
+        return new BotwPlayer(jsonStr(o, "rsn"), items);
+    }
+
+    static List<BotwInfo> parseBotwInfo(JsonObject bootstrap)
+    {
+        List<BotwInfo> out = new ArrayList<>();
+        if (bootstrap == null || !bootstrap.has("botw") || !bootstrap.get("botw").isJsonArray()) return out;
+        for (JsonElement el : bootstrap.getAsJsonArray("botw"))
+        {
+            JsonObject b = el.getAsJsonObject();
+            String id = jsonStr(b, "eventId");
+            if (id != null) out.add(new BotwInfo(id, jsonStr(b, "gameName"), jsonStr(b, "clogCategoryNeeded")));
+        }
+        return out;
+    }
+
+    /** One page of a BOTW's collection log view. Off the client thread; null on failure. */
+    public BotwView fetchBotwView(String baseUrl, String apiKey, String clanSlug, String eventId, int page)
+    {
+        JsonObject root = getSync(baseUrl + "/clans/" + clanSlug + "/events/" + encodePath(eventId) + "/clog?page=" + Math.max(1, page), apiKey);
+        if (root == null) return null;
+        try { return parseBotwView(root); } catch (Exception ex) { log.debug("parse botw view failed: {}", ex.getMessage()); return null; }
+    }
+
+    /** What one player got during a BOTW. Off the client thread; null on failure. */
+    public BotwPlayer fetchBotwPlayer(String baseUrl, String apiKey, String clanSlug, String eventId, String rsn)
+    {
+        JsonObject root = getSync(baseUrl + "/clans/" + clanSlug + "/events/" + encodePath(eventId) + "/clog/player/" + encodePath(rsn), apiKey);
+        if (root == null) return null;
+        try { return parseBotwPlayer(root); } catch (Exception ex) { log.debug("parse botw player failed: {}", ex.getMessage()); return null; }
+    }
+
+    /** The game's completion count for a BOTW boss (KC backup until Wise Old Man tracks it). */
+    public void reportBotwKc(String baseUrl, String apiKey, String clanSlug, String eventId, String rsn, int count)
+    {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("rsn", rsn);
+        payload.addProperty("count", count);
+        postAsync(baseUrl + "/clans/" + clanSlug + "/events/" + encodePath(eventId) + "/kc", apiKey, payload, "BOTW KC");
+    }
+
+    /** A collection log page read from the game, for a BOTW the server is waiting on. */
+    public void reportClogCategory(String baseUrl, String apiKey, String clanSlug, ClogCategoryReader.Category category)
+    {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("tab", category.tab);
+        payload.addProperty("category", category.category);
+        JsonArray items = new JsonArray();
+        for (ClogCategoryReader.Item i : category.items)
+        {
+            JsonObject it = new JsonObject();
+            it.addProperty("itemId", i.itemId);
+            it.addProperty("itemName", i.itemName);
+            it.addProperty("sortOrder", i.sortOrder);
+            items.add(it);
+        }
+        payload.add("items", items);
+        postAsync(baseUrl + "/clans/" + clanSlug + "/clog-catalog/category", apiKey, payload, "Clog page");
+    }
+
     /** The current open draft's signup list, for the Events tab signup section. */
     public static class Signups
     {
