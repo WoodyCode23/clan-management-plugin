@@ -2294,16 +2294,16 @@ public class PlatformApiService
         BotwDrop(String rsn, String itemName, Integer itemId, String at) { this.rsn = rsn; this.itemName = itemName; this.itemId = itemId; this.at = at; } }
     public static class BotwView
     {
-        public final String category; public final String phase;
+        public final String category; public final String phase; public final String start; public final String end;
         public final List<BotwItem> grid; public final List<BotwRank> ranking; public final List<BotwDrop> drops;
         public final int page; public final int pages; public final int total;
-        BotwView(String category, String phase, List<BotwItem> grid, List<BotwRank> ranking, List<BotwDrop> drops, int page, int pages, int total)
-        { this.category = category; this.phase = phase; this.grid = grid; this.ranking = ranking; this.drops = drops; this.page = page; this.pages = pages; this.total = total; }
+        BotwView(String category, String phase, String start, String end, List<BotwItem> grid, List<BotwRank> ranking, List<BotwDrop> drops, int page, int pages, int total)
+        { this.category = category; this.phase = phase; this.start = start; this.end = end; this.grid = grid; this.ranking = ranking; this.drops = drops; this.page = page; this.pages = pages; this.total = total; }
     }
     public static class BotwPlayerItem { public final Integer itemId; public final String itemName; public final int count; public final String firstAt;
         BotwPlayerItem(Integer itemId, String itemName, int count, String firstAt) { this.itemId = itemId; this.itemName = itemName; this.count = count; this.firstAt = firstAt; } }
-    public static class BotwPlayer { public final String rsn; public final List<BotwPlayerItem> items;
-        BotwPlayer(String rsn, List<BotwPlayerItem> items) { this.rsn = rsn; this.items = items; } }
+    public static class BotwPlayer { public final String rsn; public final int kc; public final String kcSource; public final List<BotwPlayerItem> items;
+        BotwPlayer(String rsn, int kc, String kcSource, List<BotwPlayerItem> items) { this.rsn = rsn; this.kc = kc; this.kcSource = kcSource; this.items = items; } }
     /** From the bootstrap: a BOTW to report KC for (by the name in the game's completion message), and
      *  a collection log page the server still needs, read from the game. Either may be null. */
     public static class BotwInfo { public final String eventId; public final String gameName; public final String clogCategoryNeeded;
@@ -2334,7 +2334,7 @@ public class PlatformApiService
         if (d != null && d.has("items") && d.get("items").isJsonArray())
             for (JsonElement el : d.getAsJsonArray("items")) { JsonObject x = el.getAsJsonObject();
                 drops.add(new BotwDrop(jsonStr(x, "rsn"), jsonStr(x, "itemName"), intOrNull(x, "itemId"), jsonStr(x, "at"))); }
-        return new BotwView(jsonStr(o, "category"), jsonStr(o, "phase"), grid, ranking, drops,
+        return new BotwView(jsonStr(o, "category"), jsonStr(o, "phase"), jsonStr(o, "start"), jsonStr(o, "end"), grid, ranking, drops,
             intOr(d, "page", 1), intOr(d, "pages", 1), intOr(d, "total", 0));
     }
 
@@ -2344,7 +2344,7 @@ public class PlatformApiService
         if (o.has("items") && o.get("items").isJsonArray())
             for (JsonElement el : o.getAsJsonArray("items")) { JsonObject i = el.getAsJsonObject();
                 items.add(new BotwPlayerItem(intOrNull(i, "itemId"), jsonStr(i, "itemName"), intOr(i, "count", 0), jsonStr(i, "firstAt"))); }
-        return new BotwPlayer(jsonStr(o, "rsn"), items);
+        return new BotwPlayer(jsonStr(o, "rsn"), intOr(o, "kc", 0), jsonStr(o, "kcSource"), items);
     }
 
     static List<BotwInfo> parseBotwInfo(JsonObject bootstrap)

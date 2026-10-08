@@ -2218,6 +2218,12 @@ public class ClanPanel extends PluginPanel
         updateRaidRace(currentRaidRace);
     }
 
+    private void closeBotwPlayer(String eventId)
+    {
+        botwExpanded.remove(eventId);
+        updateRaidRace(currentRaidRace);
+    }
+
     /** Refresh every open live BOTW card once a minute; stops itself when none is open. */
     private void ensureBotwRefresh()
     {
@@ -4169,7 +4175,8 @@ public class ClanPanel extends PluginPanel
                         () -> fetchBotw(eventId, bv.page - 1),
                         () -> fetchBotw(eventId, bv.page + 1),
                         rsn -> toggleBotwPlayer(eventId, rsn),
-                        expandedRsn, player));
+                        () -> closeBotwPlayer(eventId),
+                        expandedRsn, player, java.time.Instant.now()));
                     if ("live".equals(bv.phase)) ensureBotwRefresh();
                 }
             }

@@ -15,13 +15,14 @@ public class BotwParseTest
     public void parsesAView()
     {
         PlatformApiService.BotwView v = PlatformApiService.parseBotwView(json(
-            "{\"category\":\"Zulrah\",\"phase\":\"live\","
+            "{\"category\":\"Zulrah\",\"phase\":\"live\",\"start\":\"2026-10-20T00:00:00Z\",\"end\":\"2026-10-27T00:00:00Z\","
             + "\"grid\":[{\"itemId\":1,\"itemName\":\"Tanzanite fang\",\"count\":2},{\"itemId\":2,\"itemName\":\"Magic fang\",\"count\":0}],"
             + "\"ranking\":[{\"rsn\":\"Alpha\",\"kc\":30,\"source\":\"wom\"}],"
             + "\"drops\":{\"page\":2,\"pages\":3,\"total\":45,\"items\":[{\"rsn\":\"Alpha\",\"itemName\":\"Tanzanite fang\",\"itemId\":1,\"at\":\"2026-10-21T10:00:00.000Z\"},"
             + "{\"rsn\":\"Beta\",\"itemName\":\"Visage\",\"itemId\":null,\"at\":\"2026-10-21T09:00:00.000Z\"}]}}"));
         assertEquals("Zulrah", v.category);
         assertEquals("live", v.phase);
+        assertEquals("2026-10-27T00:00:00Z", v.end);
         assertEquals(2, v.grid.size());
         assertEquals(2, v.grid.get(0).count);
         assertEquals(30, v.ranking.get(0).kc);
