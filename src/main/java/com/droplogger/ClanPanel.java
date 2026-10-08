@@ -3332,18 +3332,16 @@ public class ClanPanel extends PluginPanel
     // Bingo card (team boards, standings, roster drill-in)
     // ══════════════════════════════════════════
 
-    /** The live card when a bingo event exists; else (developer mode only) the SAME UI fed with
-     *  sample data, so the whole view can be checked before the server route exists; else null (no
-     *  section at all (a Plugin Hub install with no event running shows nothing here). */
+    /** The live card when a bingo event exists whose board is ready; else null (no section). */
     private JPanel buildBingoSection()
     {
         PlatformApiService.BingoCard card = currentBingoCard;
         boolean sample = false;
+        // No bingo running: no section, in a dev client too. (A sample preview used to show here in
+        // developer mode; it was removed 2026-10-08 once real bingos existed.)
         if (card == null || card.event == null)
         {
-            if (!developerMode) return null;
-            card = sampleBingoCard();
-            sample = true;
+            return null;
         }
         // A real bingo whose draft is not done yet has no board here: it is just its card with Sign
         // up in the Events list below (Ryan, 2026-09-30). This also keeps the dev sample away.
@@ -3995,14 +3993,6 @@ public class ClanPanel extends PluginPanel
         return bestId;
     }
 
-    /** Dev preview only: an item id for a sample drop, so the preview exercises the icon path
-     *  rather than rendering every row with the blank spacer. */
-    private static int sampleTileItemId(PlatformApiService.BingoBoardTile t)
-    {
-        if (t == null || t.items == null || t.items.isEmpty()) return 0;
-        return t.items.get(0).itemId;
-    }
-
     private String bingoTileLabel(String tileCode)
     {
         // The card being rendered right now, NOT currentBingoCard: the dev preview renders a sample
@@ -4025,167 +4015,6 @@ public class ClanPanel extends PluginPanel
     {
         if (v == Math.rint(v) && !Double.isInfinite(v)) return String.valueOf((long) v);
         return String.format(java.util.Locale.US, "%.1f", v);
-    }
-
-    /**
-     * Sample bingo card for developer-mode preview: the same 5x5 boss/item board the old dev-preview
-     * used, wrapped into a full BingoCard (event, 4 teams of 3-6 players, scattered per-team
-     * progress, computed standings with rank/gap/lead, rosters, and recent drops) so the WHOLE
-     * team-view UI can be checked in the dev client before the server route exists. Never used for a
-     * Plugin Hub install (buildBingoSection only calls this when developerMode is true).
-     */
-    private PlatformApiService.BingoCard sampleBingoCard()
-    {
-        // Columns: code, name, icon, row, col, threshold, kind, womMetric. kind is the server's real
-        // enum ("drop" | "kc" | "xp"), so the preview exercises the same branches a live board does:
-        // D2 is a KC tile whose metric resolves to a boss sprite, A4 an XP tile whose metric resolves
-        // to a skill sprite, and E4 a KC tile on an aggregate metric that resolves to no sprite at
-        // all, which is the case that has to read as a real tile rather than a broken one.
-        Object[][] defs = {
-            {"A1", "Vorkath", "Vorkath", 1, 1, 30.0, "drop", null},
-            {"B1", "Zulrah", "Zulrah", 1, 2, 30.0, "drop", null},
-            {"C1", "Kree'arra", "Kree'arra", 1, 3, 30.0, "drop", null},
-            {"D1", "Nex", "Nex", 1, 4, 30.0, "drop", null},
-            {"E1", "Cerberus", "Cerberus", 1, 5, 30.0, "drop", null},
-            {"A2", "The Leviathan", "The Leviathan", 2, 1, 30.0, "drop", null},
-            {"B2", "Vardorvis", "Vardorvis", 2, 2, 30.0, "drop", null},
-            {"C2", "Corporeal Beast", "Corporeal Beast", 2, 3, 30.0, "drop", null},
-            {"D2", "Chambers of Xeric KC", "", 2, 4, 30.0, "kc", "chambers_of_xeric"},
-            {"E2", "Theatre of Blood", "Theatre of Blood", 2, 5, 30.0, "drop", null},
-            {"A3", "Tombs of Amascut", "Tombs of Amascut", 3, 1, 30.0, "drop", null},
-            {"B3", "Phosani's Nightmare", "Phosani's Nightmare", 3, 2, 30.0, "drop", null},
-            {"C3", "Twisted bow", "", 3, 3, 1.0, "drop", null},
-            {"D3", "Dragon warhammer", "", 3, 4, 1.0, "drop", null},
-            {"E3", "Zalcano", "Zalcano", 3, 5, 30.0, "drop", null},
-            {"A4", "Woodcutting XP", "", 4, 1, 30.0, "xp", "woodcutting"},
-            {"B4", "Kraken", "Kraken", 4, 2, 30.0, "drop", null},
-            {"C4", "Sarachnis", "Sarachnis", 4, 3, 30.0, "drop", null},
-            {"D4", "Skotizo", "Skotizo", 4, 4, 30.0, "drop", null},
-            {"E4", "Clue scrolls", "", 4, 5, 30.0, "kc", "clue_scrolls_all"},
-            {"A5", "King Black Dragon", "King Black Dragon", 5, 1, 30.0, "drop", null},
-            {"B5", "Callisto", "Callisto", 5, 2, 30.0, "drop", null},
-            {"C5", "Venenatis", "Venenatis", 5, 3, 30.0, "drop", null},
-            {"D5", "Artio", "Artio", 5, 4, 30.0, "drop", null},
-            {"E5", "Scorpia", "Scorpia", 5, 5, 30.0, "drop", null},
-        };
-        java.util.List<PlatformApiService.BingoBoardTile> tiles = new java.util.ArrayList<>();
-        for (Object[] d : defs)
-        {
-            String code = (String) d[0];
-            String name = (String) d[1];
-            String icon = (String) d[2];
-            int row = (Integer) d[3];
-            int col = (Integer) d[4];
-            double threshold = (Double) d[5];
-            String kind = (String) d[6];
-            String womMetric = (String) d[7];
-            java.util.List<PlatformApiService.BingoItem> items = new java.util.ArrayList<>();
-            // A kc/xp tile has no items at all, exactly like the server's own payload.
-            if (icon.isEmpty() && womMetric == null)
-            {
-                int itemId = "C3".equals(code) ? 20997 : 13576;
-                items.add(new PlatformApiService.BingoItem(name, itemId, 1));
-            }
-            tiles.add(new PlatformApiService.BingoBoardTile(code, name, kind, row, col, threshold, 0, icon, items,
-                null, womMetric, womMetric != null ? 1 : 0));
-        }
-        PlatformApiService.BingoBoard board = new PlatformApiService.BingoBoard(5, 5, tiles);
-
-        java.util.List<PlatformApiService.BingoTeam> teamShells = new java.util.ArrayList<>();
-        teamShells.add(new PlatformApiService.BingoTeam("teamA", "Red Chinchompas", "#E53935",
-            java.util.Arrays.asList("Woody Code", "Alice", "Bob", "Carol")));
-        teamShells.add(new PlatformApiService.BingoTeam("teamB", "Blue Dragons", "#1E88E5",
-            java.util.Arrays.asList("Dave", "Erin", "Frank", "Grace", "Hank")));
-        teamShells.add(new PlatformApiService.BingoTeam("teamC", "Green Goblins", "#43A047",
-            java.util.Arrays.asList("Ivy", "Jack", "Kim")));
-        teamShells.add(new PlatformApiService.BingoTeam("teamD", "Purple Pengs", "#8E24AA",
-            java.util.Arrays.asList("Liam", "Mona", "Noah", "Opal", "Priya", "Quinn")));
-
-        java.util.Map<String, java.util.Map<String, PlatformApiService.BingoTileProgress>> progress = new java.util.HashMap<>();
-        progress.put("teamA", sampleBingoProgress(tiles,
-            new double[]{30, 15, 7.5, 0, 22.5, 29.7, 30, 12, 9, 18, 21, 6, 0, 1, 4.5, 27, 13.5, 1.5, 24, 10.5, 16.5, 19.5, 25.5, 28.5, 15},
-            "Woody Code"));
-        progress.put("teamB", sampleBingoProgress(tiles,
-            new double[]{30, 30, 20, 10, 0, 15, 30, 25, 5, 0, 30, 10, 1, 0, 15, 20, 0, 30, 5, 10, 0, 25, 15, 30, 5},
-            "Dave"));
-        progress.put("teamC", sampleBingoProgress(tiles,
-            new double[]{10, 5, 0, 0, 0, 5, 10, 0, 0, 0, 5, 0, 0, 0, 0, 10, 5, 0, 0, 0, 5, 0, 0, 0, 0},
-            "Ivy"));
-        progress.put("teamD", sampleBingoProgress(tiles,
-            new double[]{20, 10, 5, 0, 0, 15, 20, 10, 0, 5, 10, 0, 0, 0, 10, 15, 5, 0, 10, 0, 5, 10, 0, 15, 0},
-            "Liam"));
-
-        // Per-team totals/roster/recent drops, matching the shape the real API puts on teams[]
-        // (points/tilesComplete/roster/recentDrops alongside members - NOT on standings[]).
-        java.util.List<PlatformApiService.BingoTeam> unranked = new java.util.ArrayList<>();
-        for (PlatformApiService.BingoTeam t : teamShells)
-        {
-            java.util.Map<String, PlatformApiService.BingoTileProgress> p = progress.get(t.teamId);
-            double points = 0;
-            int complete = 0;
-            for (PlatformApiService.BingoTileProgress tp : p.values())
-            {
-                points += tp.points;
-                if (tp.complete) complete++;
-            }
-            java.util.List<PlatformApiService.BingoRosterEntry> roster = new java.util.ArrayList<>();
-            for (int i = 0; i < t.members.size(); i++)
-            {
-                double share = points / Math.max(1, t.members.size()) * (1 + i * 0.15);
-                roster.add(new PlatformApiService.BingoRosterEntry(t.members.get(i), Math.round(share * 10) / 10.0, 2 + i));
-            }
-            java.util.List<PlatformApiService.BingoDrop> recent = new java.util.ArrayList<>();
-            int n = 0;
-            for (PlatformApiService.BingoBoardTile tile : tiles)
-            {
-                PlatformApiService.BingoTileProgress tp = p.get(tile.code);
-                if (tp != null && tp.points > 0 && n < 4)
-                {
-                    recent.add(new PlatformApiService.BingoDrop(t.members.get(n % t.members.size()), tile.name, sampleTileItemId(tile), tile.code,
-                        tp.points, "2026-09-1" + (n + 1) + "T12:00:00Z"));
-                    n++;
-                }
-            }
-            unranked.add(new PlatformApiService.BingoTeam(t.teamId, t.name, t.color, t.members, points, complete,
-                0, null, null, roster, recent));
-        }
-        unranked.sort((a, b) -> Double.compare(b.points, a.points));
-
-        // teams[] gets rank/gap once sorted; standings[] mirrors the same order but only the plain
-        // leaderboard fields, matching the real API's lean standings[] shape.
-        java.util.List<PlatformApiService.BingoTeam> teams = new java.util.ArrayList<>();
-        java.util.List<PlatformApiService.BingoStanding> standings = new java.util.ArrayList<>();
-        for (int i = 0; i < unranked.size(); i++)
-        {
-            PlatformApiService.BingoTeam t = unranked.get(i);
-            PlatformApiService.BingoGap gapAbove = i > 0
-                ? new PlatformApiService.BingoGap(unranked.get(i - 1).points - t.points, 0) : null;
-            PlatformApiService.BingoGap leadBelow = i < unranked.size() - 1
-                ? new PlatformApiService.BingoGap(t.points - unranked.get(i + 1).points, 0) : null;
-            teams.add(new PlatformApiService.BingoTeam(t.teamId, t.name, t.color, t.members, t.points,
-                t.tilesComplete, i + 1, gapAbove, leadBelow, t.roster, t.recentDrops));
-            standings.add(new PlatformApiService.BingoStanding(t.teamId, t.name, t.color, t.points, t.tilesComplete, i + 1));
-        }
-
-        PlatformApiService.BingoEvent event = new PlatformApiService.BingoEvent("sample-event", "Autumn Bingo (sample)",
-            "active", "2026-09-01T00:00:00Z", "2026-09-30T00:00:00Z", null);
-        return new PlatformApiService.BingoCard(event, board, teams, standings, progress, new java.util.ArrayList<>());
-    }
-
-    private java.util.Map<String, PlatformApiService.BingoTileProgress> sampleBingoProgress(
-        java.util.List<PlatformApiService.BingoBoardTile> tiles, double[] points, String contributor)
-    {
-        java.util.Map<String, PlatformApiService.BingoTileProgress> map = new java.util.HashMap<>();
-        for (int i = 0; i < tiles.size() && i < points.length; i++)
-        {
-            PlatformApiService.BingoBoardTile t = tiles.get(i);
-            double pts = points[i];
-            boolean complete = t.threshold > 0 && pts >= t.threshold;
-            java.util.List<PlatformApiService.BingoDrop> drops = new java.util.ArrayList<>();
-            if (pts > 0) drops.add(new PlatformApiService.BingoDrop(contributor, t.name, sampleTileItemId(t), t.code, pts, "2026-09-05T18:00:00Z"));
-            map.put(t.code, new PlatformApiService.BingoTileProgress(pts, complete, drops));
-        }
-        return map;
     }
 
     // ══════════════════════════════════════════
