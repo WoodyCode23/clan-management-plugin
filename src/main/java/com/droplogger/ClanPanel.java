@@ -3017,22 +3017,6 @@ public class ClanPanel extends PluginPanel
         clogCatListPanel.repaint();
     }
 
-    /** Boss KC for a clog category, if it maps to a tracked boss. Clue/minigame/pet categories that
-     *  don't match a boss KC key return null (no KC shown). Matches on alphanumerics only, so display
-     *  names like "Abyssal Sire" line up with KC keys like "abyssal_sire". */
-    private Integer lookupCategoryKc(String category)
-    {
-        if (category == null || currentProfileKc == null || currentProfileKc.isEmpty()) return null;
-        String norm = category.toLowerCase().replaceAll("[^a-z0-9]", "");
-        for (java.util.Map.Entry<String, Integer> e : currentProfileKc.entrySet())
-        {
-            Integer v = e.getValue();
-            if (v != null && v > 0 && e.getKey().toLowerCase().replaceAll("[^a-z0-9]", "").equals(norm))
-                return v;
-        }
-        return null;
-    }
-
     /** Level 3: the item icon grid for a category (owned bright, missing dimmed). */
     private void showClogCategory(String tab, String category)
     {
@@ -3052,13 +3036,24 @@ public class ClanPanel extends PluginPanel
             if (it.owned) owned++;
         }
 
-        Integer bossKc = lookupCategoryKc(category);
-        JLabel cnt = new JLabel(owned + " / " + total + (bossKc != null ? "   ·   KC: " + String.format("%,d", bossKc) : ""));
+        // The KC sits on its own line: a raid page lists each mode (CoX and CM, ToB and HM, ToA and
+        // Expert), which does not fit beside the item count in the side panel.
+        String kcLine = CategoryKc.line(category, currentProfileKc);
+        JLabel cnt = new JLabel(owned + " / " + total);
         cnt.setFont(READABLE_FONT_SMALL);
         cnt.setForeground(new Color(170, 170, 170));
         cnt.setAlignmentX(Component.LEFT_ALIGNMENT);
-        cnt.setBorder(new EmptyBorder(2, 0, 8, 0));
+        cnt.setBorder(new EmptyBorder(2, 0, kcLine != null ? 2 : 8, 0));
         membersContent.add(cnt);
+        if (kcLine != null)
+        {
+            JLabel kcLabel = new JLabel(kcLine);
+            kcLabel.setFont(READABLE_FONT_SMALL);
+            kcLabel.setForeground(new Color(170, 170, 170));
+            kcLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+            kcLabel.setBorder(new EmptyBorder(0, 0, 8, 0));
+            membersContent.add(kcLabel);
+        }
 
         JPanel holder = new JPanel(new BorderLayout());
         holder.setBackground(ColorScheme.DARK_GRAY_COLOR);
