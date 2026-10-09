@@ -48,8 +48,10 @@ task runClient(type: JavaExec) {
     classpath = sourceSets.dev.output + sourceSets.test.runtimeClasspath
     dependsOn devClasses
     mainClass = 'com.droplogger.ClanManagementPluginTest'
+    // No '-ea': with Java assertions on, an assert inside RuneLite itself (GPU plugin, Menu Entry
+    // Swapper, often set off by another plugin's error) kills this client. Normal RuneLite runs
+    // without them, so those just get logged there.
     jvmArgs = [
-        '-ea',
         '-Drunelite.insecure-skip-tls-verification=true'
     ]
     args = ['--insecure-skip-tls-verification', '--developer-mode']
