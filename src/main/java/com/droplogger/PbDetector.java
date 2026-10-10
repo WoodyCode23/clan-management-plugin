@@ -543,6 +543,12 @@ public class PbDetector
         return lastBossName;
     }
 
+    /** How long ago the last boss's kill-count line arrived; Long.MAX_VALUE if none yet. */
+    public long getMsSinceLastBoss()
+    {
+        return contextAtMs == 0 ? Long.MAX_VALUE : System.currentTimeMillis() - contextAtMs;
+    }
+
     public void reset()
     {
         lastActivity = null;

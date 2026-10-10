@@ -29,6 +29,7 @@ import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.InventoryID;
 import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.Skill;
+import net.runelite.api.events.StatChanged;
 import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.Item;
 import net.runelite.api.ItemComposition;
@@ -157,6 +158,7 @@ public class ClanManagementPlugin extends Plugin
         BOSS_PET.put("tzkal-zuk", "Jal-nib-rek");
         BOSS_PET.put("chambers of xeric", "Olmlet");
         BOSS_PET.put("chambers of xeric challenge mode", "Olmlet");
+        BOSS_PET.put("cm chambers of xeric", "Olmlet");
         BOSS_PET.put("theatre of blood", "Lil' zik");
         BOSS_PET.put("tombs of amascut", "Tumeken's guardian");
     }
@@ -354,6 +356,11 @@ public class ClanManagementPlugin extends Plugin
     private String lastKilledNpc = "Unknown";
     private int lastKillCount = 0;
     private long lastKillTime = 0;
+    // When each skill last gained XP, so a duplicate pet with no recent boss kill can be matched to
+    // the skill being trained (DuplicatePet). Seeded by the login burst of StatChanged events, so an
+    // XP total that did not move is not counted.
+    private final Map<Skill, Integer> lastXp = new java.util.EnumMap<>(Skill.class);
+    private final Map<Skill, Long> lastXpGainAt = new java.util.EnumMap<>(Skill.class);
 
     // Death cause: the last actor we interacted with, used to name our killer. See identifyKiller().
     private WeakReference<Actor> lastTarget = new WeakReference<>(null);
@@ -1325,22 +1332,36 @@ public class ClanManagementPlugin extends Plugin
         if (!isPlatformConfigured() || !localPlayerInClan()) return;
 
         String boss = pbDetector.getLastBossName();
-        String petName = boss != null ? BOSS_PET.get(boss.toLowerCase()) : null;
-        if (petName == null)
+        String bossPet = boss != null ? BOSS_PET.get(boss.toLowerCase()) : null;
+        long now = System.currentTimeMillis();
+        Map<String, Long> skillAges = new HashMap<>();
+        for (Map.Entry<Skill, Long> e : lastXpGainAt.entrySet()) skillAges.put(e.getKey().getName(), now - e.getValue());
+        String[] resolved = DuplicatePet.resolve(bossPet, boss, pbDetector.getMsSinceLastBoss(), skillAges);
+        if (resolved == null)
         {
-            log.debug("Duplicate pet with no mapped boss context (boss={})", boss);
+            log.debug("Duplicate pet with no recent boss or single pet skill (boss={})", boss);
             return;
         }
+        String petName = resolved[0];
+        String source = resolved[1];
+        boolean fromBoss = source.equals(boss);
 
         String playerName = client.getLocalPlayer() != null ? client.getLocalPlayer().getName() : "Unknown";
         WorldPoint wp = client.getLocalPlayer() != null
             ? client.getLocalPlayer().getWorldLocation() : new WorldPoint(0, 0, 0);
-        DropEntry drop = new DropEntry(petName, 0, boss, pbDetector.getLastKillCount(),
+        DropEntry drop = new DropEntry(petName, 0, source, fromBoss ? pbDetector.getLastKillCount() : 0,
             wp.getX(), wp.getY(), wp.getPlane(), playerName, -1);
         withScreenshotAfterPopup(screenshot ->
             platformApiService.submitDrop(getPlatformUrl(), getPlatformKey(), getPlatformSlug(), drop, screenshot,
                 config.sendScreenshotsToDiscord(), config.dropPhrase()));
-        log.debug("Duplicate pet logged: {} from {}", petName, boss);
+        log.debug("Duplicate pet logged: {} from {}", petName, source);
+    }
+
+    @Subscribe
+    public void onStatChanged(StatChanged event)
+    {
+        Integer prev = lastXp.put(event.getSkill(), event.getXp());
+        if (prev != null && event.getXp() > prev) lastXpGainAt.put(event.getSkill(), System.currentTimeMillis());
     }
 
     /**
