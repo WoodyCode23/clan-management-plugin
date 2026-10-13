@@ -9,7 +9,6 @@ import net.runelite.api.NPC;
 import net.runelite.api.NPCComposition;
 import net.runelite.api.Player;
 import net.runelite.api.clan.ClanChannel;
-import net.runelite.api.clan.ClanChannelMember;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.GameState;
 import net.runelite.api.WorldType;
@@ -2983,34 +2982,25 @@ public class ClanManagementPlugin extends Plugin
     }
 
     /**
-     * Validate that all party members are in the player's clan chat.
+     * Validate that all party members are clan MEMBERS, from the clan's member list rather than the
+     * clan chat channel, which guests share (see PartyClanCheck).
      */
     private boolean validateClanMembership(List<String> partyMembers)
     {
-        ClanChannel clanChannel = client.getClanChannel();
-        if (clanChannel == null)
+        net.runelite.api.clan.ClanSettings clanSettings = client.getClanSettings();
+        if (clanSettings == null)
         {
-            log.warn("Cannot validate clan membership — not in a clan chat");
+            log.warn("Cannot validate clan membership: no clan member list");
             return false;
         }
-
-        Set<String> clanNames = new HashSet<>();
-        for (ClanChannelMember member : clanChannel.getMembers())
+        List<String> memberNames = new ArrayList<>();
+        for (net.runelite.api.clan.ClanMember member : clanSettings.getMembers())
         {
-            clanNames.add(Text.toJagexName(member.getName()).toLowerCase());
+            memberNames.add(member.getName());
         }
-
-        for (String partyMember : partyMembers)
-        {
-            String normalized = Text.toJagexName(partyMember).toLowerCase();
-            if (!clanNames.contains(normalized))
-            {
-                log.debug("Party member {} is not in clan chat", partyMember);
-                return false;
-            }
-        }
-
-        return true;
+        boolean ok = PartyClanCheck.allMembers(partyMembers, memberNames);
+        if (!ok) log.debug("Not every party member is a clan member: {}", partyMembers);
+        return ok;
     }
 
     @Subscribe
