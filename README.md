@@ -10,7 +10,7 @@ enter is the API key your clan admin gives you.
 
 ## Features
 
-- **Drops**: log valuable drops to the clan drop feed and value/points leaderboards.
+- **Drops**: log valuable drops to the clan drop feed and value/points leaderboards. A duplicate pet is credited to the boss you killed in the last minute, or else the one pet skill you were training; if neither is clear, nothing is posted.
 - **Speed Times**: submit personal-best boss times, including automatic detection of live raid
   completions (Chambers, Theatre, and Tombs team times) for the clan speed-time boards.
 - **Collection Log**: sync your collection log progress for clan clog tracking.
@@ -52,7 +52,7 @@ This is the important part, so it is spelled out in full.
 | Setting | What it sends | What it's used for |
 |---|---|---|
 | **Track Drops** | each valuable drop (item, GP value, source monster, kill count) plus your RSN and account hash | the clan drop feed and value/points leaderboards |
-| **Track Speed Times** | your personal-best boss times (boss, time, team members) plus your RSN and account hash | the clan speed-time boards; your raid party is read **locally** at the start only, to credit the right team |
+| **Track Speed Times** | your personal-best boss times (boss, time, team members) plus your RSN and account hash | the clan speed-time boards; your raid party is read **locally** at the start only, to credit the right team. A team time is marked verified only if every party member is on the clan's member list (guests in clan chat don't count) |
 | **Sync Collection Log** | your collection log items and obtained/total counts (only when you open the log) plus your RSN and account hash. This toggle **also** covers the names of your purchased Slayer Reward unlocks, read when you open the Slayer Rewards shop | clan collection-log tracking and the clog leaderboard; Slayer unlocks are used for rank requirements that need them |
 | **Track Stats** | your RSN only; the server then reads your **public** XP/KC from the official OSRS hiscores | clan XP and boss-KC leaderboards. No private game data is sent for this |
 | **Send screenshots to Discord** *(opt-in)* | a **screenshot** of your drop, personal best, or death, plus an optional caption, plus your RSN | posts to your clan's Discord via the server. Off by default; nothing is captured or sent unless you enable it. You can also black out chat, or just private messages, before a screenshot is sent |
@@ -109,9 +109,9 @@ belongs to holds an admin role in the clan.
 | **Home** | Connection status, announcements, active event, your clog/CA/XP summary |
 | **Leaderboards** | Drops, Speed Times, XP and Boss KC, picked from one selector |
 | **Activity** | Recent clan achievements, PBs, and notable drops |
-| **Members** | Clan roster with each member's collection log, combat achievements, and stats; members who recently joined the clan are marked with a leaf |
+| **Members** | Clan roster with each member's collection log (including raid KC per mode: Chambers/Challenge Mode, Theatre/Hard Mode, Tombs/Expert), combat achievements, and stats; members who recently joined the clan are marked with a leaf |
 | **Ranks** | Your rank-up progress and the request button |
-| **Events** | Event schedule, sign-ups, the live clog-race board for your team, the draft, mass cards (sign up, the live collection log, and final results), and a live bingo board once that bingo's draft is complete or it has started: tile progress, standings, a team switcher, rosters you can click for a player's contributions, and recent drops |
+| **Events** | Event schedule, sign-ups, the live clog-race board for your team, the draft, mass cards (sign up, the live collection log, and final results), Boss of the Week cards (KC ranking, the boss's collection log, recent drops, and a per-player view), and a live bingo board once that bingo's draft is complete or it has started: tile progress, standings, a team switcher, rosters you can click for a player's contributions, and recent drops |
 | **Admin** | Roster sync, key rotation, speed-times moderation, announcements, and weekly-event scheduling. Only shown if your account has an admin role in the clan |
 
 ## License
