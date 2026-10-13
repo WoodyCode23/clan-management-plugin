@@ -35,6 +35,15 @@ public class PartyClanCheckTest
     }
 
     @Test
+    public void aSeparatorCannotBeDroppedToMatchAnotherName()
+    {
+        // "Nex tris" is a different account from "Nextris"; only the separator kind is interchangeable.
+        assertFalse(PartyClanCheck.allMembers(Arrays.asList("Nex tris"), MEMBERS));
+        assertFalse(PartyClanCheck.allMembers(Arrays.asList("ThatGuyBTW"), MEMBERS));
+        assertTrue(PartyClanCheck.allMembers(Arrays.asList("That-Guy BTW"), MEMBERS));
+    }
+
+    @Test
     public void noMemberListMeansUnverified()
     {
         assertFalse(PartyClanCheck.allMembers(Arrays.asList("Nextris"), null));

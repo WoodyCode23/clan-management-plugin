@@ -10,7 +10,8 @@ import java.util.Set;
  *
  * Checked against the clan's MEMBER list (ClanSettings), not the clan chat channel: guests sit in
  * the channel too, so on 2026-10-11 a ToB team with a waitlisted guest was verified. Names match
- * ignoring case, spaces, underscores and hyphens, which the game treats as the same.
+ * ignoring case, with space, underscore and hyphen treated as the same character (as the game
+ * does). A separator is never dropped: "Nex tris" and "Nextris" are different accounts.
  */
 final class PartyClanCheck
 {
@@ -33,6 +34,6 @@ final class PartyClanCheck
 
     private static String norm(String name)
     {
-        return name == null ? "" : name.toLowerCase().replaceAll("[\\s_\\- ]", "");
+        return name == null ? "" : name.toLowerCase().replaceAll("[\\s_\\-\u00A0]+", " ").trim();
     }
 }
