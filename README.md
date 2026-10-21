@@ -12,7 +12,8 @@ enter is the API key your clan admin gives you.
 
 - **Drops**: log valuable drops to the clan drop feed and value/points leaderboards. A duplicate pet is credited to the boss you killed in the last minute, or else the one pet skill you were training; if neither is clear, nothing is posted.
 - **Speed Times**: submit personal-best boss times, including automatic detection of live raid
-  completions (Chambers, Theatre, and Tombs team times) for the clan speed-time boards.
+  completions (Chambers, Theatre, Tombs and The Fractured Archive team times) for the clan
+  speed-time boards. The Fractured Archive has solo, duo, trio, 4-man, 5-man and 6+ boards.
 - **Collection Log**: sync your collection log progress for clan clog tracking.
 - **Combat Achievements**: sync your CA completions and track new ones the moment you earn them.
 - **XP / KC**: clan XP and boss-KC leaderboards (read from the official OSRS hiscores).
@@ -26,8 +27,10 @@ enter is the API key your clan admin gives you.
   with how many of each item have been obtained and who got what. After it ends, it stays under
   Past with the final numbers: kills, the top 10 killers, and drops.
 - **Boss of the Week**: a boss event's card shows the KC ranking, the boss's collection log with
-  how many of each item the clan got that week, and who got what and when, a page at a time. Click
-  a name to see everything that player got that week.
+  how many of each item the clan got that week, and who got what and when, a page at a time. While
+  a Boss of the Week is live, its card opens by itself (close it and it stays closed). Click a name
+  in the KC ranking or recent drops to see everything that player got that week, right under that
+  list.
 - **Ranks**: check your rank-up requirements (evaluated locally on your client) and request a rank.
   For raid KC requirements, each Chambers of Xeric Challenge Mode, Theatre of Blood Hard Mode and
   Tombs of Amascut Expert clear counts as 1.5 normal clears. A requirement for the hard mode itself
