@@ -168,6 +168,20 @@ public class BossCategory
     public static final BossCategory TOA_EXPERT_GROUP = register(
         "toa_expert_group", "toa_expert", "Tombs of Amascut: Expert Mode", "Raids", 4, 100, true);
 
+    // The Fractured Archive (raid 4, 2026-10-20): 1 to 8 players, one mode so far.
+    public static final BossCategory TFA_SOLO = register(
+        "tfa_solo", "tfa", "The Fractured Archive", "Raids", 1, 1, false);
+    public static final BossCategory TFA_DUO = register(
+        "tfa_duo", "tfa", "The Fractured Archive", "Raids", 2, 2, true);
+    public static final BossCategory TFA_TRIO = register(
+        "tfa_trio", "tfa", "The Fractured Archive", "Raids", 3, 3, true);
+    public static final BossCategory TFA_4MAN = register(
+        "tfa_4man", "tfa", "The Fractured Archive", "Raids", 4, 4, true);
+    public static final BossCategory TFA_5MAN = register(
+        "tfa_5man", "tfa", "The Fractured Archive", "Raids", 5, 5, true);
+    public static final BossCategory TFA_GROUP = register(
+        "tfa_group", "tfa", "The Fractured Archive", "Raids", 6, 100, true);
+
     // ── GWD ──
 
     public static final BossCategory BANDOS_SOLO = register(

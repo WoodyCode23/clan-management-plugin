@@ -33,6 +33,12 @@ public class PbDetector
     private static final Pattern TOA_TIME = Pattern.compile(
         "Tombs of Amascut.*?total completion time: ((\\d+:)?\\d+:\\d+(?:\\.\\d+)?)", Pattern.CASE_INSENSITIVE);
 
+    // The Fractured Archive (2026-10-20): "The Fractured Archive: Total completion time: 31:25.80"
+    // with "(new personal best)" or ". Personal best: ..." after it. Like ToA's, it is the whole raid.
+    // The per-boss lines ("Challenge complete: Ocellus. Duration: ...") are rejected further down.
+    private static final Pattern TFA_TIME = Pattern.compile(
+        "The Fractured Archive: Total completion time: ((\\d+:)?\\d+:\\d+(?:\\.\\d+)?)", Pattern.CASE_INSENSITIVE);
+
     // "Hallowed Sepulchre completion time: 5:30.00"
     private static final Pattern SEP_TIME = Pattern.compile(
         "Hallowed Sepulchre.*?completion time: ((\\d+:)?\\d+:\\d+(?:\\.\\d+)?)", Pattern.CASE_INSENSITIVE);
@@ -305,6 +311,12 @@ public class PbDetector
             return new CompletionResult(toaGroup, matcher.group(1), null, isPb, pbTime);
         }
 
+        matcher = TFA_TIME.matcher(cleanedMessage);
+        if (matcher.find())
+        {
+            return new CompletionResult("tfa", matcher.group(1), null, isPb, pbTime);
+        }
+
         // Check Sepulchre
         matcher = SEP_TIME.matcher(cleanedMessage);
         if (matcher.find())
@@ -523,6 +535,7 @@ public class PbDetector
         }
         if (lower.contains("theatre") || lower.contains("verzik")) return "tob";
         if (lower.contains("tombs") || lower.contains("amascut")) return "toa";
+        if (lower.contains("fractured archive")) return "tfa";
 
         return "unknown";
     }

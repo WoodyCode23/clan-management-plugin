@@ -141,6 +141,8 @@ public class ClanPanel extends PluginPanel
     private final java.util.Map<String, PlatformApiService.Signups> eventSignups = new java.util.HashMap<>();
     private final java.util.Map<String, Integer> eventSignupPage = new java.util.HashMap<>();
     private final java.util.Set<String> expandedEvents = new java.util.HashSet<>();
+    // Events the member closed by hand, so a card that opens by itself (autoOpens) stays closed.
+    private final java.util.Set<String> closedEvents = new java.util.HashSet<>();
     // Masses (spec 2026-09-29): cards fetched on expand, the last Sign up result per mass, and a
     // 60-second refresh that only runs while a live mass card is open.
     private java.util.function.Consumer<String> onFetchMassCard;
@@ -4076,6 +4078,16 @@ public class ClanPanel extends PluginPanel
         return true;
     }
 
+    /**
+     * A live Boss of the Week card starts open (Ryan, 2026-10-21: the Events tab looked empty because
+     * the card only loads once its header is clicked, and nobody clicked it). Once the member closes
+     * it, it stays closed.
+     */
+    static boolean autoOpens(String type, String status, boolean closedByMember)
+    {
+        return "boss".equals(type) && "live".equals(status) && !closedByMember;
+    }
+
     /** One expandable event card: header (type: name + host, click to expand) with the event's own
      *  paginated signup list nested inside. Collapsed by default; expanding lazily fetches signups. */
     private JPanel buildEventCard(PlatformApiService.ScheduleEntry e)
@@ -4085,6 +4097,11 @@ public class ClanPanel extends PluginPanel
         final boolean isMass = "mass".equals(e.type);
         // A Boss of the Week shows its KC ranking and collection log view (spec 2026-10-07).
         final boolean isBotw = "boss".equals(e.type);
+        if (eventId != null && !expandedEvents.contains(eventId) && autoOpens(e.type, e.status, closedEvents.contains(eventId)))
+        {
+            expandedEvents.add(eventId);
+            fetchBotw(eventId, botwPages.getOrDefault(eventId, 1));
+        }
         final boolean expanded = eventId != null && expandedEvents.contains(eventId);
 
         JPanel card = new JPanel()
@@ -4190,6 +4207,7 @@ public class ClanPanel extends PluginPanel
                 if (expandedEvents.contains(eventId))
                 {
                     expandedEvents.remove(eventId);
+                    closedEvents.add(eventId);
                 }
                 else
                 {
