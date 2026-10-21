@@ -9,7 +9,8 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 
 // The redesigned BOTW card (Ryan, 2026-10-08): header with a LIVE dot and time left, KC list, collection
-// log with a progress bar, a 10-per-page drops feed, and one player panel at the bottom.
+// log with a progress bar, a 10-per-page drops feed, and one player panel. The panel opens right under
+// the list the name was clicked in (Ryan, 2026-10-21: at the bottom it meant scrolling down to find it).
 public class BotwCardPanelTest
 {
     private static final Instant NOW = Instant.parse("2026-10-22T00:00:00Z");
@@ -59,7 +60,7 @@ public class BotwCardPanelTest
     @Test
     public void buildsWhateverTheViewHolds()
     {
-        JPanel empty = BotwCardPanel.build(view("{\"phase\":\"upcoming\"}"), null, () -> { }, () -> { }, rsn -> { }, () -> { }, null, null, NOW);
+        JPanel empty = BotwCardPanel.build(view("{\"phase\":\"upcoming\"}"), null, () -> { }, () -> { }, (rsn, from) -> { }, () -> { }, null, null, null, NOW);
         assertNotNull(empty);
         PlatformApiService.BotwView full = view("{\"category\":\"Zulrah\",\"phase\":\"live\",\"start\":\"2026-10-20T00:00:00Z\",\"end\":\"2026-10-27T00:00:00Z\","
             + "\"grid\":[{\"itemId\":0,\"itemName\":\"Tanzanite fang\",\"count\":1}],"
@@ -68,6 +69,46 @@ public class BotwCardPanelTest
         PlatformApiService.BotwPlayer player = PlatformApiService.parseBotwPlayer(new Gson().fromJson(
             "{\"rsn\":\"Alpha\",\"kc\":3,\"kcSource\":\"plugin\",\"items\":[{\"itemId\":0,\"itemName\":\"Tanzanite fang\",\"count\":1,\"firstAt\":\"2026-10-21T10:00:00.000Z\"}]}", JsonObject.class));
         assertEquals(3, player.kc);
-        assertTrue(BotwCardPanel.build(full, null, () -> { }, () -> { }, rsn -> { }, () -> { }, "Alpha", player, NOW).getComponentCount() > 0);
+        assertTrue(BotwCardPanel.build(full, null, () -> { }, () -> { }, (rsn, from) -> { }, () -> { }, "Alpha", BotwCardPanel.From.KC, player, NOW).getComponentCount() > 0);
+    }
+
+    private static final String FULL = "{\"category\":\"Zulrah\",\"phase\":\"live\",\"start\":\"2026-10-20T00:00:00Z\",\"end\":\"2026-10-27T00:00:00Z\","
+        + "\"grid\":[{\"itemId\":0,\"itemName\":\"Tanzanite fang\",\"count\":1}],"
+        + "\"ranking\":[{\"rsn\":\"Alpha\",\"kc\":3,\"source\":\"plugin\"},{\"rsn\":\"Beta\",\"kc\":2,\"source\":\"plugin\"}],"
+        + "\"drops\":{\"page\":1,\"pages\":2,\"total\":11,\"items\":[{\"rsn\":\"Alpha\",\"itemName\":\"Tanzanite fang\",\"itemId\":0,\"at\":\"2026-10-21T10:00:00.000Z\"}]}}";
+
+    private static int indexOf(JPanel body, String name)
+    {
+        for (int i = 0; i < body.getComponentCount(); i++)
+        {
+            if (name.equals(body.getComponent(i).getName())) return i;
+        }
+        return -1;
+    }
+
+    @Test
+    public void aNameFromTheKcListOpensRightUnderTheKcList()
+    {
+        JPanel body = BotwCardPanel.build(view(FULL), null, () -> { }, () -> { }, (rsn, from) -> { }, () -> { }, "Alpha", BotwCardPanel.From.KC, null, NOW);
+        int panel = indexOf(body, "botw-player");
+        assertTrue(panel > 0);
+        assertEquals(indexOf(body, "botw-section-collection") - 1, panel);
+    }
+
+    @Test
+    public void aNameFromTheDropsOpensRightUnderTheDrops()
+    {
+        JPanel body = BotwCardPanel.build(view(FULL), null, () -> { }, () -> { }, (rsn, from) -> { }, () -> { }, "Alpha", BotwCardPanel.From.DROPS, null, NOW);
+        int panel = indexOf(body, "botw-player");
+        // After the drops and their pager, at the end of the card.
+        assertEquals(indexOf(body, "botw-drops-pager") + 1, panel);
+        assertEquals(body.getComponentCount() - 1, panel);
+    }
+
+    @Test
+    public void nothingOpensWithoutASelection()
+    {
+        JPanel body = BotwCardPanel.build(view(FULL), null, () -> { }, () -> { }, (rsn, from) -> { }, () -> { }, null, null, null, NOW);
+        assertEquals(-1, indexOf(body, "botw-player"));
     }
 }

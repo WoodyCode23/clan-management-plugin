@@ -152,6 +152,8 @@ public class ClanPanel extends PluginPanel
     private final java.util.Map<String, PlatformApiService.BotwView> botwViews = new java.util.HashMap<>();
     private final java.util.Map<String, Integer> botwPages = new java.util.HashMap<>();
     private final java.util.Map<String, String> botwExpanded = new java.util.HashMap<>();
+    // Which list the open player's name was clicked in, so their panel opens right under it.
+    private final java.util.Map<String, BotwCardPanel.From> botwExpandedFrom = new java.util.HashMap<>();
     private final java.util.Map<String, PlatformApiService.BotwPlayer> botwPlayers = new java.util.HashMap<>();
     private javax.swing.Timer botwRefreshTimer;
     private java.util.function.Consumer<String> onSignUpForMass;
@@ -2205,24 +2207,26 @@ public class ClanPanel extends PluginPanel
         if (onFetchBotw != null) onFetchBotw.accept(eventId, Math.max(1, page));
     }
 
-    private void toggleBotwPlayer(String eventId, String rsn)
+    /** Clicking the open name in the same list closes it; in the other list, it moves there. */
+    private void toggleBotwPlayer(String eventId, String rsn, BotwCardPanel.From from)
     {
         if (rsn == null) return;
-        if (rsn.equalsIgnoreCase(botwExpanded.get(eventId)))
+        boolean same = rsn.equalsIgnoreCase(botwExpanded.get(eventId));
+        if (same && from == botwExpandedFrom.get(eventId))
         {
-            botwExpanded.remove(eventId);
+            closeBotwPlayer(eventId);
+            return;
         }
-        else
-        {
-            botwExpanded.put(eventId, rsn);
-            if (onFetchBotwPlayer != null) onFetchBotwPlayer.accept(eventId, rsn);
-        }
+        botwExpanded.put(eventId, rsn);
+        botwExpandedFrom.put(eventId, from);
+        if (!same && onFetchBotwPlayer != null) onFetchBotwPlayer.accept(eventId, rsn);
         updateRaidRace(currentRaidRace);
     }
 
     private void closeBotwPlayer(String eventId)
     {
         botwExpanded.remove(eventId);
+        botwExpandedFrom.remove(eventId);
         updateRaidRace(currentRaidRace);
     }
 
@@ -4186,9 +4190,9 @@ public class ClanPanel extends PluginPanel
                     body.add(BotwCardPanel.build(bv, itemManager,
                         () -> fetchBotw(eventId, bv.page - 1),
                         () -> fetchBotw(eventId, bv.page + 1),
-                        rsn -> toggleBotwPlayer(eventId, rsn),
+                        (rsn, from) -> toggleBotwPlayer(eventId, rsn, from),
                         () -> closeBotwPlayer(eventId),
-                        expandedRsn, player, java.time.Instant.now()));
+                        expandedRsn, botwExpandedFrom.get(eventId), player, java.time.Instant.now()));
                     if ("live".equals(bv.phase)) ensureBotwRefresh();
                 }
             }

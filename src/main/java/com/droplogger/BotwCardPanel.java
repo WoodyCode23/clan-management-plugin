@@ -16,6 +16,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
 import java.util.Locale;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import javax.swing.BorderFactory;
 import javax.swing.ImageIcon;
@@ -113,18 +114,24 @@ final class BotwCardPanel
         return owned(v) + " / " + v.grid.size();
     }
 
+    /** Which list a name was clicked in: the player's panel opens right under that list. */
+    enum From { KC, DROPS }
+
     // ── The card ─────────────────────────────────────────────────────────────────────────────
     /**
-     * @param onSelectPlayer called with a clicked name (KC list or drops feed)
+     * @param onSelectPlayer called with a clicked name and the list it was in
      * @param onClosePlayer  the player panel's close button
      * @param selectedRsn    the player whose panel is open, or null
+     * @param selectedFrom   the list their name was clicked in; the panel opens right under it
      * @param player         that player's data, or null while it loads
      */
     static JPanel build(PlatformApiService.BotwView view, ItemManager itemManager, Runnable onPrev, Runnable onNext,
-                        Consumer<String> onSelectPlayer, Runnable onClosePlayer, String selectedRsn,
-                        PlatformApiService.BotwPlayer player, Instant now)
+                        BiConsumer<String, From> onSelectPlayer, Runnable onClosePlayer, String selectedRsn,
+                        From selectedFrom, PlatformApiService.BotwPlayer player, Instant now)
     {
         JPanel body = MassCardPanel.column();
+        // Ryan, 2026-10-21: at the bottom of the card the panel meant scrolling down to find it.
+        JPanel playerPanel = selectedRsn == null ? null : playerPanel(selectedRsn, player, itemManager, onClosePlayer);
 
         // Status line: a green dot while live, and the time left.
         JPanel status = row();
@@ -144,15 +151,19 @@ final class BotwCardPanel
             JPanel who = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
             who.setOpaque(false);
             who.add(MassCardPanel.label((i + 1) + "  ", FONT_BOLD, placeColor(i + 1)));
-            who.add(nameLink(r.rsn, r.rsn.equalsIgnoreCase(selectedRsn), onSelectPlayer));
+            who.add(nameLink(r.rsn, r.rsn.equalsIgnoreCase(selectedRsn), rsn -> onSelectPlayer.accept(rsn, From.KC)));
             line.add(who, BorderLayout.WEST);
             line.add(MassCardPanel.label(String.valueOf(r.kc), FONT_BOLD, i < 3 ? placeColor(i + 1) : Color.WHITE), BorderLayout.EAST);
             body.add(line);
         }
 
+        if (playerPanel != null && selectedFrom != From.DROPS) body.add(playerPanel);
+
         // Collection log
-        body.add(sectionHeader("COLLECTION LOG" + (view.category != null ? ": " + view.category.toUpperCase(Locale.ENGLISH) : ""),
-            view.grid.isEmpty() ? null : ownedLabel(view)));
+        JPanel clogHeader = sectionHeader("COLLECTION LOG" + (view.category != null ? ": " + view.category.toUpperCase(Locale.ENGLISH) : ""),
+            view.grid.isEmpty() ? null : ownedLabel(view));
+        clogHeader.setName("botw-section-collection");
+        body.add(clogHeader);
         if (view.grid.isEmpty())
         {
             body.add(MassCardPanel.label(view.category == null ? "No collection log page for this event" : "Waiting for the page to load", FONT_SMALL, MUTED));
@@ -179,7 +190,7 @@ final class BotwCardPanel
         }
         for (PlatformApiService.BotwDrop d : view.drops)
         {
-            body.add(dropRow(d, itemManager, selectedRsn, onSelectPlayer, now));
+            body.add(dropRow(d, itemManager, selectedRsn, rsn -> onSelectPlayer.accept(rsn, From.DROPS), now));
         }
         if (view.pages > 1)
         {
@@ -189,14 +200,11 @@ final class BotwCardPanel
             nav.add(smallButton("‹ Prev", view.page > 1, onPrev));
             nav.add(MassCardPanel.label(view.page + " / " + view.pages, FONT_SMALL, MUTED));
             nav.add(smallButton("Next ›", view.page < view.pages, onNext));
+            nav.setName("botw-drops-pager");
             body.add(nav);
         }
 
-        // The selected player's panel
-        if (selectedRsn != null)
-        {
-            body.add(playerPanel(selectedRsn, player, itemManager, onClosePlayer));
-        }
+        if (playerPanel != null && selectedFrom == From.DROPS) body.add(playerPanel);
         return body;
     }
 
@@ -300,6 +308,7 @@ final class BotwCardPanel
     private static JPanel playerPanel(String rsn, PlatformApiService.BotwPlayer player, ItemManager itemManager, Runnable onClose)
     {
         JPanel panel = MassCardPanel.column();
+        panel.setName("botw-player");
         panel.setBackground(ColorScheme.DARKER_GRAY_COLOR);
         panel.setBorder(BorderFactory.createCompoundBorder(
             BorderFactory.createMatteBorder(1, 0, 0, 0, LINK), new EmptyBorder(6, 6, 6, 6)));
