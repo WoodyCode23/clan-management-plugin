@@ -4959,7 +4959,7 @@ public class ClanPanel extends PluginPanel
             rowPanel.add(metricIcon(
                 ev.has("type") ? ev.get("type").getAsString() : null,
                 ev.has("metric") ? ev.get("metric").getAsString() : null, 16));
-            JLabel row = new JLabel("<html><b>" + ev.get("displayName").getAsString() + "</b> \u2014 " + when + "</html>");
+            JLabel row = new JLabel("<html><b>" + escapeHtml(ev.get("displayName").getAsString()) + "</b> \u2014 " + escapeHtml(when) + "</html>");
             row.setFont(READABLE_FONT_SMALL);
             row.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
             rowPanel.add(row);
@@ -5007,7 +5007,7 @@ public class ClanPanel extends PluginPanel
         titleRow.add(metricIcon(
             upcoming.has("type") ? upcoming.get("type").getAsString() : null,
             upcoming.has("metric") ? upcoming.get("metric").getAsString() : null, 20));
-        JLabel title = new JLabel("<html><b>" + upcoming.get("displayName").getAsString() + "</b></html>");
+        JLabel title = new JLabel("<html><b>" + escapeHtml(upcoming.get("displayName").getAsString()) + "</b></html>");
         title.setForeground(Color.WHITE);
         titleRow.add(title);
         card.add(titleRow);
@@ -5065,7 +5065,7 @@ public class ClanPanel extends PluginPanel
         titleRow.setBackground(ColorScheme.DARKER_GRAY_COLOR);
         titleRow.setAlignmentX(Component.LEFT_ALIGNMENT);
         titleRow.add(metricIcon(type, event.has("metric") ? event.get("metric").getAsString() : null, 20));
-        JLabel title = new JLabel("<html><b>" + event.get("displayName").getAsString() + "</b></html>");
+        JLabel title = new JLabel("<html><b>" + escapeHtml(event.get("displayName").getAsString()) + "</b></html>");
         title.setForeground(ACCENT_GOLD);
         titleRow.add(title);
         card.add(titleRow);
@@ -5101,7 +5101,7 @@ public class ClanPanel extends PluginPanel
                 // HTML with a fixed width so a long RSN wraps to a second line instead of forcing
                 // the panel (and the client) wider. STANDINGS_TEXT_WIDTH \u2248 panel minus borders/pad.
                 JLabel line = new JLabel("<html><div style='width:" + cssPxFor(STANDINGS_TEXT_WIDTH) + "px'>"
-                    + (i + 1) + ". " + rsn + " \u2014 " + raceScore(type, score) + "</div></html>");
+                    + (i + 1) + ". " + escapeHtml(rsn) + " \u2014 " + raceScore(type, score) + "</div></html>");
                 line.setFont(isMe ? READABLE_FONT.deriveFont(Font.BOLD, 12f) : READABLE_FONT_SMALL);
                 line.setForeground(isMe ? Color.WHITE : ColorScheme.LIGHT_GRAY_COLOR);
                 line.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -5117,7 +5117,7 @@ public class ClanPanel extends PluginPanel
         if (myRank > 10)
         {
             JLabel mine = new JLabel("<html><div style='width:" + cssPxFor(STANDINGS_TEXT_WIDTH) + "px'>\u2026 "
-                + myRank + ". " + localPlayerName + " \u2014 " + myScore + "</div></html>");
+                + myRank + ". " + escapeHtml(localPlayerName) + " \u2014 " + myScore + "</div></html>");
             mine.setFont(READABLE_FONT.deriveFont(Font.BOLD, 12f));
             mine.setForeground(Color.WHITE);
             mine.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -5138,9 +5138,10 @@ public class ClanPanel extends PluginPanel
         return String.format("%,d kc", score);
     }
 
-    private JLabel eventNote(String text)
+    // Plain text only: callers pass names and team codes from the server, so it is escaped here.
+    static JLabel eventNote(String text)
     {
-        JLabel l = new JLabel("<html><i>" + text + "</i></html>");
+        JLabel l = new JLabel("<html><i>" + escapeHtml(text) + "</i></html>");
         l.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
         l.setBorder(new EmptyBorder(4, 2, 4, 2));
         l.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -5265,7 +5266,7 @@ public class ClanPanel extends PluginPanel
             }
 
             String status = event.get("status").getAsString();
-            JLabel name = new JLabel("<html><b>" + event.get("name").getAsString() + "</b></html>");
+            JLabel name = new JLabel("<html><b>" + escapeHtml(event.get("name").getAsString()) + "</b></html>");
             name.setForeground(Color.WHITE);
             name.setAlignmentX(Component.LEFT_ALIGNMENT);
             name.setBorder(new EmptyBorder(0, 2, 2, 2));
@@ -5280,7 +5281,7 @@ public class ClanPanel extends PluginPanel
                 int round = picks.size() / n;
                 int idx = picks.size() % n;
                 com.google.gson.JsonObject clockTeam = (round % 2 == 0 ? teams.get(idx) : teams.get(n - 1 - idx)).getAsJsonObject();
-                JLabel clock = new JLabel("<html><b>\u23f1 On the clock: " + clockTeam.get("name").getAsString() + "</b></html>");
+                JLabel clock = new JLabel("<html><b>\u23f1 On the clock: " + escapeHtml(clockTeam.get("name").getAsString()) + "</b></html>");
                 try { clock.setForeground(Color.decode(clockTeam.get("color").getAsString())); }
                 catch (NumberFormatException ex) { clock.setForeground(Color.WHITE); }
                 clock.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -5339,7 +5340,7 @@ public class ClanPanel extends PluginPanel
                     BorderFactory.createMatteBorder(0, 3, 0, 0, teamColor),
                     new EmptyBorder(6, 8, 6, 8)));
 
-                JLabel tn = new JLabel("<html><b>" + t.get("name").getAsString() + (mine ? " \u2b50" : "") + "</b></html>");
+                JLabel tn = new JLabel("<html><b>" + escapeHtml(t.get("name").getAsString()) + (mine ? " \u2b50" : "") + "</b></html>");
                 tn.setForeground(teamColor);
                 tn.setAlignmentX(Component.LEFT_ALIGNMENT);
                 card.add(tn);
@@ -5456,7 +5457,7 @@ public class ClanPanel extends PluginPanel
         textPanel.add(nameLabel);
         textPanel.add(Box.createVerticalStrut(2));
 
-        JLabel descLabel = new JLabel("<html>" + description + "</html>");
+        JLabel descLabel = new JLabel("<html>" + escapeHtml(description) + "</html>");
         descLabel.setFont(descLabel.getFont().deriveFont(11f));
         descLabel.setForeground(new Color(170, 170, 170));
         textPanel.add(descLabel);
@@ -5563,8 +5564,7 @@ public class ClanPanel extends PluginPanel
     /** Minimal HTML escape so announcement text renders literally inside the JLabel HTML. */
     private static String escapeHtml(String s)
     {
-        if (s == null) return "";
-        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+        return Html.esc(s);
     }
 
     /**

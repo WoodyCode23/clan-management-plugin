@@ -443,11 +443,11 @@ public class AdminPanel extends JPanel implements Scrollable
                 text.setLayout(new BoxLayout(text, BoxLayout.Y_AXIS));
                 text.setBackground(new Color(35, 35, 35));
                 String glyph = row.length > 4 && row[4] != null ? row[4] : "";
-                JLabel name = new JLabel("<html><b>" + (live ? "LIVE" : "SCHEDULED") + "</b> \u00b7 " + glyph + row[2] + "</html>");
+                JLabel name = new JLabel("<html><b>" + (live ? "LIVE" : "SCHEDULED") + "</b> \u00b7 " + escapeHtml(glyph) + escapeHtml(row[2]) + "</html>");
                 name.setFont(SMALL_FONT);
                 name.setForeground(chipColor);
                 text.add(name);
-                JLabel window = new JLabel("<html>" + row[3] + "</html>");
+                JLabel window = new JLabel("<html>" + escapeHtml(row[3]) + "</html>");
                 window.setFont(SMALL_ITALIC);
                 window.setForeground(new Color(150, 150, 150));
                 text.add(window);
@@ -561,8 +561,7 @@ public class AdminPanel extends JPanel implements Scrollable
 
     private static String escapeHtml(String s)
     {
-        if (s == null) return "";
-        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+        return Html.esc(s);
     }
 
     public void setNewBoardCode(String code)
